@@ -9,7 +9,7 @@ The configuration options will include either a dashboard refresh button for upd
 ## Development Plan
 ### Stage 1
 - Parse the container list and add it to `services.yaml` without overwriting existing entries.
-- Implement a dashboard refresh button to manually trigger updates.
+ (The button option seemed to be more tricky than originally thought, so should be reported to later stages).
 
 ### Stage 2
 - Search for the presence of Caddy and automatically grab associated URLs from the `Caddyfile` if it exists.
