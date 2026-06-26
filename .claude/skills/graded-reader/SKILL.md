@@ -43,7 +43,8 @@ Python that has `jieba` and `pypinyin` installed (see Setup).
   accepted: writes the gloss-once chapter glossary, appends newly-glossed words
   to `introduced`, files the recap, marks the outline entry, wires `book.json`.
 - **`scripts/build_epub.py`** — hand-built EPUB with selectable pinyin display
-  (`ruby` / `interlinear` / `plain`) and per-chapter glossary. No epub library.
+  (`ruby` / `interlinear` / `plain`) and per-chapter glossary; glossed words in
+  the text link to their glossary entry (and back). No epub library.
 - **`scripts/llm.py`** — minimal OpenAI-compatible chat client (stdlib only).
   The swappable model seam for the headless runner. Reads `config.json`.
 - **`scripts/run_book.py`** — headless runner: drives the whole loop by calling
