@@ -1,0 +1,13 @@
+{
+  "title": "愚公移山",
+  "author": "分级读物 (HSK 1-3)",
+  "language": "zh",
+  "pinyin_mode": "ruby",
+  "chapters": [
+    { "source": "chapters/ch01.md", "glossary": "build/ch01-glossary.tsv" },
+    { "source": "chapters/ch02.md", "glossary": "build/ch02-glossary.tsv" },
+    { "source": "chapters/ch03.md", "glossary": "build/ch03-glossary.tsv" },
+    { "source": "chapters/ch04.md", "glossary": "build/ch04-glossary.tsv" },
+    { "source": "chapters/ch05.md", "glossary": "build/ch05-glossary.tsv" }
+  ]
+}
