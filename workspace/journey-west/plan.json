@@ -1,0 +1,36 @@
+{
+  "title": "西游记 · 分级读物 (HSK 1-3)",
+  "source_material": "西游记 (Journey to the West) — opening episodes, retold",
+  "target_level": "HSK1-3",
+  "segmenter": "jieba (custom dict = vocab lists)",
+  "validation": {
+    "threshold": 0.05,
+    "max_stretch": 0.15,
+    "rework_cap": 3
+  },
+  "outline": [
+    {
+      "n": 1,
+      "title": "石头里的猴子",
+      "summary": "A stone on a high mountain splits open and a monkey is born. He can walk, run, and talk; the other monkeys make him their king. He starts to wonder what lies beyond the mountain.",
+      "status": "drafted-and-validated"
+    },
+    {
+      "n": 2,
+      "title": "猴王要学本领",
+      "summary": "The Monkey King leaves the mountain to find a teacher and learn real skills.",
+      "status": "planned"
+    }
+  ],
+  "introduced": {
+    "comment": "Running set of words/characters already introduced and glossed once. Later chapters check against this set and only gloss first appearances. The loop appends to this after each accepted chapter.",
+    "words": [
+      "孙悟空", "猴子", "石头", "王", "山上",
+      "很久很久", "跑来跑去", "朋友", "高兴", "聪明"
+    ],
+    "add_and_gloss": {
+      "comment": "Words the rework loop was forced to introduce (topic-essential, above level). Mirrored into lists/personal.tsv so the validator treats them as known going forward.",
+      "words": ["猴子", "石头", "王"]
+    }
+  }
+}
