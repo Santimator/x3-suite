@@ -4,8 +4,8 @@
   "base_url": "https://integrate.api.nvidia.com/v1",
   "_base_url_note": "OpenAI-compatible root. NVIDIA NIM is the default (free tier, nvapi- key). Swap for a local server, e.g. http://localhost:11434/v1 (Ollama) or http://localhost:8000/v1 (vLLM).",
 
-  "model": "qwen/qwen3.5-397b-a17b",
-  "_model_note": "Beefy Qwen on NIM — strongest in-list discipline, writes simple by default (good for graded readers; the validator is the floor either way). For more literary prose try 'moonshotai/kimi-k2-instruct' (most natural per the HSK-story benchmark) or 'zai-org/glm-4.6'. One-line swap; the prompts are model-agnostic.",
+  "model": "moonshotai/kimi-k2-instruct",
+  "_model_note": "Kimi K2 — most natural Chinese prose per the HSK-story benchmark; reaches for the right word, and the validator+rework loop pulls anything above level back in. For flatter/simpler output try 'qwen/qwen3.5-397b-a17b' (very disciplined, somewhat dull); avoid GLM for now (repetition loops in that benchmark). One-line swap; the prompts are model-agnostic. Confirm the exact model id at build.nvidia.com.",
 
   "api_key_file": "secrets/nim.key",
   "_api_key_file_note": "Path (relative to the skill dir) to a gitignored file holding ONLY the key. Create secrets/nim.key and paste your nvapi-... key. Never commit the key.",

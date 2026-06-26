@@ -84,14 +84,16 @@ exact same scripts:
   tools, writes each chapter and curates each glossary inline. No `config.json`
   needed. Best for chapter 1 and the human-QA gate.
 - **`run_book.py` drives** (headless, any model) — calls an OpenAI-compatible
-  endpoint for the model steps. Default is NVIDIA NIM (free tier) with a beefy
-  Qwen; one-line swap to Kimi/GLM/a local Ollama or vLLM server. Best for
-  batching the remaining chapters unattended. Setup:
+  endpoint for the model steps. Default is NVIDIA NIM (free tier) with Kimi K2
+  (most natural Chinese prose; one-line swap to Qwen / a local Ollama or vLLM
+  server). By default it runs the **whole book in one go** — readers are cheap
+  to regenerate, so the convenience wins. Setup:
   ```
-  cp config.example.json config.json          # then set model / base_url
-  printf '%s' 'nvapi-...' > secrets/nim.key    # gitignored
-  python scripts/run_book.py BOOK              # processes un-accepted chapters
-  python scripts/run_book.py BOOK --from 3     # resume from chapter 3
+  cp config.example.json config.json            # then set model / base_url
+  printf '%s' 'nvapi-...' > secrets/nim.key      # gitignored
+  python scripts/run_book.py BOOK                # whole book, unattended
+  python scripts/run_book.py BOOK --pause-after 1  # opt-in QA stop after ch1
+  python scripts/run_book.py BOOK --from 3       # resume from chapter 3
   ```
   `config.json` and `secrets/` are gitignored. The runner stops (doesn't guess)
   if a chapter still fails after the rework cap — add-and-gloss stays a
@@ -165,12 +167,15 @@ Two gates, both per segmented token (not per character):
    python scripts/build_epub.py BOOK --out BOOK/build/book.epub --pinyin-mode interlinear
    ```
 
-## Gates that are NOT automated — do these by hand
+## Gates that are NOT automated
 
-- **The validator checks vocabulary only, never quality.** Before trusting the
-  loop to run unattended, a human must read **chapter 1** end to end: does it
-  read naturally, is the story coherent, is the grading not just legal but
-  *pleasant*? Do not batch-generate until chapter 1 passes this human QA gate.
+- **The validator checks vocabulary only, never quality.** The QA read is
+  *optional and off by default* — readers are cheap to regenerate, so the
+  default is to run the whole book unattended and just reread/regenerate if a
+  result disappoints. When you do want the safety check (a new source or level
+  you haven't tried), opt in with `--pause-after 1`: the runner stops after
+  chapter 1 so a human can confirm it reads naturally and the grading is
+  *pleasant*, not merely legal, before the rest of the book generates.
 - **Pinyin display depends on the target device.** Ruby (`<ruby>`) is compact
   and preferred, but a given e-reader may not support it (it can leak the `<rt>`
   text inline). Before scaling, build the diagnostic EPUB and confirm on the
