@@ -7,6 +7,10 @@
     {
       "source": "chapters/ch01.md",
       "glossary": "build/ch01-glossary.tsv"
+    },
+    {
+      "source": "chapters/ch02.md",
+      "glossary": "build/ch02-glossary.tsv"
     }
   ]
 }
