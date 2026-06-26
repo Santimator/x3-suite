@@ -15,6 +15,10 @@ unconfirmed, so we don't bet the structure on it):
                no <ruby> tag, so it renders anywhere. Safe e-ink fallback.
   plain        hanzi only; pinyin appears solely in the per-chapter glossary.
 
+The first occurrence of each glossary word in the chapter text is a tappable
+link (dotted underline) to its entry in the end-of-chapter glossary; each entry
+has a ↩ back-link to jump back to the reading position.
+
 Use --diagnostic to emit ONE epub containing the first chapter rendered all
 three ways (labeled), so you can sideload once and see what the device does.
 
@@ -99,16 +103,39 @@ def render_word(word: str, mode: str) -> str:
     return f'<span class="w">{cells}</span>'
 
 
-def render_paragraph(text: str, mode: str) -> str:
+def render_paragraph(text: str, mode: str, link_ctx: Optional[Tuple] = None) -> str:
+    """Render a paragraph; if link_ctx is given, hyperlink the first occurrence
+    of each glossary word to its entry at the end of the chapter.
+
+    link_ctx = (prefix, link_map, linked): link_map maps a glossary word to its
+    row index; `linked` is a shared mutable set so only the FIRST occurrence in
+    the chapter becomes a link (matches the gloss-once policy).
+    """
     words = vocab_mod.segment(text)
-    return "".join(render_word(w, mode) for w in words)
+    parts: List[str] = []
+    for w in words:
+        rendered = render_word(w, mode)
+        if link_ctx:
+            prefix, link_map, linked = link_ctx
+            idx = link_map.get(w)
+            if idx is not None and idx not in linked:
+                linked.add(idx)
+                rendered = (
+                    f'<a class="gl" id="{prefix}-r{idx}" href="#{prefix}-g{idx}">'
+                    f"{rendered}</a>"
+                )
+        parts.append(rendered)
+    return "".join(parts)
 
 
 # --------------------------------------------------------------------------- #
 # Chapter markdown -> XHTML body
 # --------------------------------------------------------------------------- #
-def chapter_body(md: str, mode: str) -> Tuple[str, str]:
-    """Return (title, body_html). First '# ' line is the chapter title."""
+def chapter_body(md: str, mode: str, link_ctx: Optional[Tuple] = None) -> Tuple[str, str]:
+    """Return (title, body_html). First '# ' line is the chapter title.
+
+    Glossary links (link_ctx) are applied only inside paragraphs, not headings.
+    """
     title = ""
     blocks: List[str] = []
     for raw in md.splitlines():
@@ -123,19 +150,33 @@ def chapter_body(md: str, mode: str) -> Tuple[str, str]:
                 title = t
             blocks.append(f"<h1>{render_paragraph(t, mode)}</h1>")
         else:
-            blocks.append(f"<p>{render_paragraph(line.strip(), mode)}</p>")
+            blocks.append(f"<p>{render_paragraph(line.strip(), mode, link_ctx)}</p>")
     return title or "Chapter", "\n".join(blocks)
 
 
-def glossary_section(rows: List[Tuple[str, str, str]], mode: str) -> str:
+def glossary_section(
+    rows: List[Tuple[str, str, str]],
+    mode: str,
+    prefix: str = "",
+    linked: Optional[set] = None,
+) -> str:
+    """Render the end-of-chapter glossary. Each entry gets an id so words in the
+    text can link to it; entries whose word was actually linked in the body get
+    a ↩ back-link to the reading position.
+    """
     if not rows:
         return ""
     items = []
-    for word, pinyin, gloss in rows:
+    for idx, (word, pinyin, gloss) in enumerate(rows):
+        back = (
+            f' <a class="gback" href="#{prefix}-r{idx}">↩</a>'
+            if linked is not None and idx in linked
+            else ""
+        )
         items.append(
-            f'<li><span class="gw">{html.escape(word)}</span> '
+            f'<li id="{prefix}-g{idx}"><span class="gw">{html.escape(word)}</span> '
             f'<span class="gp">{html.escape(pinyin)}</span> '
-            f'<span class="gg">{html.escape(gloss)}</span></li>'
+            f'<span class="gg">{html.escape(gloss)}</span>{back}</li>'
         )
     return (
         '<section class="glossary" epub:type="glossary">'
@@ -163,6 +204,9 @@ ruby rt { font-size: 0.5em; }
 .glossary li { margin: 0.2em 0; }
 .gw { font-weight: bold; }
 .gp { color: #555; margin: 0 0.4em; }
+/* tappable glossary links: dotted underline under the word, hanzi color kept */
+a.gl { color: inherit; text-decoration: underline; text-decoration-style: dotted; }
+a.gback { text-decoration: none; color: #888; margin-left: 0.4em; }
 """
 
 XHTML_TMPL = """\
@@ -259,10 +303,13 @@ def assemble(book_dir: Path, mode: str) -> List[Dict]:
     chapters = []
     for idx, ch in enumerate(meta["chapters"], start=1):
         md = (book_dir / ch["source"]).read_text(encoding="utf-8")
-        title, body = chapter_body(md, mode)
         gloss_rows = load_glossary(book_dir / ch["glossary"]) if ch.get("glossary") else []
-        body += glossary_section(gloss_rows, mode)
-        chapters.append({"id": f"ch{idx:02d}", "file": f"ch{idx:02d}.xhtml", "title": title, "body": body})
+        prefix = f"ch{idx:02d}"
+        link_map = {w: i for i, (w, _, _) in enumerate(gloss_rows)}
+        linked: set = set()
+        title, body = chapter_body(md, mode, link_ctx=(prefix, link_map, linked))
+        body += glossary_section(gloss_rows, mode, prefix=prefix, linked=linked)
+        chapters.append({"id": prefix, "file": f"{prefix}.xhtml", "title": title, "body": body})
     return chapters, meta
 
 
