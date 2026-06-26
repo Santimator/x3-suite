@@ -188,6 +188,9 @@ def main(argv=None) -> int:
     ap.add_argument("--from", dest="frm", type=int, default=None, help="from this chapter to the end")
     ap.add_argument("--config", type=Path, default=None, help="LLM config (default: skill config.json)")
     ap.add_argument("--length", type=int, default=220, help="target chapter length in characters")
+    ap.add_argument("--pause-after", type=int, default=None, metavar="N",
+                    help="stop after chapter N for a human QA read, then resume with --from N+1 "
+                         "(default: run the whole book in one go)")
     ap.add_argument("--no-epub", action="store_true", help="skip the final EPUB build")
     ap.add_argument("--dry-run", action="store_true", help="build briefs only; no model calls")
     args = ap.parse_args(argv)
@@ -209,6 +212,10 @@ def main(argv=None) -> int:
             print(f"\nstopped at chapter {n}. Resume with: run_book.py {book} --from {n}")
             return 1
         completed += 1
+        if args.pause_after is not None and n == args.pause_after and n != todo[-1]:
+            print(f"\nQA pause after chapter {n}. Read it for quality (not just vocab), "
+                  f"then continue with: run_book.py {book} --from {n + 1}")
+            return 0
 
     if completed and not args.no_epub and not args.dry_run:
         out = book / "build" / f"{book.name}.epub"

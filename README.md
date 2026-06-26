@@ -76,8 +76,10 @@ cd .claude/skills/graded-reader
 - **Two interchangeable drivers.** The model steps are a file-based seam, so the
   same scripts run either way: **Claude Code** drives the loop interactively on
   your subscription, or the headless **`run_book.py`** runner drives it via any
-  OpenAI-compatible endpoint (NVIDIA NIM free tier by default; swap to
-  Kimi/GLM/local Ollama in one config line). See `config.example.json`.
+  OpenAI-compatible endpoint (NVIDIA NIM free tier with Kimi K2 by default; swap
+  to Qwen/local Ollama in one config line). By default the runner generates the
+  whole book in one go; `--pause-after 1` opts into a human QA stop after
+  chapter 1. See `config.example.json`.
 - **Writing is guided, not just checked.** `gen_context.py` front-loads the
   permitted vocabulary (grouped by band) into the scribe's brief, so it reaches
   for in-list words while writing instead of being reworked afterward.
