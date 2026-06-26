@@ -19,18 +19,47 @@
       "n": 2,
       "title": "猴王要学本领",
       "summary": "The Monkey King leaves the mountain to find a teacher and learn real skills.",
-      "status": "planned"
+      "status": "accepted",
+      "recap": "Sun Wukong, now monkey king, grows unhappy that he and the monkeys will age and die, so he leaves the mountain by boat to find a master and learn real skills; after many days he still hasn't found one."
     }
   ],
   "introduced": {
     "comment": "Running set of words/characters already introduced and glossed once. Later chapters check against this set and only gloss first appearances. The loop appends to this after each accepted chapter.",
     "words": [
-      "孙悟空", "猴子", "石头", "王", "山上",
-      "很久很久", "跑来跑去", "朋友", "高兴", "聪明"
+      "孙悟空",
+      "猴子",
+      "石头",
+      "王",
+      "山上",
+      "很久很久",
+      "跑来跑去",
+      "朋友",
+      "高兴",
+      "聪明",
+      "第二章",
+      "猴王",
+      "本领",
+      "天天",
+      "一天",
+      "不想",
+      "师父",
+      "第二天",
+      "小船",
+      "大水",
+      "很多",
+      "没有",
+      "哪里",
+      "才能",
+      "找到"
     ],
     "add_and_gloss": {
       "comment": "Words the rework loop was forced to introduce (topic-essential, above level). Mirrored into lists/personal.tsv so the validator treats them as known going forward.",
-      "words": ["猴子", "石头", "王"]
+      "words": [
+        "猴子",
+        "石头",
+        "王",
+        "本领"
+      ]
     }
   }
 }

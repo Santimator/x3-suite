@@ -33,10 +33,33 @@ Python that has `jieba` and `pypinyin` installed (see Setup).
 - **`scripts/vocab.py`** — loads + merges the lists, configures jieba so
   segmentation boundaries match the list (critical — otherwise the fail-rate
   lies), derives the known-character set, exposes pinyin lookup.
+- **`scripts/gen_context.py`** — builds the scribe's writing brief for chapter N
+  (beat + story-so-far + constraints + introduced set + topic words + the
+  permitted vocabulary grouped by band). This is what makes writing *guided*
+  rather than write-then-rework.
 - **`scripts/validate.py`** — segments a chapter and runs the cascade; reports
   out-of-list rate per token; harvests stretch words. Exit 0 = pass, 1 = fail.
+- **`scripts/update_state.py`** — deterministic bookkeeping after a chapter is
+  accepted: writes the gloss-once chapter glossary, appends newly-glossed words
+  to `introduced`, files the recap, marks the outline entry, wires `book.json`.
 - **`scripts/build_epub.py`** — hand-built EPUB with selectable pinyin display
   (`ruby` / `interlinear` / `plain`) and per-chapter glossary. No epub library.
+- **`prompts/planner.md`, `prompts/scribe.md`** — the two LLM-role briefs.
+
+## Two roles + deterministic scripts
+
+The pipeline is one model wearing two hats, with scripts doing everything
+mechanical between them:
+
+- **Planner (LLM, once per book)** — turns source material + level into
+  `plan.json` (outline with per-chapter beats). See `prompts/planner.md`.
+- **Scribe (LLM, once per chapter)** — writes chapter N from the brief
+  `gen_context.py` produces. See `prompts/scribe.md`.
+- **Deterministic scripts** — `validate.py` (grade), `update_state.py` (track
+  used words + what happened), `build_epub.py` (assemble). No LLM judgement.
+
+The planner invents structure; the scribe invents prose; the scripts never
+invent anything — they segment, count, gloss, and record.
 
 ## The validation cascade
 
@@ -56,37 +79,48 @@ Two gates, both per segmented token (not per character):
 
 ## The orchestration loop
 
-For each chapter `N`:
+**Once per book — Planner.** Produce `plan.json` per `prompts/planner.md`
+(outline + per-chapter beats; seed obvious story names into `lists/personal.tsv`).
 
-1. **Plan.** Read `plan.json`: outline, target level, and the `introduced` set
-   (words/characters already glossed). Pick chapter N's beat from the outline.
-2. **Generate a chunk.** Write chapter N in the target level. Base it on
-   well-known source material (西游记 episodes, fables, fairy tales) so effort
-   goes into grading, not plot. Expect culturally loaded passages to pull toward
-   classical/canonical vocab that fights the cap — those rework more.
-3. **Validate.**
+**Then, for each chapter `N`:**
+
+1. **Build the scribe brief** (deterministic):
    ```
-   python scripts/validate.py BOOK/chapters/chNN.md \
-       --harvest-out BOOK/build/chNN-newwords.tsv --json
+   python scripts/gen_context.py BOOK --chapter N --out BOOK/build/chNN-brief.md
+   ```
+   It pulls the beat, the story-so-far recaps, the `introduced` set, the topic
+   words, and the permitted vocabulary grouped by band.
+2. **Write the chunk — Scribe.** Following the brief and `prompts/scribe.md`,
+   write `BOOK/chapters/chNN.md` (a `# 第N章` title, paragraphs, then a final
+   `RECAP:` line). Stay inside the permitted vocabulary; prefer the lowest band;
+   reuse words. Base it on well-known source material so effort goes into
+   grading, not plot. Expect culturally loaded passages to rework more.
+3. **Validate** (deterministic):
+   ```
+   python scripts/validate.py BOOK/chapters/chNN.md --json
    ```
 4. **Rework OR accept.**
    - **Pass** → accept.
-   - **Fail** → look at `flagged_tokens` (worst first). Rewrite to avoid them,
+   - **Fail** → take `flagged_tokens` (worst first) and rewrite to avoid them,
      keeping the story. Re-validate. **Cap reworks at `rework_cap` (default 3).**
-   - **After the cap**, if the same word keeps recurring because the topic
-     genuinely demands it, do **not** keep rewriting: take the **add-and-gloss**
-     path — add that word to `lists/personal.tsv` (with pinyin + gloss) and to
-     `plan.json` → `introduced.add_and_gloss`. It is now known for all later
-     chapters and gets glossed once here. This is the correct escape hatch, not
-     a failure.
-5. **Harvest vocabulary.** The harvest TSV from step 3 holds this chapter's
-   stretch (and, with `--harvest-flagged`, flagged) words. Fill any blank
-   glosses, drop words already in `introduced`, and save as the chapter glossary
-   `BOOK/build/chNN-glossary.tsv`. Only first appearances are glossed.
-6. **Update state.** Append newly introduced words to `plan.json` → `introduced.words`.
-7. **Next chapter.** Repeat. Re-validation in later chapters uses the updated
-   lists, so add-and-gloss words no longer flag.
-8. **Assemble EPUB** (after chapters are accepted):
+   - **After the cap**, if a word keeps recurring because the topic genuinely
+     demands it, do **not** keep rewriting: take the **add-and-gloss** path — add
+     it to `lists/personal.tsv` (pinyin + gloss) and to `plan.json` →
+     `introduced.add_and_gloss`. It becomes known for all later chapters and is
+     glossed once here. (A content word that recurs many times but squeaks under
+     the threshold is also an add-and-gloss candidate, not a pass to ignore.)
+5. **Update state** (deterministic — does the harvest, glossary, and tracking):
+   ```
+   python scripts/update_state.py BOOK --chapter N
+   ```
+   It writes `BOOK/build/chNN-glossary.tsv` (gloss-worthy first appearances:
+   topic words + compositional stretch, minus anything already in `introduced`),
+   appends them to `introduced.words`, files the `RECAP:` line into the outline
+   (and strips it from the chapter), and wires `book.json`. Then **review the
+   glossary**: fill any blank gloss it flagged, or delete transparent rows.
+6. **Next chapter.** Repeat. Later chapters re-segment against the updated lists,
+   so add-and-gloss words no longer flag and introduced words aren't re-glossed.
+7. **Assemble EPUB** (after chapters are accepted):
    ```
    python scripts/build_epub.py BOOK --out BOOK/build/book.epub --pinyin-mode interlinear
    ```

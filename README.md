@@ -29,8 +29,13 @@ in one pass. Each chapter is graded, reworked if needed, and only then accepted.
     personal.tsv        personal known-words + add-and-gloss escalation sink
   scripts/
     vocab.py            list loader + jieba configuration (shared)
+    gen_context.py      builds the scribe's writing brief for a chapter
     validate.py         cascade validator + glossary harvester
+    update_state.py     deterministic post-accept bookkeeping
     build_epub.py       hand-built EPUB, selectable pinyin display
+  prompts/
+    planner.md          planner role: source + level -> plan.json outline
+    scribe.md           scribe role: write one chapter under constraints
   reference/
     readers.md          Xteink X3 / CrossPoint ruby-support notes
 workspace/
@@ -59,6 +64,13 @@ cd .claude/skills/graded-reader
 
 ## Key design points
 
+- **Two LLM roles, deterministic glue.** A *planner* writes the outline once; a
+  *scribe* writes each chapter from a mechanically-built brief; scripts grade,
+  track state, and assemble. The model invents structure and prose; the scripts
+  never invent — they segment, count, gloss, and record.
+- **Writing is guided, not just checked.** `gen_context.py` front-loads the
+  permitted vocabulary (grouped by band) into the scribe's brief, so it reaches
+  for in-list words while writing instead of being reworked afterward.
 - **Two-gate validation per segmented token** (not per character): out-of-list
   rate ≤ 5%, stretch rate ≤ 15% (both tunable).
 - **jieba with the vocab list as its custom dictionary**, so segmentation
