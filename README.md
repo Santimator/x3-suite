@@ -22,6 +22,7 @@ in one pass. Each chapter is graded, reworked if needed, and only then accepted.
 .claude/skills/graded-reader/
   SKILL.md              orchestration loop + full docs
   requirements.txt      jieba, pypinyin
+  config.example.json   LLM runner config template (copy to config.json)
   lists/
     hsk.tsv             base HSK 1-3 list (word, level, pinyin, gloss)
     supplement.tsv      high-freq function/grammar words the word list omits
@@ -33,9 +34,12 @@ in one pass. Each chapter is graded, reworked if needed, and only then accepted.
     validate.py         cascade validator + glossary harvester
     update_state.py     deterministic post-accept bookkeeping
     build_epub.py       hand-built EPUB, selectable pinyin display
+    llm.py              OpenAI-compatible chat client (the model seam)
+    run_book.py         headless runner: drives the loop via any OpenAI API
   prompts/
     planner.md          planner role: source + level -> plan.json outline
     scribe.md           scribe role: write one chapter under constraints
+    glossary_editor.md  glossary-editor role: prune + fill the chapter glossary
   reference/
     readers.md          Xteink X3 / CrossPoint ruby-support notes
 workspace/
@@ -64,10 +68,16 @@ cd .claude/skills/graded-reader
 
 ## Key design points
 
-- **Two LLM roles, deterministic glue.** A *planner* writes the outline once; a
-  *scribe* writes each chapter from a mechanically-built brief; scripts grade,
-  track state, and assemble. The model invents structure and prose; the scripts
-  never invent — they segment, count, gloss, and record.
+- **Three LLM roles, deterministic glue.** A *planner* writes the outline once;
+  a *scribe* writes (and reworks) each chapter from a mechanically-built brief;
+  a *glossary editor* prunes the auto-proposed per-chapter glossary to the rows
+  a learner actually needs. Scripts grade, track state, and assemble — they
+  never invent, they segment, count, gloss, and record.
+- **Two interchangeable drivers.** The model steps are a file-based seam, so the
+  same scripts run either way: **Claude Code** drives the loop interactively on
+  your subscription, or the headless **`run_book.py`** runner drives it via any
+  OpenAI-compatible endpoint (NVIDIA NIM free tier by default; swap to
+  Kimi/GLM/local Ollama in one config line). See `config.example.json`.
 - **Writing is guided, not just checked.** `gen_context.py` front-loads the
   permitted vocabulary (grouped by band) into the scribe's brief, so it reaches
   for in-list words while writing instead of being reworked afterward.

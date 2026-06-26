@@ -44,22 +44,58 @@ Python that has `jieba` and `pypinyin` installed (see Setup).
   to `introduced`, files the recap, marks the outline entry, wires `book.json`.
 - **`scripts/build_epub.py`** — hand-built EPUB with selectable pinyin display
   (`ruby` / `interlinear` / `plain`) and per-chapter glossary. No epub library.
-- **`prompts/planner.md`, `prompts/scribe.md`** — the two LLM-role briefs.
+- **`scripts/llm.py`** — minimal OpenAI-compatible chat client (stdlib only).
+  The swappable model seam for the headless runner. Reads `config.json`.
+- **`scripts/run_book.py`** — headless runner: drives the whole loop by calling
+  an OpenAI-compatible endpoint for the model steps (see "Two drivers").
+- **`prompts/planner.md`, `prompts/scribe.md`, `prompts/glossary_editor.md`** —
+  the three LLM-role briefs.
 
-## Two roles + deterministic scripts
+## Three roles + deterministic scripts
 
-The pipeline is one model wearing two hats, with scripts doing everything
+The pipeline is one model wearing three hats, with scripts doing everything
 mechanical between them:
 
 - **Planner (LLM, once per book)** — turns source material + level into
   `plan.json` (outline with per-chapter beats). See `prompts/planner.md`.
 - **Scribe (LLM, once per chapter)** — writes chapter N from the brief
-  `gen_context.py` produces. See `prompts/scribe.md`.
-- **Deterministic scripts** — `validate.py` (grade), `update_state.py` (track
-  used words + what happened), `build_epub.py` (assemble). No LLM judgement.
+  `gen_context.py` produces (and reworks it from flagged tokens on a fail).
+  See `prompts/scribe.md`.
+- **Glossary editor (LLM, once per chapter)** — `update_state.py` proposes every
+  gloss-worthy first appearance (over-inclusive on purpose); the model prunes
+  compositionally-transparent rows, keeps topic words, and fills blank glosses.
+  See `prompts/glossary_editor.md`.
+- **Deterministic scripts** — `gen_context.py` (brief), `validate.py` (grade),
+  `update_state.py` (track used words + what happened + propose glossary),
+  `build_epub.py` (assemble). No LLM judgement.
 
-The planner invents structure; the scribe invents prose; the scripts never
-invent anything — they segment, count, gloss, and record.
+The planner invents structure; the scribe invents prose; the glossary editor
+applies pedagogical judgement; the scripts never invent anything — they segment,
+count, gloss, and record.
+
+## Two drivers (the model seam is file-based)
+
+The LLM steps read and write files (brief in → chapter out; raw glossary in →
+curated glossary out), so *who fills them* is pluggable. Two ways to drive the
+exact same scripts:
+
+- **Claude Code drives** (interactive, rides your Claude subscription) — Claude
+  Code follows the orchestration loop below itself: runs the scripts as Bash
+  tools, writes each chapter and curates each glossary inline. No `config.json`
+  needed. Best for chapter 1 and the human-QA gate.
+- **`run_book.py` drives** (headless, any model) — calls an OpenAI-compatible
+  endpoint for the model steps. Default is NVIDIA NIM (free tier) with a beefy
+  Qwen; one-line swap to Kimi/GLM/a local Ollama or vLLM server. Best for
+  batching the remaining chapters unattended. Setup:
+  ```
+  cp config.example.json config.json          # then set model / base_url
+  printf '%s' 'nvapi-...' > secrets/nim.key    # gitignored
+  python scripts/run_book.py BOOK              # processes un-accepted chapters
+  python scripts/run_book.py BOOK --from 3     # resume from chapter 3
+  ```
+  `config.json` and `secrets/` are gitignored. The runner stops (doesn't guess)
+  if a chapter still fails after the rework cap — add-and-gloss stays a
+  human/Claude-Code judgement call.
 
 ## The validation cascade
 
@@ -116,11 +152,15 @@ Two gates, both per segmented token (not per character):
    It writes `BOOK/build/chNN-glossary.tsv` (gloss-worthy first appearances:
    topic words + compositional stretch, minus anything already in `introduced`),
    appends them to `introduced.words`, files the `RECAP:` line into the outline
-   (and strips it from the chapter), and wires `book.json`. Then **review the
-   glossary**: fill any blank gloss it flagged, or delete transparent rows.
-6. **Next chapter.** Repeat. Later chapters re-segment against the updated lists,
+   (and strips it from the chapter), and wires `book.json`.
+6. **Curate the glossary — Glossary editor (LLM).** The proposed TSV is
+   over-inclusive on purpose. Per `prompts/glossary_editor.md`, prune
+   compositionally-transparent rows (山上, 很多, 一天…), keep topic words, and
+   fill any blank gloss. This is the model's judgement call, not a human's — the
+   `run_book.py` driver does it automatically; Claude Code does it inline.
+7. **Next chapter.** Repeat. Later chapters re-segment against the updated lists,
    so add-and-gloss words no longer flag and introduced words aren't re-glossed.
-7. **Assemble EPUB** (after chapters are accepted):
+8. **Assemble EPUB** (after chapters are accepted):
    ```
    python scripts/build_epub.py BOOK --out BOOK/build/book.epub --pinyin-mode interlinear
    ```

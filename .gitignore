@@ -1,3 +1,8 @@
 .venv/
 __pycache__/
 *.pyc
+
+# graded-reader: LLM runner config + API keys (never commit)
+.claude/skills/graded-reader/config.json
+.claude/skills/graded-reader/secrets/*
+!.claude/skills/graded-reader/secrets/README.md
