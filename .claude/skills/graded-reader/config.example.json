@@ -1,0 +1,19 @@
+{
+  "_comment": "Copy this file to config.json (gitignored) and adjust. The runner (scripts/run_book.py) reads it; Claude Code driving SKILL.md by hand does not need it.",
+
+  "base_url": "https://integrate.api.nvidia.com/v1",
+  "_base_url_note": "OpenAI-compatible root. NVIDIA NIM is the default (free tier, nvapi- key). Swap for a local server, e.g. http://localhost:11434/v1 (Ollama) or http://localhost:8000/v1 (vLLM).",
+
+  "model": "qwen/qwen3.5-397b-a17b",
+  "_model_note": "Beefy Qwen on NIM — strongest in-list discipline, writes simple by default (good for graded readers; the validator is the floor either way). For more literary prose try 'moonshotai/kimi-k2-instruct' (most natural per the HSK-story benchmark) or 'zai-org/glm-4.6'. One-line swap; the prompts are model-agnostic.",
+
+  "api_key_file": "secrets/nim.key",
+  "_api_key_file_note": "Path (relative to the skill dir) to a gitignored file holding ONLY the key. Create secrets/nim.key and paste your nvapi-... key. Never commit the key.",
+
+  "api_key_env": "NVIDIA_API_KEY",
+  "_api_key_env_note": "Fallback: if the key file is absent, read this environment variable instead.",
+
+  "temperature": 0.7,
+  "max_tokens": 2048,
+  "timeout": 180
+}
