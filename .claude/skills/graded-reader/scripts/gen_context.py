@@ -29,11 +29,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import vocab as vocab_mod  # noqa: E402
 
 # Bands shown to the scribe, simplest first, so it can prefer low bands.
-BAND_ORDER = ["HSK1", "HSK2", "HSK3", "SUP", "IDIOM"]
+BAND_ORDER = ["HSK1", "HSK2", "HSK3", "HSK4", "SUP", "IDIOM"]
 BAND_LABEL = {
     "HSK1": "HSK 1 (easiest — prefer these)",
     "HSK2": "HSK 2",
     "HSK3": "HSK 3",
+    "HSK4": "HSK 4",
     "SUP": "Function/grammar words",
     "IDIOM": "Set expressions",
 }
