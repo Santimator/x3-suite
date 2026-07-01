@@ -235,7 +235,10 @@ def build_opf(title: str, author: str, lang: str, chapters: List[Dict]) -> str:
         manifest.append(f'<item id="{ch["id"]}" href="{ch["file"]}" media-type="application/xhtml+xml"/>')
         spine.append(f'<itemref idref="{ch["id"]}"/>')
     import uuid
-    book_id = "urn:uuid:" + str(uuid.uuid4())
+    # Stable id (derived from the title): rebuilding doesn't change the book's
+    # identity, so readers replace a re-sideloaded copy instead of duplicating
+    # it, and identical sources build byte-identical epubs.
+    book_id = "urn:uuid:" + str(uuid.uuid5(uuid.NAMESPACE_URL, "graded-reader:" + title))
     return f"""\
 <?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="{lang}">
@@ -244,6 +247,7 @@ def build_opf(title: str, author: str, lang: str, chapters: List[Dict]) -> str:
     <dc:title>{html.escape(title)}</dc:title>
     <dc:creator>{html.escape(author)}</dc:creator>
     <dc:language>{lang}</dc:language>
+    <!-- fixed timestamp: same book source always builds a byte-identical epub -->
     <meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>
   </metadata>
   <manifest>{"".join(manifest)}</manifest>
@@ -297,7 +301,7 @@ def load_glossary(path: Optional[Path]) -> List[Tuple[str, str, str]]:
 # --------------------------------------------------------------------------- #
 # Driver
 # --------------------------------------------------------------------------- #
-def assemble(book_dir: Path, mode: str) -> List[Dict]:
+def assemble(book_dir: Path, mode: str) -> Tuple[List[Dict], Dict]:
     """Build the chapter dicts for a single-mode book."""
     meta = json.loads((book_dir / "book.json").read_text(encoding="utf-8"))
     chapters = []
@@ -313,7 +317,7 @@ def assemble(book_dir: Path, mode: str) -> List[Dict]:
     return chapters, meta
 
 
-def assemble_diagnostic(book_dir: Path) -> List[Dict]:
+def assemble_diagnostic(book_dir: Path) -> Tuple[List[Dict], Dict]:
     """One epub: first chapter rendered in all three modes, labeled."""
     meta = json.loads((book_dir / "book.json").read_text(encoding="utf-8"))
     ch = meta["chapters"][0]

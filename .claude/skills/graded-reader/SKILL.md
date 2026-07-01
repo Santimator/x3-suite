@@ -49,6 +49,9 @@ Python that has `jieba` and `pypinyin` installed (see Setup).
   The swappable model seam for the headless runner. Reads `config.json`.
 - **`scripts/run_book.py`** — headless runner: drives the whole loop by calling
   an OpenAI-compatible endpoint for the model steps (see "Two drivers").
+- **`scripts/selftest.py`** — pipeline self-test: cascade examples, every
+  workspace book against its gates, epub build + link integrity. Run it after
+  changing scripts or lists.
 - **`prompts/planner.md`, `prompts/scribe.md`, `prompts/glossary_editor.md`** —
   the three LLM-role briefs.
 
@@ -108,13 +111,21 @@ Each Han-containing token is classified:
 |------|------|---------|
 | a | token is a list word | **known** |
 | b | token is a chengyu/expression | **known** (in list) |
-| — | single character met in any known word | **known** |
-| c | multi-char word, not listed, every char known | **stretch** (keep + gloss once) |
-| d | otherwise (contains an unknown character) | **flagged** (out of list) |
+| c | single character met in any known word | **known** |
+| d | number grammar (第五名, 十二个) or a concatenation of list words (很快, 只能) | **composed** (in list) |
+| e | multi-char word, not listed, every char known | **stretch** (keep + gloss once) |
+| f | otherwise (contains an unknown character) | **flagged** (out of list) |
+
+Tier (d) exists because jieba merges frequent collocations into single tokens.
+Without it, ordinals and known-word compounds eat the stretch budget and the
+rate stops measuring genuine reach — a learner who knows 很 and 快 *recognizes*
+很快; only combinations like 山上 or 睡着 are real (gloss-worthy) stretches.
 
 Two gates, both per segmented token (not per character):
 `out_of_list_rate = flagged / counted` (default cap **5%**) and
-`stretch_rate = stretch / counted` (default cap **15%**). Either over its cap fails.
+`stretch_rate = stretch / counted` (default cap **15%**). Either over its cap
+fails. Gates default to the book's `plan.json` validation params; CLI flags
+override. `validate.py BOOKDIR` checks every chapter in `book.json` at once.
 
 ## The orchestration loop
 
@@ -200,8 +211,9 @@ BOOK/
   build/               harvest TSVs, glossaries, .epub output
 ```
 
-`workspace/journey-west/` is a worked example: a validated HSK 1-3 chapter 1
-with glossary, plan, and built EPUBs (including the diagnostic).
+Worked examples under `workspace/`: `journey-west` (first scaffold, HSK 1-3),
+`yugong-mountain` (愚公移山, HSK 1-3, 5 chapters), `twelve-zodiac` (十二生肖,
+HSK 1-4, 10 chapters) — each with plan, glossaries, and built EPUBs.
 
 ## Build order (when starting a new reader)
 
@@ -220,6 +232,7 @@ jieba's legacy `setup.py` (`install_layout`). Run the scripts with `.venv/bin/py
 
 ## Adjusting level
 
-Change which bands count as "known" by editing `lists/`. For a tighter cap, trim
-`hsk.tsv`/`supplement.tsv`; for a higher target, append more bands. The pipeline
-is level-agnostic — it grades against whatever the lists contain.
+Change which bands count as "known" by editing `lists/`. `hsk.tsv` currently
+carries HSK 1-4; for a tighter target, trim bands out, and for a higher one,
+append more (mirror any new band in `gen_context.py`'s `BAND_ORDER`). The
+pipeline is level-agnostic — it grades against whatever the lists contain.

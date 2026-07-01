@@ -69,12 +69,48 @@ class Vocab:
     def char_known(self, ch: str) -> bool:
         return ch in self.known_chars
 
+    def decomposes_known(self, word: str) -> bool:
+        """True if the word splits entirely into known list entries (2+ pieces).
+
+        jieba merges frequent collocations (很快, 就要, 只能) into single tokens
+        that are not list entries themselves. If every piece of such a token is
+        a word the learner was taught, reading it is recognition, not a guess —
+        so the validator should not spend the stretch budget on it.
+        """
+        n = len(word)
+        if n < 2 or n > 8:
+            return False
+        reach = [True] + [False] * n  # reach[i]: word[:i] splits into entries
+        for i in range(1, n + 1):
+            for j in range(i):
+                if reach[j] and (i - j) < n and word[j:i] in self.known:
+                    reach[i] = True
+                    break
+        return reach[n]
+
     def get(self, word: str) -> Optional[Entry]:
         return self.entries.get(word)
 
 
 def _is_han(ch: str) -> bool:
     return "一" <= ch <= "鿿"
+
+
+# Number grammar, not vocabulary: ordinals (第五, 第十一名) and number+measure
+# combos (十二个, 一次, 两年, 一个月). jieba merges these into single tokens; a
+# learner who knows the numerals and the measure word reads them at sight.
+_NUMERALS = set("〇零一二两三四五六七八九十百千万亿几半")
+_MEASURES = set("个只条块座名年月天次步位件章场遍岁层家口点分")
+
+
+def is_number_pattern(token: str) -> bool:
+    """True for 第+numeral(+measure) ordinals and numeral(+个)+measure combos."""
+    body = token[1:] if token.startswith("第") else token
+    if len(body) >= 2 and body[-1] in _MEASURES:
+        body = body[:-1]
+        if body and body[-1] == "个":  # 一个月-style: numeral + 个 + unit
+            body = body[:-1]
+    return bool(body) and all(c in _NUMERALS for c in body)
 
 
 def _read_tsv(path: Path, source: str) -> Iterable[Entry]:
