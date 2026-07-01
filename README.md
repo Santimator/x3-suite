@@ -24,7 +24,7 @@ in one pass. Each chapter is graded, reworked if needed, and only then accepted.
   requirements.txt      jieba, pypinyin
   config.example.json   LLM runner config template (copy to config.json)
   lists/
-    hsk.tsv             base HSK 1-3 list (word, level, pinyin, gloss)
+    hsk.tsv             base leveled list, HSK 1-4 (word, level, pinyin, gloss)
     supplement.tsv      high-freq function/grammar words the word list omits
     chengyu.tsv         idioms / fixed expressions
     personal.tsv        personal known-words + add-and-gloss escalation sink
@@ -36,6 +36,7 @@ in one pass. Each chapter is graded, reworked if needed, and only then accepted.
     build_epub.py       hand-built EPUB, selectable pinyin display
     llm.py              OpenAI-compatible chat client (the model seam)
     run_book.py         headless runner: drives the loop via any OpenAI API
+    selftest.py         pipeline self-test (cascade, books, epub integrity)
   prompts/
     planner.md          planner role: source + level -> plan.json outline
     scribe.md           scribe role: write one chapter under constraints
@@ -43,7 +44,9 @@ in one pass. Each chapter is graded, reworked if needed, and only then accepted.
   reference/
     readers.md          Xteink X3 / CrossPoint ruby-support notes
 workspace/
-  journey-west/         worked example: validated HSK 1-3 chapter 1 + EPUBs
+  journey-west/         first scaffold example (HSK 1-3, 2 chapters)
+  yugong-mountain/      愚公移山 (HSK 1-3, 5 chapters) + built EPUB
+  twelve-zodiac/        十二生肖 (HSK 1-4, 10 chapters) + built EPUB
 ```
 
 ## Quick start
@@ -51,16 +54,20 @@ workspace/
 ```bash
 python -m venv .venv
 .venv/bin/pip install -r .claude/skills/graded-reader/requirements.txt
-cd .claude/skills/graded-reader
+S=.claude/skills/graded-reader/scripts
 
-# validate a chapter against the HSK 1-3 lists
-.venv/bin/python scripts/validate.py ../../../workspace/journey-west/chapters/ch01.md
+# validate one chapter, or a whole book at once (gates come from its plan.json)
+.venv/bin/python $S/validate.py workspace/twelve-zodiac/chapters/ch01.md
+.venv/bin/python $S/validate.py workspace/twelve-zodiac
 
-# build the EPUB (interlinear pinyin), and a 3-mode render test for the device
-.venv/bin/python scripts/build_epub.py ../../../workspace/journey-west \
-    --out ../../../workspace/journey-west/build/book.epub --pinyin-mode interlinear
-.venv/bin/python scripts/build_epub.py ../../../workspace/journey-west \
-    --out ../../../workspace/journey-west/build/render-test.epub --diagnostic
+# build the EPUB (ruby pinyin), or a 3-mode render test for a new device
+.venv/bin/python $S/build_epub.py workspace/twelve-zodiac \
+    --out workspace/twelve-zodiac/build/book.epub --pinyin-mode ruby
+.venv/bin/python $S/build_epub.py workspace/twelve-zodiac \
+    --out workspace/twelve-zodiac/build/render-test.epub --diagnostic
+
+# verify the whole pipeline after changing scripts or lists
+.venv/bin/python $S/selftest.py
 ```
 
 > On Debian/Ubuntu, install `jieba` inside a venv — the system setuptools breaks
@@ -84,12 +91,16 @@ cd .claude/skills/graded-reader
   permitted vocabulary (grouped by band) into the scribe's brief, so it reaches
   for in-list words while writing instead of being reworked afterward.
 - **Two-gate validation per segmented token** (not per character): out-of-list
-  rate ≤ 5%, stretch rate ≤ 15% (both tunable).
+  rate ≤ 5%, stretch rate ≤ 15% (both tunable, read from the book's plan.json).
 - **jieba with the vocab list as its custom dictionary**, so segmentation
   boundaries match the list — otherwise the fail-rate is meaningless.
 - **A character is "known" if it appears in any known word.** The official HSK
   list is word-based and omits standalone characters it already uses (e.g. `说话`
   but not `说`); crediting those keeps the rate honest.
+- **Number grammar and known-word compounds are recognition, not stretch.**
+  jieba merges 第五名, 十二个, 很快 into single tokens; the validator classifies
+  them *composed* (in list) so the stretch budget only pays for genuine reaches
+  like 山上 or 睡着 — the ones worth glossing.
 - **Rework is capped** (default 3). When a topic genuinely demands an above-level
   word, the loop adds it to `personal.tsv` and glosses it once rather than
   rewriting forever.
