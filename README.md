@@ -47,6 +47,7 @@ workspace/
   journey-west/         first scaffold example (HSK 1-3, 2 chapters)
   yugong-mountain/      愚公移山 (HSK 1-3, 5 chapters) + built EPUB
   twelve-zodiac/        十二生肖 (HSK 1-4, 10 chapters) + built EPUB
+  letter-writer/        写信的老人, original story (HSK 1-4, 7 ch) + built EPUB
 ```
 
 ## Quick start

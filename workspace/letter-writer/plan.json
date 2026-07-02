@@ -1,0 +1,102 @@
+{
+  "title": "写信的老人 · 分级读物 (HSK 1-4)",
+  "source_material": "Original story: an old public letter-writer in a small town loses his trade to the telephone, and finds it again as a teacher.",
+  "target_level": "HSK1-4",
+  "segmenter": "jieba (custom dict = vocab lists)",
+  "validation": {
+    "threshold": 0.05,
+    "max_stretch": 0.15,
+    "rework_cap": 3
+  },
+  "outline": [
+    {
+      "n": 1,
+      "title": "小城里的老人",
+      "summary": "Introduce Mr. Wang, an old man in a small town, who sits at a little table in the street with paper and pen. Many people in town cannot write, so they tell him their words and he writes their letters. His handwriting is beautiful and he loves characters. This is his whole life's work.",
+      "status": "accepted",
+      "recap": "In a small town, old Mr. Wang sets up a little table in the street each morning and writes letters for the many townspeople who cannot write, turning their spoken words into beautiful characters; he loves characters like little pictures, and this has been his life's work."
+    },
+    {
+      "n": 2,
+      "title": "一封信",
+      "summary": "Show the work at its best: a mother whose son works in a far city comes to the table. She speaks, Mr. Wang writes, the letter is sent. Weeks later a reply arrives and he reads it aloud to her; she is moved to tears of joy. Mr. Wang feels his work matters — he carries people's hearts on paper.",
+      "status": "accepted",
+      "recap": "A mother whose son works far away dictates a letter to Mr. Wang, full of a mother's small cares; a month later he reads her the son's reply — new job, home for New Year — and she weeps with joy. Mr. Wang realizes he writes not mere characters but the most important words in people's hearts."
+    },
+    {
+      "n": 3,
+      "title": "手机来了",
+      "summary": "Years pass. Phones and computers arrive in the small town. People can now call or go online; hearing a voice is faster than waiting for paper. Fewer and fewer people come to the little table. Mr. Wang understands why, but the street feels quiet.",
+      "status": "accepted",
+      "recap": "Years pass; phones, mobiles and computers reach the small town, and hearing a loved one's voice instantly beats waiting for paper, so fewer and fewer people come to the letter table — some days nobody at all. Mr. Wang accepts that new things replace old ones and blames no one, but the street, and his heart, feel quieter than before."
+    },
+    {
+      "n": 4,
+      "title": "没有人来了",
+      "summary": "Now whole days pass with no customers at all. Out of habit Mr. Wang still sets up his table every morning and practices characters alone on old paper. He feels old and useless and thinks maybe it is time to stop. He does not know that someone has been watching him.",
+      "status": "accepted",
+      "recap": "Nobody comes at all now, but out of lifelong habit Mr. Wang still sets up his table daily and practices characters alone on old paper — as beautiful as ever, with no one to see them. One rainy day he decides he is old and unneeded and thinks it may be time to stop, not knowing someone across the street has been watching him for days."
+    },
+    {
+      "n": 5,
+      "title": "小花",
+      "summary": "A little girl called Xiaohua has been watching him write on their street. She thinks his characters are the most beautiful things she has seen — like little pictures. She walks up and asks him to teach her to write. Mr. Wang is surprised, then delighted, and agrees.",
+      "status": "accepted",
+      "recap": "The watcher is Xiaohua, an eight-year-old neighbor girl who slows down after school every day to watch Mr. Wang write, believing his characters appear like magic and look like little pictures; at last she approaches, calls his writing the most beautiful thing she has seen, and asks him to teach her — he puts the pen in her hand and says they'll start right now."
+    },
+    {
+      "n": 6,
+      "title": "小小的学校",
+      "summary": "He teaches Xiaohua every afternoon; she learns fast and loves it. Other children see them and join. The letter table becomes a tiny school in the street, with children practicing characters. Mr. Wang is busy again, and happier than he has been in years.",
+      "status": "accepted",
+      "recap": "Xiaohua comes every afternoon after school; Mr. Wang teaches earnestly — write slowly, a quiet heart makes beautiful characters — and other children, drawn by the fun, join until five or six sit at the table daily. The letter table has become a tiny street school where children practice characters and read stories, and Mr. Wang, busy again, feels years younger."
+    },
+    {
+      "n": 7,
+      "title": "最好的信",
+      "summary": "Years later, Xiaohua has grown up and moved to the big city to study. One day a letter arrives for Mr. Wang — the first letter in his whole life written TO him. In beautiful characters (the ones he taught her) it says: thank you, teacher. He reads it many times. The story closes: what you give others does not disappear; it only changes its shape.",
+      "status": "accepted",
+      "recap": "Years later, white-haired Mr. Wang still teaches the street children when a letter arrives — the first ever addressed to him. It is from Xiaohua, now at university in the big city, whose handwriting is the most beautiful in her class, thanking the finest teacher on a small-town street. He reads it over and over, smiling through tears: what you give others does not disappear — it changes shape and lives on in other hearts."
+    }
+  ],
+  "introduced": {
+    "comment": "Running set of words/characters already introduced and glossed once. Later chapters check against this set and only gloss first appearances. The loop appends to this after each accepted chapter.",
+    "words": [
+      "城里",
+      "每天",
+      "一杯",
+      "远方",
+      "的话",
+      "变成",
+      "常常",
+      "汉字",
+      "一生",
+      "心里",
+      "天冷",
+      "吃饭",
+      "打开",
+      "眼泪",
+      "那天",
+      "小城",
+      "电话",
+      "练字",
+      "小女孩",
+      "今年",
+      "放学",
+      "魔术",
+      "手里",
+      "大学",
+      "大声",
+      "亲爱",
+      "王",
+      "不见"
+    ],
+    "add_and_gloss": {
+      "comment": "Topic-essential above-level words seeded by the planner. Mirrored into lists/personal.tsv so the validator treats them as known.",
+      "words": [
+        "封",
+        "魔术"
+      ]
+    }
+  }
+}
