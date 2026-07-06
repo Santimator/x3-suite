@@ -52,6 +52,11 @@ Python that has `jieba` and `pypinyin` installed (see Setup).
 - **`scripts/selftest.py`** — pipeline self-test: cascade examples, every
   workspace book against its gates, epub build + link integrity. Run it after
   changing scripts or lists.
+- **`scripts/charset.py`** — emits the exact character set the built book(s)
+  render (CHARSET.txt + codepoint INTERVALS.txt), for building small device
+  fonts — e-ink readers like the X3 can't hold a full 20k-glyph CJK font, but
+  a whole graded-reader library needs only a few hundred. See
+  `reference/readers.md`.
 - **`prompts/planner.md`, `prompts/scribe.md`, `prompts/glossary_editor.md`** —
   the three LLM-role briefs.
 

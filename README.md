@@ -37,6 +37,7 @@ in one pass. Each chapter is graded, reworked if needed, and only then accepted.
     llm.py              OpenAI-compatible chat client (the model seam)
     run_book.py         headless runner: drives the loop via any OpenAI API
     selftest.py         pipeline self-test (cascade, books, epub integrity)
+    charset.py          exact character set of a book -> device font subsetting
   prompts/
     planner.md          planner role: source + level -> plan.json outline
     scribe.md           scribe role: write one chapter under constraints
