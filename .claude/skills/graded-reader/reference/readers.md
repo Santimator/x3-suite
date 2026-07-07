@@ -31,13 +31,21 @@ rasterize an embedded TTF. Do not fatten the books; fix the device:
 1. **Flash CrossPoint** (supports X3 + X4): https://crosspointreader.com/ —
    web-flash from the browser; stock firmware can be restored later.
 2. **Install a CJK font on the SD card.** Options, best first:
-   - **Build a subsetted font with the pipeline's charset** (recommended —
-     see below): tiny, fast, OOM-proof.
-   - Grab a prebuilt CJK `.cpfont` from
+   - **Use the prebuilt fonts in `workspace/CHARSET/fonts/`** (recommended):
+     `NotoSansSC-GradedReader_{12,14,16,18}.cpfont` — Noto Sans SC
+     regular+bold subset to the full HSK 1-4 pipeline universe (1223 glyphs,
+     0.4–0.8 MB per size). Built with CrossPoint's own
+     `fontconvert_sdcard.py`; see "Building the font offline" below.
+   - Grab a prebuilt full-CJK `.cpfont` from
      https://github.com/crosspoint-reader/crosspoint-fonts — works, but full
      CJK is 20k+ glyphs and the CJK fork warns big fonts can OOM the ESP32.
    - Fonts go to `/fonts/` (or `/.fonts/`) on the SD card, or upload via the
      web interface in File Transfer mode; select under Settings → Fonts.
+
+   **Note on the web font builder** (https://crosspointreader.com/fonts): it
+   is a wrapper around the converter script and **requires you to upload a
+   base TTF/OTF yourself** — it ships no fonts. If you have nothing to feed
+   it, use the offline build below (or the prebuilt files above) instead.
 3. **Re-run the diagnostic EPUB** (below) to pick the pinyin mode — ruby
    support under CrossPoint is still unconfirmed; `interlinear` is the likely
    winner, `plain` the safe floor.
@@ -57,9 +65,35 @@ python scripts/charset.py workspace/BOOK [workspace/BOOK2 ...] --out-dir DIR
   `fontconvert_sdcard.py --intervals ...` or the custom-range field of the web
   font builder (https://crosspointreader.com/fonts)
 
-A ~500-glyph font is trivially small for the device; a new book only needs the
-charset re-emitted (and the font rebuilt) if it introduces new characters.
+With `--include-lists` the charset covers every character of every vocab-list
+word plus all tone-marked pinyin (currently 1224 chars) — the font then covers
+anything the pipeline can write at this level, not just the current books.
 Font source suggestion: Noto Sans SC / Noto Serif SC (OFL-licensed).
+
+### Building the font offline (what produced `workspace/CHARSET/fonts/`)
+
+The web builder needs a base font uploaded; this is the same thing headless:
+
+```bash
+pip install freetype-py fonttools
+curl -sSLO https://raw.githubusercontent.com/crosspoint-reader/crosspoint-reader/master/lib/EpdFont/scripts/fontconvert_sdcard.py
+curl -sSLO https://raw.githubusercontent.com/crosspoint-reader/crosspoint-reader/master/lib/EpdFont/scripts/cpfont_version.py
+curl -sSLo noto.otf      https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/SubsetOTF/SC/NotoSansSC-Regular.otf
+curl -sSLo noto-bold.otf https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/SubsetOTF/SC/NotoSansSC-Bold.otf
+
+# INTERVALS.txt -> the converter's (0xA-0xB),(0x20-0x7E),... syntax
+python3 -c "
+segs = open('INTERVALS.txt').read().strip().split(',')
+print(','.join(f'({a}-{b or a})' for a, _, b in (s.partition('-') for s in segs)))" > intervals_arg.txt
+
+python3 fontconvert_sdcard.py --intervals "$(cat intervals_arg.txt)" \
+    --sizes 12,14,16,18 --regular noto.otf --bold noto-bold.otf \
+    --name NotoSansSC-GradedReader --output-dir fonts/
+```
+
+Copy the resulting `.cpfont` files to `/fonts/` on the SD card (or upload via
+the web interface in File Transfer mode), then pick the font in Settings.
+Rebuild only when `charset.py` reports characters outside the current set.
 
 ## Ruby — still not confirmed under CrossPoint
 

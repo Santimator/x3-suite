@@ -66,14 +66,21 @@ def main(argv=None) -> int:
     ap.add_argument("books", nargs="+", type=Path, help="book directories (merged into one charset)")
     ap.add_argument("--out-dir", type=Path, default=None,
                     help="write CHARSET.txt + INTERVALS.txt here (default: first book's build/)")
+    ap.add_argument("--include-lists", action="store_true",
+                    help="also cover every character of every vocab-list word, so the font "
+                         "outlives the current books and covers anything the pipeline can write")
     args = ap.parse_args(argv)
 
-    vocab_mod.load_vocab()  # configures jieba for assemble()
+    v = vocab_mod.load_vocab()  # configures jieba for assemble()
 
     chars: Set[str] = set(string.printable)  # ASCII always; UI chrome needs it
     for book in args.books:
         chars.update(book_chars(book))
-    chars.discard("\n"); chars.discard("\r"); chars.discard("\t")
+    if args.include_lists:
+        chars.update(v.known_chars)
+        for e in v.entries.values():
+            chars.update(e.pinyin)  # tone-marked pinyin used in ruby + glossaries
+    chars = {c for c in chars if c.isprintable()}  # drop \n, \x0b, control chars
 
     han = sorted(c for c in chars if vocab_mod._is_han(c))
     rest = sorted(c for c in chars if not vocab_mod._is_han(c))
