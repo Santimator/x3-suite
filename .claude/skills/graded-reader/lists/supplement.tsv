@@ -1,0 +1,79 @@
+word	level	pinyin	gloss
+# High-frequency function / grammar words that the official word-based HSK
+# list omits but that any HSK 1-3 reader handles fluently: pronoun plurals,
+# demonstrative + measure combos, directional complements, common
+# conjunctions, and a few structural words. Kept separate from hsk.tsv so the
+# base list stays a faithful copy of the source and this layer is auditable.
+# Level "SUP" = supplement.
+一个	SUP	yí gè	one; a (number + generic measure word)
+这个	SUP	zhè ge	this; this one
+那个	SUP	nà ge	that; that one
+这些	SUP	zhè xiē	these
+那些	SUP	nà xiē	those
+这里	SUP	zhè lǐ	here
+那里	SUP	nà lǐ	there
+这儿	SUP	zhèr	here
+那儿	SUP	nàr	there
+这么	SUP	zhè me	so; this much; like this
+那么	SUP	nà me	then; in that case; so
+这样	SUP	zhè yàng	like this; this way
+那样	SUP	nà yàng	like that; that way
+他们	SUP	tā men	they; them (male or mixed)
+她们	SUP	tā men	they; them (female)
+它们	SUP	tā men	they; them (things/animals)
+你们	SUP	nǐ men	you (plural)
+咱们	SUP	zán men	we; us (including listener)
+一下	SUP	yí xià	(do something) briefly; once
+一些	SUP	yì xiē	some; a few
+一点	SUP	yì diǎn	a little; a bit
+一直	SUP	yì zhí	continuously; always; all along
+一定	SUP	yí dìng	certainly; definitely; must
+一样	SUP	yí yàng	the same; alike
+别的	SUP	bié de	other; another
+样子	SUP	yàng zi	appearance; look; manner
+里面	SUP	lǐ miàn	inside
+外面	SUP	wài miàn	outside
+出来	SUP	chū lái	to come out
+出去	SUP	chū qù	to go out
+进来	SUP	jìn lái	to come in
+进去	SUP	jìn qù	to go in
+起来	SUP	qǐ lái	to get up; (verb complement) to start
+过来	SUP	guò lái	to come over
+过去	SUP	guò qù	to go over; the past
+回来	SUP	huí lái	to come back
+回去	SUP	huí qù	to go back
+下来	SUP	xià lái	to come down
+上去	SUP	shàng qù	to go up
+就是	SUP	jiù shì	exactly; that is; is precisely
+还有	SUP	hái yǒu	also; in addition; and
+可是	SUP	kě shì	but; however
+因为	SUP	yīn wèi	because
+所以	SUP	suǒ yǐ	therefore; so
+但是	SUP	dàn shì	but; however
+如果	SUP	rú guǒ	if
+然后	SUP	rán hòu	afterwards; then
+而且	SUP	ér qiě	moreover; and
+或者	SUP	huò zhě	or
+为什么	SUP	wèi shén me	why
+怎么	SUP	zěn me	how
+什么	SUP	shén me	what
+多少	SUP	duō shǎo	how many; how much
+那边	SUP	nà biān	that side; over there
+这边	SUP	zhè biān	this side; over here
+上面	SUP	shàng miàn	above; on top
+下面	SUP	xià miàn	below; under
+前面	SUP	qián miàn	in front; ahead
+后面	SUP	hòu miàn	behind; at the back
+一块	SUP	yí kuài	a piece; a lump (measure word + 块)
+一座	SUP	yí zuò	a (measure word for mountains, buildings)
+一条	SUP	yì tiáo	a (measure word for long thin things)
+一只	SUP	yì zhī	a (measure word for animals)
+座	SUP	zuò	measure word for mountains, large buildings
+块	SUP	kuài	piece; lump; (measure word); yuan
+条	SUP	tiáo	measure word for long thin things; strip
+只	SUP	zhī	measure word for animals; single
+章	SUP	zhāng	chapter
+谁	SUP	shéi	who; whom
+越来越	SUP	yuè lái yuè	more and more
+没有	SUP	méi yǒu	to not have; there is not; (negates past action)
+很多	SUP	hěn duō	many; a lot; much
