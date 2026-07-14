@@ -31,11 +31,17 @@ rasterize an embedded TTF. Do not fatten the books; fix the device:
 1. **Flash CrossPoint** (supports X3 + X4): https://crosspointreader.com/ —
    web-flash from the browser; stock firmware can be restored later.
 2. **Install a CJK font on the SD card.** Options, best first:
-   - **Use the prebuilt fonts in `workspace/CHARSET/fonts/`** (recommended):
-     `NotoSansSC-GradedReader_{12,14,16,18}.cpfont` — Noto Sans SC
-     regular+bold subset to the full HSK 1-4 pipeline universe (1223 glyphs,
-     0.4–0.8 MB per size). Built with CrossPoint's own
-     `fontconvert_sdcard.py`; see "Building the font offline" below.
+   - **Use the prebuilt fonts in `workspace/CHARSET/fonts/`** (recommended).
+     Two families, both regular+bold, subset to the full HSK 1-4 pipeline
+     universe (1223 glyphs), built with CrossPoint's own
+     `fontconvert_sdcard.py` (see "Building the font offline" below):
+     - `LXGWWenKai-GradedReader_{12,14,16,18}.cpfont` — **霞鹜文楷 (LXGW
+       WenKai)**, the open-source kaiti: brush-written regular-script style
+       like HSK textbook typography, canonical handwritten stroke shapes,
+       the e-reader community's favorite for Chinese. SIL OFL 1.1.
+       0.35–0.73 MB per size. **Pick this one for reading.**
+     - `NotoSansSC-GradedReader_{12,14,16,18}.cpfont` — Noto Sans SC, a
+       clean print-style sans; crisper at very small sizes. OFL. Backup.
    - Grab a prebuilt full-CJK `.cpfont` from
      https://github.com/crosspoint-reader/crosspoint-fonts — works, but full
      CJK is 20k+ glyphs and the CJK fork warns big fonts can OOM the ESP32.
@@ -94,6 +100,27 @@ python3 fontconvert_sdcard.py --intervals "$(cat intervals_arg.txt)" \
 Copy the resulting `.cpfont` files to `/fonts/` on the SD card (or upload via
 the web interface in File Transfer mode), then pick the font in Settings.
 Rebuild only when `charset.py` reports characters outside the current set.
+
+The WenKai build is identical except for the sources: `LXGWWenKai-Regular.ttf`
++ `LXGWWenKai-Bold.ttf` as `--regular`/`--bold` with the Noto files as
+`--fallback-regular`/`--fallback-bold` (WenKai lacks exactly one of our
+glyphs, the ↩ back-link arrow — the fallback supplies it). When github.com
+is unreachable, the Ubuntu archive carries the TTFs as `fonts-lxgw-wenkai`
+(`apt-get download fonts-lxgw-wenkai && dpkg-deb -x ...`); upstream is
+https://github.com/lxgw/LxgwWenKai (releases).
+
+### Font style guide (which family for what)
+
+- **LXGW WenKai (楷体 style)** — the "pretty and readable" pick: models real
+  brush-written stroke order and shapes, the same typographic tradition HSK
+  textbooks use for body text. Best for learners: what you read is what you
+  should write.
+- **Noto Sans SC (black/sans style)** — sturdier at tiny sizes and for UI.
+- Other open kaiti/brush options if taste differs: TW-Kai (Taiwan MOE,
+  traditional-oriented), AR PL UKai (older, Arphic license), Ma Shan Zheng
+  (Google Fonts, true brush calligraphy — pretty but tiring for body text).
+  Making a font from scratch is a different hobby: ~1200 hand-drawn glyphs
+  even for our subset. Unnecessary — WenKai already is the thing.
 
 ## Ruby — still not confirmed under CrossPoint
 
