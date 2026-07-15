@@ -31,7 +31,9 @@ rasterize an embedded TTF. Do not fatten the books; fix the device:
 1. **Flash CrossPoint** (supports X3 + X4): https://crosspointreader.com/ —
    web-flash from the browser; stock firmware can be restored later.
 2. **Install a CJK font on the SD card.** Options, best first:
-   - **Use the prebuilt fonts in `workspace/CHARSET/fonts/`** (recommended).
+   - **Use the prebuilt fonts in `workspace/CHARSET/fonts/`** (recommended) —
+     the folder mirrors the SD layout (one subfolder per family), so copy the
+     whole `fonts/` folder to the SD card root as-is; see its README.
      Two families, both regular+bold, subset to the full HSK 1-4 pipeline
      universe (1223 glyphs), built with CrossPoint's own
      `fontconvert_sdcard.py` (see "Building the font offline" below):
@@ -65,7 +67,7 @@ rasterize an embedded TTF. Do not fatten the books; fix the device:
    re-implementing `SdCardFont::load()` against the files), so the remaining
    suspect is heap exhaustion on the ESP32-C3 while allocating the resident
    tables (intervals/advance/prewarm × styles). Use the lean variant in
-   `workspace/CHARSET/fonts-lite/` first:
+   `workspace/CHARSET/fonts/` first:
    `WenKaiHSK_{12,14,16,18}.cpfont` and `NotoHSK_...` — single style,
    books-only charset (533 glyphs, 71-155 KB/file), ~5× lighter resident
    footprint. Bold headings render in regular weight; acceptable trade.
