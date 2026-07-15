@@ -45,8 +45,13 @@ rasterize an embedded TTF. Do not fatten the books; fix the device:
    - Grab a prebuilt full-CJK `.cpfont` from
      https://github.com/crosspoint-reader/crosspoint-fonts — works, but full
      CJK is 20k+ glyphs and the CJK fork warns big fonts can OOM the ESP32.
-   - Fonts go to `/fonts/` (or `/.fonts/`) on the SD card, or upload via the
-     web interface in File Transfer mode; select under Settings → Fonts.
+   - Layout matters: the firmware scans `/fonts/` (or `/.fonts/`) for
+     **family folders** — loose `.cpfont` files are ignored. One folder per
+     family, size files inside:
+     `/fonts/LXGWWenKai-GradedReader/LXGWWenKai-GradedReader_12.cpfont` etc.
+     The scan runs **once at boot**, so power-cycle after copying. Fonts
+     then appear under **Settings → Reader → Font Family**. ("Manage Fonts"
+     is the WiFi download store — not needed for SD fonts.)
 
    **Note on the web font builder** (https://crosspointreader.com/fonts): it
    is a wrapper around the converter script and **requires you to upload a
@@ -97,8 +102,9 @@ python3 fontconvert_sdcard.py --intervals "$(cat intervals_arg.txt)" \
     --name NotoSansSC-GradedReader --output-dir fonts/
 ```
 
-Copy the resulting `.cpfont` files to `/fonts/` on the SD card (or upload via
-the web interface in File Transfer mode), then pick the font in Settings.
+Copy the resulting `.cpfont` files into a family folder on the SD card —
+`/fonts/<FontName>/<FontName>_SIZE.cpfont` — power-cycle the reader (fonts
+scan at boot), then pick the family under Settings → Reader → Font Family.
 Rebuild only when `charset.py` reports characters outside the current set.
 
 The WenKai build is identical except for the sources: `LXGWWenKai-Regular.ttf`
