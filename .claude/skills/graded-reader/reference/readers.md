@@ -57,6 +57,20 @@ rasterize an embedded TTF. Do not fatten the books; fix the device:
    is a wrapper around the converter script and **requires you to upload a
    base TTF/OTF yourself** — it ships no fonts. If you have nothing to feed
    it, use the offline build below (or the prebuilt files above) instead.
+
+   **If selecting the font "doesn't stick"** (books show no hanzi and the
+   setting reverts to a built-in Noto): the firmware clears
+   `sdFontFamilyName` whenever `loadFamily()` fails at book-open time. Our
+   full fonts pass every *structural* check in the 1.4.x parser (verified by
+   re-implementing `SdCardFont::load()` against the files), so the remaining
+   suspect is heap exhaustion on the ESP32-C3 while allocating the resident
+   tables (intervals/advance/prewarm × styles). Use the lean variant in
+   `workspace/CHARSET/fonts-lite/` first:
+   `WenKaiHSK_{12,14,16,18}.cpfont` and `NotoHSK_...` — single style,
+   books-only charset (533 glyphs, 71-155 KB/file), ~5× lighter resident
+   footprint. Bold headings render in regular weight; acceptable trade.
+   Note the official crosspoint-fonts catalog ships **no CJK family at
+   all** — CJK on this device is community-pioneer territory.
 3. **Re-run the diagnostic EPUB** (below) to pick the pinyin mode — ruby
    support under CrossPoint is still unconfirmed; `interlinear` is the likely
    winner, `plain` the safe floor.
