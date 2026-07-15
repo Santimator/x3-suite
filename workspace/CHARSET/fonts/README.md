@@ -1,20 +1,40 @@
 # CrossPoint SD-card fonts — copy this `fonts/` folder to the SD card root
 
-The layout below is exactly what CrossPoint expects
+Layout is exactly what CrossPoint expects
 (`/fonts/<Family>/<Family>_<size>.cpfont`, scanned once at boot — power-cycle
-the reader after copying). Pick the family under **Settings → Reader → Font
-Family**. "Manage Fonts" is the WiFi download store; not needed for these.
+after copying). Select under **Settings → Reader → Font Family**. "Manage
+Fonts" is the WiFi download store; not needed for these.
 
-| Family | Style | Glyphs | Size/file | Notes |
-|---|---|---|---|---|
-| `WenKaiHSK` | kaiti (LXGW WenKai) | 533 (current books) | 71–140 KB | **Try first** — lightest, HSK-textbook look |
-| `NotoHSK` | sans (Noto Sans SC) | 533 (current books) | 80–155 KB | Light backup |
-| `LXGWWenKai-GradedReader` | kaiti, regular+bold | 1223 (full HSK 1-4) | 0.35–0.73 MB | Covers any future book; may exceed X3 RAM |
-| `NotoSansSC-GradedReader` | sans, regular+bold | 1223 (full HSK 1-4) | 0.4–0.8 MB | Same, sans |
+## Latin (reading — these are known to work on the X3)
 
-If a family "won't stick" (selection reverts to built-in Noto), the firmware
-failed to load it at book-open — try a lighter family. Build details and
-troubleshooting: `.claude/skills/graded-reader/reference/readers.md`.
+| Family | Style | Look |
+|---|---|---|
+| `EBGaramond` | classical serif, reg+bold+italic | Warm Garamond book face — softer, more organic than the built-in Noto. **Try for Latin reading.** |
+| `ZLatinTest` | Noto Sans, single style | Plain control font (see diagnostics below) |
 
-Sources: LXGW WenKai (SIL OFL 1.1), Noto Sans SC (SIL OFL 1.1). Subsets built
+## Chinese (CJK — still being debugged on the X3, see readers.md)
+
+| Family | Coverage | Note |
+|---|---|---|
+| `ZhTest` | letter-writer book only | Minimal CJK control — open 写信的老人 |
+| `WenKaiHSK` | current books (533 glyphs) | kaiti, light |
+| `NotoHSK` | current books (533 glyphs) | sans, light |
+| `LXGWWenKai-GradedReader` | full HSK 1-4 (1223) | kaiti, reg+bold |
+| `NotoSansSC-GradedReader` | full HSK 1-4 (1223) | sans, reg+bold |
+
+## If Chinese fonts don't render (selection reverts to Noto)
+
+This is an open problem — mainline CrossPoint ships **zero** CJK fonts and
+CJK on the X3 is unvalidated. Diagnose in order:
+
+1. **`ZLatinTest`** → open any English book. If it renders and sticks, SD
+   fonts work → the issue is CJK-specific. If it *also* reverts, the whole
+   SD-font path is broken (reflash / different SD card).
+2. **`ZhTest`** → open 写信的老人. If English works but this reverts, it's a
+   CJK render-path bug worth filing upstream.
+
+Full analysis, firmware findings, and build recipe:
+`.claude/skills/graded-reader/reference/readers.md`.
+
+Sources: EB Garamond, LXGW WenKai, Noto Sans SC — all SIL OFL. Subsets built
 with CrossPoint's own `fontconvert_sdcard.py`.

@@ -22,6 +22,45 @@ CrossPoint's user guide confirms the same for its defaults: built-in fonts
 cover Latin/Cyrillic/Vietnamese, and **CJK is explicitly unsupported until you
 install a custom SD-card font**.
 
+## OPEN PROBLEM (2026-07): CJK SD fonts don't render on CrossPoint X3
+
+After flashing CrossPoint 1.4.1, our CJK `.cpfont` fonts are discovered and
+selectable, but opening a book shows no hanzi and the font setting **reverts to
+built-in Noto**. Investigated deeply — findings, so the next person doesn't
+repeat the dead ends:
+
+- **Not a file-format problem.** Firmware 1.4.1 expects `CPFONT_VERSION 4`; our
+  files are v4, magic matches. `SdCardFont::load()` is byte-identical in 1.4.0
+  and 1.4.1; re-implementing its every check in Python, our files pass all of
+  them (header, style TOC, all interval-table validations, path/name buffers).
+- **Not a memory-at-load problem.** `load()` allocates almost nothing (kern=0,
+  ligatures=0, one small interval table); the big buffers are in `prewarm()` at
+  *render* time. The lite single-style 71 KB build reverts too — ruling size out.
+- **Nobody has done it.** Mainline's font catalog (`sd-fonts.yaml`) is 21
+  families, **all Latin — zero CJK**. "Viable CJK rendering" (1.3.0 notes) was a
+  capability claim, never a shipped/validated font. There is **no known-working
+  CJK `.cpfont` in existence** to compare against.
+- **The CJK fork can't help.** `crosspoint-reader-cjk` has a real CJK font
+  system (`.bin` fonts, LRU cache) but its `platformio.ini` symlinks an
+  `open-x4-sdk` for all hardware drivers — it's built for **X4 hardware** and
+  would break an X3's display/input. Same chip, different board.
+
+**Isolation experiment (ship these two control fonts):**
+- `ZLatinTest` (Latin-only) → open any English book. Renders + sticks ⇒ SD
+  fonts work, so the failure is *CJK-specific* (render/layout path with
+  high/multibyte codepoints) — worth an upstream issue with the above evidence.
+  Reverts too ⇒ the whole SD-font subsystem is broken on this unit (reflash, or
+  a different/reformatted SD card).
+- `ZhTest` (CJK, one book's charset) → open 写信的老人, to confirm the CJK-vs-Latin split.
+
+**Bottom line:** proper CJK reading on the X3 is currently unproven in either
+firmware. Realistic options: (a) run the isolation test and, if it's a
+CJK-specific bug, file it upstream; (b) read Chinese on the **stock firmware**
+(it's a Chinese-market device — likely has a CJK font; test a plain, non-ruby
+EPUB); (c) accept Latin-only on CrossPoint for now (Garamond below); (d) use a
+different reader for Chinese. See the fresh device test needed in "How to
+settle ruby".
+
 ## The fix is reader-side (books are fine)
 
 Embedding a font in the EPUB (`@font-face`) will NOT help on this class of
