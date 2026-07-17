@@ -12,8 +12,11 @@ description: >-
 
 Recover a *document* from a *page description*. PDFs only say where ink goes;
 EPUB needs to know what the text is (paragraphs, chapters, a nav). The
-pipeline follows the suite mindset: deterministic scripts measure, transform,
-assemble, and gate; LLM roles make the judgment calls on ambiguous input.
+pipeline is **deterministic-first, agent-on-error**: the happy path is pure
+scripts (extract → restore → build); the agent orchestrates, verifies
+completeness, and diagnoses failures — and when it intervenes it emits
+*decisions* (a route, a policy switch, an anchor) that scripts apply, never
+bulk text. Every byte in the EPUB traces back to the extraction.
 Full design rationale + open questions: [`DESIGN.md`](DESIGN.md).
 
 **Status: stage 0 (triage) implemented; stages 1–5 designed, pending
@@ -62,16 +65,20 @@ subsetting, and device lore in `reference/readers.md` (repo root) are shared.
    tesseract (lang from triage) or vision-model transcription. Never edits,
    only extracts.
 
-2. **Restore** (LLM role *restorer* + deterministic gate, planned) — turn raw
-   page text into clean prose: reflow paragraphs across page breaks,
-   dehyphenate, drop furniture, normalize punctuation, preserve deliberate
-   line breaks (verse/drama). Gated by a fidelity check (length ratio +
-   n-gram containment vs the raw extraction) so the model can't silently
-   drop or invent text; failures rework, like `validate.py` in graded-reader.
+2. **Restore** (deterministic `restore.py` driven by `policy.json`, planned)
+   — reflow paragraphs across page breaks, dehyphenate, drop furniture,
+   normalize punctuation, preserve deliberate line breaks (verse/drama), all
+   as mechanical transforms configured by a policy file. The agent *verifies*
+   the result on samples; on failure it diagnoses, edits the policy (e.g.
+   flips a block to `verse`, adds a normalization entry), and re-runs.
+   Span-scoped model patches are the last resort, gated by a fidelity check
+   (length ratio + n-gram containment vs the raw extraction) and logged.
 
-3. **Structure** (LLM role *architect* + gate, planned) — infer title,
-   author, chapter boundaries from font-size signals + content; emit
-   `book.json` + `chapters/*.md`. Gate: every source paragraph accounted for.
+3. **Structure** (agent decisions applied by script, planned) — the agent
+   proposes title, author, and chapter boundaries as *anchors* (page/line
+   refs plus strings that must exist verbatim in the text); a script
+   validates the anchors and cuts `book.json` + `chapters/*.md`. Gate: every
+   source paragraph lands in exactly one chapter.
 
 4. **Build** (deterministic, planned) — generalized sibling of
    graded-reader's `build_epub.py`: X3-friendly EPUB (simple CSS, no
