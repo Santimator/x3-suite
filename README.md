@@ -70,7 +70,9 @@ verifies — confirming routes, diagnosing failures, and emitting decisions
 generates: every byte in the EPUB traces back to the extraction.
 
 Docs: [`.claude/skills/pdf2epub/SKILL.md`](.claude/skills/pdf2epub/SKILL.md) ·
-design + open questions: [`DESIGN.md`](.claude/skills/pdf2epub/DESIGN.md)
+design + open questions: [`DESIGN.md`](.claude/skills/pdf2epub/DESIGN.md) ·
+implementation plan for the remaining stages:
+[`BUILD_INSTRUCTIONS.md`](BUILD_INSTRUCTIONS.md)
 
 ```bash
 .venv/bin/pip install -r .claude/skills/pdf2epub/requirements.txt
