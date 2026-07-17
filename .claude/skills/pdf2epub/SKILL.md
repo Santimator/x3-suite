@@ -19,10 +19,10 @@ completeness, and diagnoses failures — and when it intervenes it emits
 bulk text. Every byte in the EPUB traces back to the extraction.
 Full design rationale + open questions: [`DESIGN.md`](DESIGN.md).
 
-**Status: stages 0-2, 4, and 5 (triage, extract toolbox, restore, prepare,
-build incl. FORMAT.md extensions) implemented; stage 3 (draft) is always the
-agent, by design; stage 6 (verify) is specified for implementation in
-`BUILD_INSTRUCTIONS.md` at the repo root.**
+**Status: stages 0-2 and 4-6 (triage, extract toolbox, restore, prepare,
+build incl. FORMAT.md extensions, verify) implemented; stage 3 (draft) is
+always the agent, by design. `selftest.py` and a real conversion of the
+test fixture remain — see `BUILD_INSTRUCTIONS.md` at the repo root.**
 
 ## Workspace convention
 
@@ -190,8 +190,18 @@ graded-reader.
    images, endnotes, emphasis, cover) are implemented on the un-annotated
    path; the annotated (graded-reader) path is untouched and frozen.
 
-6. **Verify** (deterministic, planned) — EPUB integrity + coverage report
-   (source text in vs. text out, per chapter).
+6. **Verify** (deterministic `verify.py`, implemented) — EPUB integrity
+   (mimetype first/stored, manifest ⇄ zip parity, every href/fragment
+   resolves, every XHTML/OPF entry well-formed) plus a coverage report:
+   strip tags from the spine, run it through the same fidelity gate
+   restore.py uses against `restore/restored.md`. Exits 1 on any failure —
+   the last check in the pipeline, catching what prepare.py or the builder
+   silently dropped.
+
+   ```bash
+   .venv/bin/python .claude/skills/pdf2epub/scripts/verify.py \
+       workspace/<slug> --epub workspace/<slug>/build/<slug>.epub
+   ```
 
 ## Setup
 
