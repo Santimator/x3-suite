@@ -1,0 +1,15 @@
+{
+  "furniture": [
+    "^Prefiero que me quite el sueño Goya a que lo haga$",
+    "^cualquier hijo de puta$",
+    "^La Carniceria Teatro$",
+    "^Texto y Dirección: Rodrigo García$"
+  ],
+  "page_ranges": [
+    {"pages": "1-18", "treat": "body"}
+  ],
+  "reflow": "sentence",
+  "normalize": {"‚": ","},
+  "dehyphenate": true,
+  "dehyphenate_exceptions": []
+}

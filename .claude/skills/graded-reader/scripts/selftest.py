@@ -56,7 +56,10 @@ def main() -> int:
         all_ok &= check(f"{token} -> {want}", got == want, f"got {got}")
 
     print("2. workspace books pass their gates")
-    books = sorted(p.parent for p in WORKSPACE.glob("*/book.json"))
+    # plan.json is graded-reader's own workspace convention; other suite
+    # tasks (pdf2epub) also drop a book.json under workspace/<slug>/, so
+    # its presence alone doesn't mean "graded-reader book".
+    books = sorted(p.parent for p in WORKSPACE.glob("*/book.json") if (p.parent / "plan.json").exists())
     if not books:
         all_ok &= check("found workspace books", False, "none found")
     for book in books:
