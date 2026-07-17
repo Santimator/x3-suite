@@ -1,0 +1,7 @@
+# Stage 0-1 (triage + text-route extraction)
+pdfplumber
+pypdf
+
+# OCR route (optional until needed):
+#   system: tesseract-ocr, tesseract-ocr-spa (or the source language), poppler-utils
+#   pip: pytesseract pdf2image
