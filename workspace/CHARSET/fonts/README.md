@@ -34,7 +34,7 @@ CJK on the X3 is unvalidated. Diagnose in order:
    CJK render-path bug worth filing upstream.
 
 Full analysis, firmware findings, and build recipe:
-`.claude/skills/graded-reader/reference/readers.md`.
+`reference/readers.md` (repo root — shared device notes for the whole suite).
 
 Sources: EB Garamond, LXGW WenKai, Noto Sans SC — all SIL OFL. Subsets built
 with CrossPoint's own `fontconvert_sdcard.py`.

@@ -220,7 +220,8 @@ def main(argv=None) -> int:
     if completed and not args.no_epub and not args.dry_run:
         out = book / "build" / f"{book.name}.epub"
         print(f"\n=== assembling EPUB ===")
-        run_script([str(SCRIPTS / "build_epub.py"), str(book), "--out", str(out),
+        builder = SCRIPTS.parents[1] / "epub-builder" / "scripts" / "build_epub.py"
+        run_script([str(builder), str(book), "--out", str(out),
                     "--pinyin-mode", "interlinear"])
     print("\ndone.")
     return 0
