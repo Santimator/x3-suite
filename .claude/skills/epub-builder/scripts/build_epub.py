@@ -41,10 +41,23 @@ import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import vocab as vocab_mod  # noqa: E402
+# Pinyin annotation lives in the graded-reader task; the builder only pulls it
+# in (jieba + pypinyin) when a book actually asks for a pinyin mode. Generic
+# books (e.g. pdf2epub output) build with no CJK dependencies at all.
+_GRADED_READER_SCRIPTS = Path(__file__).resolve().parents[2] / "graded-reader" / "scripts"
+_vocab_mod = None
 
-MODES = ("ruby", "interlinear", "plain")
+
+def vocab():
+    global _vocab_mod
+    if _vocab_mod is None:
+        sys.path.insert(0, str(_GRADED_READER_SCRIPTS))
+        import vocab as vocab_mod  # noqa: E402
+        _vocab_mod = vocab_mod
+    return _vocab_mod
+
+
+MODES = ("ruby", "interlinear", "plain")  # pinyin modes; None = no annotation
 
 
 # --------------------------------------------------------------------------- #
@@ -63,10 +76,10 @@ def char_pinyin(word: str) -> List[Tuple[str, str]]:
     # pypinyin groups by character for Han; lengths line up for CJK text.
     if len(sylls) == len(word):
         for ch, s in zip(word, sylls):
-            out.append((ch, s[0] if vocab_mod._is_han(ch) else ""))
+            out.append((ch, s[0] if vocab()._is_han(ch) else ""))
     else:  # safety net: annotate Han chars individually
         for ch in word:
-            if vocab_mod._is_han(ch):
+            if vocab()._is_han(ch):
                 out.append((ch, pinyin(ch, style=Style.TONE)[0][0]))
             else:
                 out.append((ch, ""))
@@ -75,7 +88,7 @@ def char_pinyin(word: str) -> List[Tuple[str, str]]:
 
 def render_word(word: str, mode: str) -> str:
     """Render one segmented word as annotated XHTML for the given mode."""
-    if not any(vocab_mod._is_han(c) for c in word):
+    if not any(vocab()._is_han(c) for c in word):
         return html.escape(word)
 
     pairs = char_pinyin(word)
@@ -110,8 +123,14 @@ def render_paragraph(text: str, mode: str, link_ctx: Optional[Tuple] = None) -> 
     link_ctx = (prefix, link_map, linked): link_map maps a glossary word to its
     row index; `linked` is a shared mutable set so only the FIRST occurrence in
     the chapter becomes a link (matches the gloss-once policy).
+
+    mode None = no annotation: plain escaped text, no segmentation, no CJK
+    dependencies. Glossary links need segmentation, so they only apply in
+    annotated modes.
     """
-    words = vocab_mod.segment(text)
+    if mode is None:
+        return html.escape(text)
+    words = vocab().segment(text)
     parts: List[str] = []
     for w in words:
         rendered = render_word(w, mode)
@@ -264,16 +283,22 @@ def build_nav(title: str, lang: str, chapters: List[Dict]) -> str:
 
 def write_epub(out: Path, title: str, author: str, lang: str, chapters: List[Dict]) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
+
+    # Fixed zip mtimes (matching dcterms:modified) so identical sources really
+    # do build byte-identical epubs — writestr's default stamps wall-clock time.
+    def entry(name: str) -> zipfile.ZipInfo:
+        return zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
+
     with zipfile.ZipFile(out, "w") as z:
         # mimetype MUST be first and stored (uncompressed)
-        z.writestr("mimetype", "application/epub+zip", compress_type=zipfile.ZIP_STORED)
-        z.writestr("META-INF/container.xml", CONTAINER_XML, compress_type=zipfile.ZIP_DEFLATED)
-        z.writestr("OEBPS/style.css", CSS, compress_type=zipfile.ZIP_DEFLATED)
-        z.writestr("OEBPS/content.opf", build_opf(title, author, lang, chapters), compress_type=zipfile.ZIP_DEFLATED)
-        z.writestr("OEBPS/nav.xhtml", build_nav(title, lang, chapters), compress_type=zipfile.ZIP_DEFLATED)
+        z.writestr(entry("mimetype"), "application/epub+zip", compress_type=zipfile.ZIP_STORED)
+        z.writestr(entry("META-INF/container.xml"), CONTAINER_XML, compress_type=zipfile.ZIP_DEFLATED)
+        z.writestr(entry("OEBPS/style.css"), CSS, compress_type=zipfile.ZIP_DEFLATED)
+        z.writestr(entry("OEBPS/content.opf"), build_opf(title, author, lang, chapters), compress_type=zipfile.ZIP_DEFLATED)
+        z.writestr(entry("OEBPS/nav.xhtml"), build_nav(title, lang, chapters), compress_type=zipfile.ZIP_DEFLATED)
         for ch in chapters:
             xhtml = XHTML_TMPL.format(lang=lang, title=html.escape(ch["title"]), body=ch["body"])
-            z.writestr("OEBPS/" + ch["file"], xhtml, compress_type=zipfile.ZIP_DEFLATED)
+            z.writestr(entry("OEBPS/" + ch["file"]), xhtml, compress_type=zipfile.ZIP_DEFLATED)
 
 
 # --------------------------------------------------------------------------- #
@@ -338,26 +363,31 @@ def assemble_diagnostic(book_dir: Path) -> Tuple[List[Dict], Dict]:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Assemble a pinyin-annotated EPUB by hand.")
+    ap = argparse.ArgumentParser(description="Assemble an EPUB from the common book format (see FORMAT.md).")
     ap.add_argument("book_dir", type=Path, help="book directory containing book.json")
     ap.add_argument("--out", type=Path, required=True, help="output .epub path")
     ap.add_argument("--pinyin-mode", choices=MODES, default=None, help="override book.json pinyin_mode")
-    ap.add_argument("--diagnostic", action="store_true", help="emit one epub with all three modes (X3 render test)")
-    ap.add_argument("--lists", type=Path, default=vocab_mod.LISTS_DIR, help="lists directory")
+    ap.add_argument("--diagnostic", action="store_true", help="emit one epub with all three pinyin modes (X3 render test)")
+    ap.add_argument("--lists", type=Path, default=None, help="vocab lists directory (annotated books only)")
     args = ap.parse_args(argv)
 
-    vocab_mod.load_vocab(args.lists)  # configures jieba segmenter
+    meta_peek = json.loads((args.book_dir / "book.json").read_text(encoding="utf-8"))
+    # Annotation is opt-in: book.json carries pinyin_mode (or the CLI forces
+    # one). Books without it build plain — and never import jieba/pypinyin.
+    mode = args.pinyin_mode or meta_peek.get("pinyin_mode")
+
+    if mode is not None or args.diagnostic:
+        vocab().load_vocab(args.lists or vocab().LISTS_DIR)  # configures jieba segmenter
 
     if args.diagnostic:
         chapters, meta = assemble_diagnostic(args.book_dir)
         title = meta.get("title", "Book") + " — pinyin render test"
     else:
-        mode = args.pinyin_mode or json.loads((args.book_dir / "book.json").read_text(encoding="utf-8")).get("pinyin_mode", "interlinear")
         chapters, meta = assemble(args.book_dir, mode)
         title = meta.get("title", "Book")
 
-    write_epub(args.out, title, meta.get("author", "Graded Reader Pipeline"), meta.get("language", "zh-CN"), chapters)
-    print(f"wrote {args.out}  ({len(chapters)} sections, {'diagnostic' if args.diagnostic else args.pinyin_mode or meta.get('pinyin_mode','interlinear')})")
+    write_epub(args.out, title, meta.get("author", ""), meta.get("language", "en"), chapters)
+    print(f"wrote {args.out}  ({len(chapters)} sections, {'diagnostic' if args.diagnostic else mode or 'plain (no annotation)'})")
     return 0
 
 
