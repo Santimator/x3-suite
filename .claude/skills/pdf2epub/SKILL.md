@@ -20,9 +20,9 @@ bulk text. Every byte in the EPUB traces back to the extraction.
 Full design rationale + open questions: [`DESIGN.md`](DESIGN.md).
 
 **Status: stages 0-2 and 4-6 (triage, extract toolbox, restore, prepare,
-build incl. FORMAT.md extensions, verify) implemented; stage 3 (draft) is
-always the agent, by design. `selftest.py` and a real conversion of the
-test fixture remain — see `BUILD_INSTRUCTIONS.md` at the repo root.**
+build incl. FORMAT.md extensions, verify) implemented, plus `selftest.py`;
+stage 3 (draft) is always the agent, by design. A real conversion of the
+test fixture remains — see `BUILD_INSTRUCTIONS.md` at the repo root.**
 
 ## Workspace convention
 
@@ -210,10 +210,28 @@ python3 -m venv .venv
 .venv/bin/pip install -r .claude/skills/pdf2epub/requirements.txt
 ```
 
+## Self-test
+
+```bash
+.venv/bin/python .claude/skills/pdf2epub/scripts/selftest.py
+```
+
+No network, no LLM. Runs the full chain (triage → extract_text → restore →
+prepare → build → verify) on the test fixture into a temp directory, using
+its committed `policy.json`/`draft.json`, plus the OCR roundtrip from
+`extract_ocr.py`'s own check (skipped with a notice if `tesseract` isn't
+installed). Run this after changing any pdf2epub script. Changes under
+`epub-builder/` also require
+`.venv/bin/python .claude/skills/graded-reader/scripts/selftest.py` to
+PASS and a clean content-diff of `workspace/yugong-mountain` — see
+`BUILD_INSTRUCTIONS.md`'s ground rules.
+
 ## Test fixture
 
 `workspace/goya-sueno/source.pdf` — *Prefiero que me quite el sueño Goya a
 que lo haga cualquier hijo de puta* (Rodrigo García / La Carnicería Teatro),
 18 pages, Spanish theatre monologue. Deliberately pathological: every glyph
-double-drawn (fake bold), scrambled subset font names, verse-like line
-breaks that must NOT be reflowed. Triage output lives next to it.
+double-drawn (fake bold), scrambled subset font names, no geometric
+paragraph signal (uniform line gaps, no indents) — paragraph boundaries are
+recoverable only from terminal punctuation, so `reflow: sentence` is the
+correct policy, not `verse`. Triage output lives next to it.
