@@ -1,10 +1,11 @@
 # The common book format — the builder's input contract
 
-Every tool in the suite converges on this format; the EPUB builder consumes
-it and nothing else. **This is the contract the orchestrating agent targets**
-when it prepares a book — if it's not described here, the builder doesn't
-support it. graded-reader's `build_epub.py` implements the core today; the
-"pdf2epub extensions" are the agreed target for the generalized builder.
+Every task in the suite converges on this format; the builder
+(`scripts/build_epub.py` in this skill) consumes it and nothing else.
+**This is the contract the orchestrating agent targets** when it prepares a
+book — if it's not described here, the builder doesn't support it. The core
+is implemented today; the "pdf2epub extensions" are the agreed target for
+the builder to grow into.
 
 ## Layout
 
@@ -65,5 +66,5 @@ book.json gains optional fields:
 - `"toc_depth": 1` — flat TOC only for now; the X3 UI is shallow.
 
 Anything else a conversion wants must be proposed here first — the builder
-stays deliberately small, and the device (see `readers.md`) rewards it:
-simple CSS, no embedded fonts, lean files.
+stays deliberately small, and the device (see `reference/readers.md` at the
+repo root) rewards it: simple CSS, no embedded fonts, lean files.

@@ -29,6 +29,8 @@ from pathlib import Path
 from typing import List, Set
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# the EPUB builder is suite-shared infrastructure, not a graded-reader script
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "epub-builder" / "scripts"))
 import build_epub  # noqa: E402
 import vocab as vocab_mod  # noqa: E402
 

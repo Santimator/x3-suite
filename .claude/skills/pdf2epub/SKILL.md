@@ -43,10 +43,11 @@ workspace/<slug>/
 ```
 
 Converted books converge on the suite's common book format — **documented in
-`reference/book-format.md` (repo root); that spec is the builder's input
-contract and the agent must know it when drafting** — so the EPUB builder,
-`charset.py` font subsetting, and device lore in `reference/readers.md` are
-shared with graded-reader.
+the epub-builder skill's contract,
+[`.claude/skills/epub-builder/FORMAT.md`](../epub-builder/FORMAT.md); the
+agent must know it when drafting** — so the EPUB builder, `charset.py` font
+subsetting, and device lore in `reference/readers.md` are shared with
+graded-reader.
 
 ## Stages
 
@@ -90,13 +91,13 @@ shared with graded-reader.
 4. **Prepare** (deterministic `prepare.py`, planned) — validate the draft
    (anchors exist, image refs resolve, every paragraph lands in exactly one
    chapter), then cut `chapters/*.md` + `book.json` and resize/grayscale
-   images to device spec — emitting exactly the format
-   `reference/book-format.md` specifies.
+   images to device spec — emitting exactly the format the epub-builder
+   skill's `FORMAT.md` specifies.
 
-5. **Build** (deterministic, planned) — generalized sibling of
-   graded-reader's `build_epub.py`, consuming the book-format contract:
-   X3-friendly EPUB (simple CSS, no embedded fonts — see
-   `reference/readers.md`).
+5. **Build** (deterministic, exists) — the suite-shared **epub-builder**
+   skill (`.claude/skills/epub-builder/`): X3-friendly EPUB, no CJK
+   dependencies for generic books. The FORMAT.md extensions (verse blocks,
+   images, endnotes) still need implementing there.
 
 6. **Verify** (deterministic, planned) — EPUB integrity + coverage report
    (source text in vs. text out, per chapter).

@@ -10,12 +10,30 @@ folder. One mindset across all of them:
 > measure, validate, track state, and assemble — they never invent. Trust
 > comes from the gates, not the model.
 
-Each tool is a Claude Code skill under `.claude/skills/`; its `SKILL.md` is
-the orchestrator and canonical documentation. Tools converge on a **common
-book format** — `chapters/*.md + book.json` in a `workspace/<slug>/` folder —
-so EPUB building, font subsetting, and device knowledge are shared.
+The suite splits into **tasks** and **infrastructure**, each a Claude Code
+skill under `.claude/skills/` whose `SKILL.md` is its canonical
+documentation. Tasks (graded-reader, pdf2epub) own their steps and tools;
+they all converge on the **common book format** — `chapters/*.md +
+book.json` in a `workspace/<slug>/` folder — which the shared
+**epub-builder** consumes.
 
-## Tools
+## Infrastructure
+
+### epub-builder — the shared EPUB builder
+
+One builder for every task, hand-built XHTML/OPF, deterministic output
+(same source → byte-identical EPUB). Its input contract — what tasks are
+allowed to hand it — is
+[`.claude/skills/epub-builder/FORMAT.md`](.claude/skills/epub-builder/FORMAT.md).
+Pinyin annotation is an opt-in feature (`pinyin_mode` in book.json); generic
+books build with zero CJK dependencies.
+
+```bash
+.venv/bin/python .claude/skills/epub-builder/scripts/build_epub.py \
+    workspace/<slug> --out workspace/<slug>/build/<slug>.epub
+```
+
+## Tasks
 
 ### graded-reader — generate Chinese graded readers *(working)*
 
@@ -33,9 +51,8 @@ python3 -m venv .venv
 S=.claude/skills/graded-reader/scripts
 
 .venv/bin/python $S/validate.py workspace/twelve-zodiac       # grade a book
-.venv/bin/python $S/build_epub.py workspace/twelve-zodiac \
-    --out workspace/twelve-zodiac/build/book.epub --pinyin-mode ruby
 .venv/bin/python $S/selftest.py                               # full pipeline check
+# EPUB assembly: the shared epub-builder (see Infrastructure above)
 ```
 
 Two drivers: Claude Code interactively, or the headless `run_book.py` against
@@ -67,9 +84,6 @@ a deliberately pathological text layer (fake-bold double-drawn glyphs).
 ## Shared ground
 
 ```
-reference/book-format.md  the common book format (book.json + chapters/*.md +
-                          images/) — the EPUB builder's input contract that
-                          every tool targets
 reference/readers.md    Xteink X3 / CrossPoint device notes: fonts, CJK saga,
                         ruby support, SD-card font layout — read before
                         touching anything device-facing
