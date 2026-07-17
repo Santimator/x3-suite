@@ -19,13 +19,14 @@ completeness, and diagnoses failures — and when it intervenes it emits
 bulk text. Every byte in the EPUB traces back to the extraction.
 Full design rationale + open questions: [`DESIGN.md`](DESIGN.md).
 
-**Status: stage 0 (triage) implemented; stage 1 toolbox partially implemented
-(`extract_text.py`, `render_pages.py`); stage 5 (build) exists as the shared
-epub-builder skill; the rest is specified for implementation in
-`BUILD_INSTRUCTIONS.md` at the repo root.** Until the remaining scripts
-exist, Claude Code performs those stages manually following the stage
-contracts below — that's the point of the design: each stage has a file
-interface, so a human, a model, or a script can fill any slot.
+**Status: stage 0 (triage) implemented; stage 1 toolbox implemented
+(`extract_text.py`, `render_pages.py`, `extract_ocr.py`); stage 5 (build)
+exists as the shared epub-builder skill; the rest is specified for
+implementation in `BUILD_INSTRUCTIONS.md` at the repo root.** Until the
+remaining scripts exist, Claude Code performs those stages manually
+following the stage contracts below — that's the point of the design: each
+stage has a file interface, so a human, a model, or a script can fill any
+slot.
 
 ## Workspace convention
 
@@ -68,14 +69,15 @@ graded-reader.
    orchestrating model reads the summary + sample pages and confirms the
    route.
 
-1. **Extract** (toolbox, `extract_text.py` + `render_pages.py` implemented;
-   `extract_ocr.py` planned) — parameterized deterministic tools the
-   agent picks between and re-runs: `extract_text.py` (pdfplumber;
+1. **Extract** (toolbox, implemented) — parameterized deterministic tools
+   the agent picks between and re-runs: `extract_text.py` (pdfplumber;
    `--dedupe`, `--pages`), `extract_ocr.py` (tesseract;
    `--lang`, `--dpi`, `--psm`), `render_pages.py` (page images, for the
    agent's own eyes or last-resort vision transcription). Per-page
    composable for HYBRID books. Tools never edit, only extract; the agent
    verifies output and reconsiders tool or parameters on failure.
+   `extract_ocr.py` degrades gracefully (exit 1, one-line hint) when the
+   `tesseract` binary or `pytesseract` module is absent — never auto-installs.
 
 2. **Restore** (deterministic `restore.py` driven by `policy.json`, planned)
    — reflow paragraphs across page breaks, dehyphenate, drop furniture,

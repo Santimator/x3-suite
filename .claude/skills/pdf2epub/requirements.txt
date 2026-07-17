@@ -2,6 +2,10 @@
 pdfplumber
 pypdf
 
-# OCR route (optional until needed):
-#   system: tesseract-ocr, tesseract-ocr-spa (or the source language), poppler-utils
-#   pip: pytesseract pdf2image
+# Stage 1 (page rendering: the agent's eyes, and OCR's input)
+pypdfium2
+Pillow
+
+# Stage 1 (OCR route). Needs the system tesseract binary too:
+#   apt install tesseract-ocr tesseract-ocr-spa  (or the source language)
+pytesseract
