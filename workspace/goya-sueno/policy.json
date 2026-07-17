@@ -6,7 +6,23 @@
     "^Texto y Dirección: Rodrigo García$"
   ],
   "page_ranges": [
-    {"pages": "1-18", "treat": "body"}
+    {
+      "start_anchor": "Prefiero que me quite el sueño Goya a que lo haga",
+      "end_anchor": "cualquier hijo de puta.",
+      "end_anchor_occurrence": 2,
+      "treat": "body"
+    },
+    {
+      "start_anchor": "Y cavo profundo en mi",
+      "end_anchor": "Cavando",
+      "treat": "body",
+      "reflow": "verse"
+    },
+    {
+      "start_anchor": "Y el Peter Sloterdijk dice: ¡Qué idea cojonuda! ¡Yo también quiero",
+      "end_anchor": "2004",
+      "treat": "body"
+    }
   ],
   "reflow": "sentence",
   "normalize": {"‚": ","},

@@ -19,10 +19,11 @@ completeness, and diagnoses failures — and when it intervenes it emits
 bulk text. Every byte in the EPUB traces back to the extraction.
 Full design rationale + open questions: [`DESIGN.md`](DESIGN.md).
 
-**Status: stages 0-2 and 4-6 (triage, extract toolbox, restore, prepare,
-build incl. FORMAT.md extensions, verify) implemented, plus `selftest.py`;
-stage 3 (draft) is always the agent, by design. A real conversion of the
-test fixture remains — see `BUILD_INSTRUCTIONS.md` at the repo root.**
+**Status: fully implemented (stages 0-2 and 4-6, plus `selftest.py`) and
+proven end-to-end on the test fixture — `workspace/goya-sueno/build/
+goya-sueno.epub` exists, passes `verify.py`, and is a clean read. Stage 3
+(draft) is always the agent, by design.** See `BUILD_INSTRUCTIONS.md` at
+the repo root for the full implementation history.
 
 ## Workspace convention
 
@@ -108,15 +109,27 @@ graded-reader.
    ```
    - `furniture`: regexes (`re.search`); a line matching any of them is
      dropped entirely, everywhere (all treats) — counted per pattern.
-   - `page_ranges`: every extracted page must be covered by exactly one
-     range (1-indexed, inclusive `"A-B"` or single `"N"`); overlaps or gaps
-     are a restore error, never guessed. `treat`: `front_matter` — lines
-     pass through **verbatim**, one paragraph per surviving physical line,
-     no reflow/dehyphenation (the draft later decides what becomes title
-     metadata, or drops them); `body` — dehyphenate (if on) then reflow;
-     `skip` — the pages' content is dropped from the document (still counted
-     in the fidelity gate's input baseline, so a skip that eats real text
-     will fail the gate rather than silently vanishing).
+   - `page_ranges`: every extracted line must be covered by exactly one
+     range; overlaps or gaps are a restore error, never guessed. A range is
+     either `"pages": "A-B"` (1-indexed, inclusive; also accepts a single
+     `"N"`) — whole pages, the common case — or `"start_anchor"` +
+     `"end_anchor"` (both required together), each matching one physical
+     extracted line's text **exactly**: isolates a precise line span, e.g.
+     a verse passage embedded mid-page that page-level granularity can't
+     separate from the surrounding prose. If the anchor text repeats (a
+     refrain), it's ambiguous by default — never guessed — until the
+     policy disambiguates with an explicit 1-indexed
+     `"start_anchor_occurrence"` / `"end_anchor_occurrence"` (the agent's
+     decision, not the script's); an `end_anchor` search always starts
+     from its own range's resolved `start_anchor`, so an earlier
+     occurrence outside the range can't cause false ambiguity on its own.
+     `treat`: `front_matter` — lines pass through **verbatim**, one
+     paragraph per surviving physical line, no reflow/dehyphenation (the
+     draft later decides what becomes title metadata, or drops them);
+     `body` — dehyphenate (if on) then reflow; `skip` — the pages' content
+     is dropped from the document (still counted in the fidelity gate's
+     input baseline, so a skip that eats real text will fail the gate
+     rather than silently vanishing).
    - `reflow` (top-level default, overridable per `page_ranges` entry):
      `prose` — join lines into paragraphs, breaking on vertical gap > 1.6×
      the chunk's median line gap or on x0 indent drifting > 10pt from the
@@ -230,8 +243,17 @@ PASS and a clean content-diff of `workspace/yugong-mountain` — see
 
 `workspace/goya-sueno/source.pdf` — *Prefiero que me quite el sueño Goya a
 que lo haga cualquier hijo de puta* (Rodrigo García / La Carnicería Teatro),
-18 pages, Spanish theatre monologue. Deliberately pathological: every glyph
-double-drawn (fake bold), scrambled subset font names, no geometric
-paragraph signal (uniform line gaps, no indents) — paragraph boundaries are
-recoverable only from terminal punctuation, so `reflow: sentence` is the
-correct policy, not `verse`. Triage output lives next to it.
+18 pages, Spanish theatre monologue, converted (`build/goya-sueno.epub`).
+Deliberately pathological: every glyph double-drawn (fake bold), scrambled
+subset font names, no geometric paragraph signal (uniform line gaps, no
+indents) — paragraph boundaries are recoverable only from terminal
+punctuation, so `reflow: sentence` is the right policy for almost the whole
+book. One exception: a twelve-line poem is embedded mid-page-15
+("Y cavo profundo en mi…"), set apart only by extra vertical whitespace
+before/after — invisible to `reflow: sentence` (nothing in it ends with
+terminal punctuation, so it would otherwise run into one wall of prose) and
+un-isolable by page-level `page_ranges` (it starts and ends mid-page,
+interleaved with ordinary prose on both pages 15 and 16). Caught by eye
+against the page renders, not by any gate; `workspace/goya-sueno/policy.json`
+carves it out with an anchor-based `page_ranges` entry (`reflow: verse`).
+Triage output lives next to the source.
