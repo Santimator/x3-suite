@@ -19,13 +19,10 @@ completeness, and diagnoses failures — and when it intervenes it emits
 bulk text. Every byte in the EPUB traces back to the extraction.
 Full design rationale + open questions: [`DESIGN.md`](DESIGN.md).
 
-**Status: stages 0-2 (triage, extract toolbox, restore) implemented; stage 5
-(build) exists as the shared epub-builder skill; the rest is specified for
-implementation in `BUILD_INSTRUCTIONS.md` at the repo root.** Until the
-remaining scripts exist, Claude Code performs those stages manually
-following the stage contracts below — that's the point of the design: each
-stage has a file interface, so a human, a model, or a script can fill any
-slot.
+**Status: stages 0-2 and 4 (triage, extract toolbox, restore, prepare)
+implemented; stage 5 (build) exists as the shared epub-builder skill; stage
+3 (draft) is always the agent, by design; stage 6 (verify) is specified for
+implementation in `BUILD_INSTRUCTIONS.md` at the repo root.**
 
 ## Workspace convention
 
@@ -37,6 +34,7 @@ workspace/<slug>/
   build/triage.json   stage 0 output
   extract/            stage 1 output (raw per-page extraction)
   policy.json         stage 2 input — the agent's restore decisions
+  restore/            stage 2 output (restored.md + restore-report.json)
   draft.json          stage 3 output — the agent's structured plan of the book
   chapters/*.md       stage 4 output ┐
   book.json           stage 4 output ├ the common book format (builder input)
@@ -142,16 +140,49 @@ graded-reader.
      `ngram_containment ≥ 0.995`; restore.py exits 1 on gate failure — that
      exit code is the signal to look at the report and edit the policy.
 
-3. **Draft** (agent, planned) — the agent authors `draft.json`, the
-   structured plan of the book: title/author, chapter boundaries as
-   *verbatim anchors*, TOC labels, image placements, front-matter handling.
-   Its whole creative output — and every claim in it is checkable.
+3. **Draft** (agent) — the agent authors `draft.json`, the structured plan
+   of the book: title/author, chapter boundaries as *verbatim anchors*, TOC
+   labels, image placements, front-matter handling. Its whole creative
+   output — and every claim in it is checkable.
 
-4. **Prepare** (deterministic `prepare.py`, planned) — validate the draft
-   (anchors exist, image refs resolve, every paragraph lands in exactly one
-   chapter), then cut `chapters/*.md` + `book.json` and resize/grayscale
-   images to device spec — emitting exactly the format the epub-builder
-   skill's `FORMAT.md` specifies.
+   `draft.json` schema:
+   ```json
+   {
+     "title": "Prefiero que me quite el sueño Goya…",
+     "author": "Rodrigo García",
+     "language": "es",
+     "chapters": [
+       {"toc_label": "Monólogo", "start_anchor": "Prefiero que me quite el sueño Goya a que lo haga cualquier hijo"}
+     ],
+     "images": [],
+     "front_matter": "drop"
+   }
+   ```
+   - `chapters[].start_anchor`: a verbatim substring of `restore/restored.md`;
+     must occur exactly once; chapters must appear in document order.
+     Chapter N's content runs from the paragraph containing its anchor to
+     the paragraph before chapter N+1's anchor (last chapter to EOF).
+   - `images[]` (may be empty): `{"page": 7, "index": 0, "anchor": "…",
+     "caption": "…"}` — `page`/`index` select a bbox from the extraction's
+     `pages.jsonl`; `anchor` (verbatim, unique, must land inside some
+     chapter) places the image paragraph immediately after that paragraph.
+   - `front_matter`: only `"drop"` is implemented — paragraphs before
+     chapter 1's anchor are excluded from the book.
+
+4. **Prepare** (deterministic `prepare.py`, implemented) — validate the
+   draft (anchors exist and are unique and ordered, image refs resolve,
+   every paragraph lands in exactly one chapter or the dropped front
+   matter — asserted, not trusted), then cut `chapters/*.md` + `book.json`
+   and crop/grayscale/downscale (480px max width) images to device spec —
+   emitting exactly the format the epub-builder skill's `FORMAT.md`
+   specifies. Validation failures exit 1 with a precise, fixable message
+   ("anchor not found", "anchor ambiguous (N hits)", "anchors out of
+   order") — prepare.py never guesses.
+
+   ```bash
+   .venv/bin/python .claude/skills/pdf2epub/scripts/prepare.py \
+       workspace/<slug>   # expects draft.json; restore/ defaults to workspace/<slug>/restore
+   ```
 
 5. **Build** (deterministic, exists) — the suite-shared **epub-builder**
    skill (`.claude/skills/epub-builder/`): X3-friendly EPUB, no CJK
