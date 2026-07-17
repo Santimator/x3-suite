@@ -59,7 +59,7 @@ Two drivers: Claude Code interactively, or the headless `run_book.py` against
 any OpenAI-compatible endpoint. On Debian/Ubuntu install `jieba` inside a
 venv — system setuptools breaks its legacy `setup.py`.
 
-### pdf2epub — convert PDFs into clean EPUBs *(stage 0 and stage 1 toolbox done)*
+### pdf2epub — convert PDFs into clean EPUBs *(stages 0-2 done: triage, extract toolbox, restore)*
 
 PDFs are page descriptions (where ink goes); EPUB is a document (what the
 text is). The pipeline recovers intent from ink, **deterministic-first,
