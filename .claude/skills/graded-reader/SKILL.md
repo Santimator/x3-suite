@@ -56,7 +56,7 @@ Python that has `jieba` and `pypinyin` installed (see Setup).
   render (CHARSET.txt + codepoint INTERVALS.txt), for building small device
   fonts — e-ink readers like the X3 can't hold a full 20k-glyph CJK font, but
   a whole graded-reader library needs only a few hundred. See
-  `reference/readers.md`.
+  `reference/readers.md` at the repo root (shared device notes).
 - **`prompts/planner.md`, `prompts/scribe.md`, `prompts/glossary_editor.md`** —
   the three LLM-role briefs.
 
@@ -203,8 +203,8 @@ override. `validate.py BOOKDIR` checks every chapter in `book.json` at once.
   It renders chapter 1 three ways (ruby / interlinear / plain) on labeled pages.
   Sideload once, see which looks right, set `pinyin_mode` in `book.json`
   accordingly. `interlinear` is the safe fallback — CSS stacking, no ruby tag,
-  renders anywhere. See `reference/readers.md` for the Xteink X3 / CrossPoint
-  situation.
+  renders anywhere. See `reference/readers.md` at the repo root for the
+  Xteink X3 / CrossPoint situation.
 
 ## Book layout
 
