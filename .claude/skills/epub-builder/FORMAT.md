@@ -42,28 +42,39 @@ workspace/<slug>/
 - Blank-line-separated paragraphs. Plain prose; no inline formatting is
   interpreted today.
 
-## pdf2epub extensions (proposed — builder support pending)
+## pdf2epub extensions (implemented, un-annotated path only)
 
 The conversion draft needs to express things graded readers never had.
-Chapter markdown gains a small, closed set of constructs:
+Chapter markdown gains a small, closed set of constructs. These only exist
+on the un-annotated path (no `pinyin_mode`) — the annotated path's behavior
+and output bytes are frozen and never see this code.
 
 - **Verse blocks** — lines that must keep their breaks (poetry, drama):
-  fenced as ` ```verse … ``` `. The builder renders line-per-line with
-  hanging indent; the restorer's `reflow: verse` policy emits these.
-- **Images** — `![caption](../images/fig-03.png)` on its own paragraph.
-  Files must already be *prepared*: grayscale, device-width (480 px max),
-  PNG/JPEG. The prepare step does this; the builder only embeds.
-- **Endnotes** — `[^n]` marker in text, `[^n]: note text` at chapter end.
-  Rendered as per-chapter endnotes with back-links (same machinery as
-  glossary links). CrossPoint can't do EPUB3 popups.
+  fenced as ` ```verse … ``` `. Rendered `<div class="verse"><p>line</p>…
+  </div>`, hanging indent via CSS; the restorer's `reflow: verse` policy
+  emits these.
+- **Images** — `![caption](../images/fig-03.png)` on its own paragraph
+  (path relative to `chapters/`, i.e. `../images/<file>`). Files must
+  already be *prepared*: grayscale, device-width (480 px max), PNG/JPEG.
+  The prepare step does this; the builder only embeds (`<figure><img/>
+  <figcaption>`) and errors out if the file is missing.
+- **Endnotes** — `[^n]` marker in text, `[^n]: note text` on its own line
+  (defs are stripped wherever they appear, not just at chapter end).
+  Rendered as a per-chapter endnotes section with back-links (mirrors the
+  glossary link/back-link id scheme). An `[^n]` with no matching def is a
+  build error. CrossPoint can't do EPUB3 popups.
 - **Emphasis** — `*em*` only. No bold (fake-bold PDFs are *pathology*, not
   semantics), no nested markup.
 
 book.json gains optional fields:
 
-- `"cover": "images/cover.png"` — prepared like any image.
+- `"cover": "images/cover.png"` — path relative to the book directory
+  (not `chapters/`). Prepared like any image; becomes an EPUB3
+  `cover-image` manifest property. **Implemented.**
 - `"source": {"file": "source.pdf", "pages": 18}` — provenance record.
+  **Not yet implemented** — no conversion has needed it read back.
 - `"toc_depth": 1` — flat TOC only for now; the X3 UI is shallow.
+  **Not yet implemented** — the builder's TOC is already flat by default.
 
 Anything else a conversion wants must be proposed here first — the builder
 stays deliberately small, and the device (see `reference/readers.md` at the

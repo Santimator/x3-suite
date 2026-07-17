@@ -19,10 +19,10 @@ completeness, and diagnoses failures — and when it intervenes it emits
 bulk text. Every byte in the EPUB traces back to the extraction.
 Full design rationale + open questions: [`DESIGN.md`](DESIGN.md).
 
-**Status: stages 0-2 and 4 (triage, extract toolbox, restore, prepare)
-implemented; stage 5 (build) exists as the shared epub-builder skill; stage
-3 (draft) is always the agent, by design; stage 6 (verify) is specified for
-implementation in `BUILD_INSTRUCTIONS.md` at the repo root.**
+**Status: stages 0-2, 4, and 5 (triage, extract toolbox, restore, prepare,
+build incl. FORMAT.md extensions) implemented; stage 3 (draft) is always the
+agent, by design; stage 6 (verify) is specified for implementation in
+`BUILD_INSTRUCTIONS.md` at the repo root.**
 
 ## Workspace convention
 
@@ -187,7 +187,8 @@ graded-reader.
 5. **Build** (deterministic, exists) — the suite-shared **epub-builder**
    skill (`.claude/skills/epub-builder/`): X3-friendly EPUB, no CJK
    dependencies for generic books. The FORMAT.md extensions (verse blocks,
-   images, endnotes) still need implementing there.
+   images, endnotes, emphasis, cover) are implemented on the un-annotated
+   path; the annotated (graded-reader) path is untouched and frozen.
 
 6. **Verify** (deterministic, planned) — EPUB integrity + coverage report
    (source text in vs. text out, per chapter).
