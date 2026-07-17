@@ -19,11 +19,12 @@ completeness, and diagnoses failures — and when it intervenes it emits
 bulk text. Every byte in the EPUB traces back to the extraction.
 Full design rationale + open questions: [`DESIGN.md`](DESIGN.md).
 
-**Status: stage 0 (triage) implemented; stages 1–5 designed, pending
-brainstorm sign-off.** Until the scripts exist, Claude Code performs the later
-stages manually following the stage contracts below — that's the point of the
-design: each stage has a file interface, so a human, a model, or a script can
-fill any slot.
+**Status: stage 0 (triage) implemented; stage 5 (build) exists as the shared
+epub-builder skill; the rest is specified for implementation in
+`BUILD_INSTRUCTIONS.md` at the repo root.** Until the scripts exist, Claude
+Code performs the later stages manually following the stage contracts below —
+that's the point of the design: each stage has a file interface, so a human,
+a model, or a script can fill any slot.
 
 ## Workspace convention
 
