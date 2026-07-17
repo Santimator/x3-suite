@@ -59,7 +59,7 @@ Two drivers: Claude Code interactively, or the headless `run_book.py` against
 any OpenAI-compatible endpoint. On Debian/Ubuntu install `jieba` inside a
 venv — system setuptools breaks its legacy `setup.py`.
 
-### pdf2epub — convert PDFs into clean EPUBs *(stage 0 done, design open)*
+### pdf2epub — convert PDFs into clean EPUBs *(fully implemented and proven end-to-end on its test fixture)*
 
 PDFs are page descriptions (where ink goes); EPUB is a document (what the
 text is). The pipeline recovers intent from ink, **deterministic-first,
@@ -76,12 +76,12 @@ implementation plan for the remaining stages:
 
 ```bash
 .venv/bin/pip install -r .claude/skills/pdf2epub/requirements.txt
-.venv/bin/python .claude/skills/pdf2epub/scripts/triage.py \
-    workspace/goya-sueno/source.pdf --out workspace/goya-sueno/build/triage.json
+.venv/bin/python .claude/skills/pdf2epub/scripts/selftest.py
 ```
 
 Test fixture: `workspace/goya-sueno/` — an 18-page Spanish theatre text with
-a deliberately pathological text layer (fake-bold double-drawn glyphs).
+a deliberately pathological text layer (fake-bold double-drawn glyphs),
+converted end-to-end (`build/goya-sueno.epub`).
 
 ## Shared ground
 

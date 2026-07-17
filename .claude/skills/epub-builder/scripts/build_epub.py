@@ -36,6 +36,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import re
 import sys
 import zipfile
 from pathlib import Path
@@ -58,6 +59,12 @@ def vocab():
 
 
 MODES = ("ruby", "interlinear", "plain")  # pinyin modes; None = no annotation
+
+
+class BuildError(Exception):
+    """An authoring error the builder catches instead of a raw traceback --
+    a missing image or an undefined footnote ref should have been caught by
+    prepare.py, but the builder is the last line of defense."""
 
 
 # --------------------------------------------------------------------------- #
@@ -150,11 +157,21 @@ def render_paragraph(text: str, mode: str, link_ctx: Optional[Tuple] = None) -> 
 # --------------------------------------------------------------------------- #
 # Chapter markdown -> XHTML body
 # --------------------------------------------------------------------------- #
-def chapter_body(md: str, mode: str, link_ctx: Optional[Tuple] = None) -> Tuple[str, str]:
+def chapter_body(md: str, mode: str, link_ctx: Optional[Tuple] = None,
+                  prefix: str = "ch01", images_out: Optional[List[Tuple[str, str]]] = None
+                  ) -> Tuple[str, str]:
     """Return (title, body_html). First '# ' line is the chapter title.
 
     Glossary links (link_ctx) are applied only inside paragraphs, not headings.
+
+    mode is None (no pinyin annotation) dispatches to chapter_body_plain(),
+    which understands the pdf2epub extensions (verse/images/endnotes/
+    emphasis) documented in epub-builder/FORMAT.md. The annotated path below
+    is frozen -- its behavior and output bytes must not change.
     """
+    if mode is None:
+        return chapter_body_plain(md, prefix, images_out)
+
     title = ""
     blocks: List[str] = []
     for raw in md.splitlines():
@@ -171,6 +188,132 @@ def chapter_body(md: str, mode: str, link_ctx: Optional[Tuple] = None) -> Tuple[
         else:
             blocks.append(f"<p>{render_paragraph(line.strip(), mode, link_ctx)}</p>")
     return title or "Chapter", "\n".join(blocks)
+
+
+# --- pdf2epub extensions (un-annotated / mode=None path only) -------------- #
+FOOTNOTE_REF_RE = re.compile(r"\[\^([^\]]+)\]")
+FOOTNOTE_DEF_RE = re.compile(r"^\[\^([^\]]+)\]:\s*(.*)$")
+EMPHASIS_RE = re.compile(r"\*([^*]+)\*")
+IMAGE_RE = re.compile(r"^!\[([^\]]*)\]\(([^)]+)\)$")
+
+
+def split_blocks(md: str) -> List[str]:
+    """Blank-line-separated blocks. A ```verse fenced block has no internal
+    blank lines (restore.py never inserts one), so it always survives as a
+    single block here -- no special-casing needed at this stage."""
+    return [b for b in re.split(r"\n\s*\n", md.strip()) if b.strip()]
+
+
+def apply_emphasis(escaped_text: str) -> str:
+    """*em* -> <em>, single asterisk pairs only, no nesting. Must run on
+    already-HTML-escaped text (the markup chars * are untouched by escape)."""
+    return EMPHASIS_RE.sub(lambda m: f"<em>{m.group(1)}</em>", escaped_text)
+
+
+def render_inline_plain(text: str, footnote_order: Dict[str, int], prefix: str) -> str:
+    """Emphasis + footnote refs for the un-annotated path. No segmentation,
+    no glossary linking -- just the closed set FORMAT.md documents."""
+    escaped = apply_emphasis(html.escape(text))
+
+    def sub_footnote(m: "re.Match") -> str:
+        marker = m.group(1)
+        idx = footnote_order.setdefault(marker, len(footnote_order) + 1)
+        return (f'<a class="fnref" id="{prefix}-fr{idx}" href="#{prefix}-fn{idx}">'
+                f"<sup>{idx}</sup></a>")
+
+    return FOOTNOTE_REF_RE.sub(sub_footnote, escaped)
+
+
+def endnotes_section(footnote_defs: Dict[str, str], footnote_order: Dict[str, int], prefix: str) -> str:
+    if not footnote_order:
+        return ""
+    items = []
+    for marker, idx in sorted(footnote_order.items(), key=lambda kv: kv[1]):
+        if marker not in footnote_defs:
+            raise BuildError(f"{prefix}: undefined footnote reference [^{marker}]")
+        note_html = apply_emphasis(html.escape(footnote_defs[marker]))
+        items.append(
+            f'<li id="{prefix}-fn{idx}"><sup>{idx}</sup> {note_html} '
+            f'<a class="fnback" href="#{prefix}-fr{idx}">↩</a></li>'
+        )
+    return ('<section class="endnotes" epub:type="endnotes"><h2>Notes</h2>'
+            "<ul>" + "".join(items) + "</ul></section>")
+
+
+def image_paragraph(caption: str, rel_path: str, prefix: str,
+                     images_out: Optional[List[Tuple[str, str]]]) -> str:
+    if not rel_path.startswith("../images/"):
+        raise BuildError(f"{prefix}: image path must be under ../images/: {rel_path!r}")
+    basename = rel_path.rsplit("/", 1)[-1]
+    epub_src = f"images/{basename}"
+    if images_out is not None:
+        images_out.append((rel_path, epub_src))
+    return (f'<figure><img src="{epub_src}" alt="{html.escape(caption)}"/>'
+            f"<figcaption>{html.escape(caption)}</figcaption></figure>")
+
+
+def strip_footnote_defs(md: str) -> Tuple[str, Dict[str, str]]:
+    """Pull out "[^n]: text" lines (one def per physical line -- markdown
+    footnote defs are conventionally adjacent, no blank line between them,
+    so block-splitting alone can't isolate them). Skips lines inside a
+    ```verse fence, where a poem could coincidentally start with "[^"."""
+    footnote_defs: Dict[str, str] = {}
+    kept: List[str] = []
+    in_verse = False
+    for line in md.split("\n"):
+        if line.strip().startswith("```verse"):
+            in_verse = True
+        elif in_verse and line.strip() == "```":
+            in_verse = False
+        elif not in_verse:
+            m = FOOTNOTE_DEF_RE.match(line)
+            if m:
+                footnote_defs[m.group(1)] = m.group(2)
+                continue
+        kept.append(line)
+    return "\n".join(kept), footnote_defs
+
+
+def chapter_body_plain(md: str, prefix: str,
+                        images_out: Optional[List[Tuple[str, str]]]) -> Tuple[str, str]:
+    """chapter_body() for mode=None: the pdf2epub construct set -- verse
+    blocks, images, endnotes, *em* -- on top of the same heading/paragraph
+    shape the annotated path uses."""
+    md, footnote_defs = strip_footnote_defs(md)
+    content_blocks = split_blocks(md)
+    title = ""
+    if content_blocks and content_blocks[0].startswith("# "):
+        title = content_blocks[0][2:].strip()
+        content_blocks = content_blocks[1:]
+
+    footnote_order: Dict[str, int] = {}
+    html_blocks: List[str] = []
+    if title:
+        html_blocks.append(f"<h1>{render_inline_plain(title, footnote_order, prefix)}</h1>")
+
+    for b in content_blocks:
+        if b.startswith("```verse") and b.rstrip().endswith("```"):
+            inner = b.split("\n", 1)[1] if "\n" in b else ""
+            inner = inner.rsplit("```", 1)[0].rstrip("\n")
+            lines_html = "".join(
+                f"<p>{render_inline_plain(ln, footnote_order, prefix)}</p>"
+                for ln in inner.split("\n")
+            )
+            html_blocks.append(f'<div class="verse">{lines_html}</div>')
+        elif b.startswith("!["):
+            m = IMAGE_RE.match(b.strip())
+            if not m:
+                raise BuildError(f"{prefix}: malformed image paragraph: {b!r}")
+            html_blocks.append(image_paragraph(m.group(1), m.group(2), prefix, images_out))
+        elif b.startswith("## "):
+            html_blocks.append(f"<h2>{render_inline_plain(b[3:].strip(), footnote_order, prefix)}</h2>")
+        elif b.startswith("# "):
+            html_blocks.append(f"<h1>{render_inline_plain(b[2:].strip(), footnote_order, prefix)}</h1>")
+        else:
+            html_blocks.append(f"<p>{render_inline_plain(b, footnote_order, prefix)}</p>")
+
+    html_blocks.append(endnotes_section(footnote_defs, footnote_order, prefix))
+    return title or "Chapter", "\n".join(b for b in html_blocks if b)
 
 
 def glossary_section(
@@ -228,6 +371,21 @@ a.gl { color: inherit; text-decoration: underline; text-decoration-style: dotted
 a.gback { text-decoration: none; color: #888; margin-left: 0.4em; }
 """
 
+# Appended only for un-annotated (mode=None / pdf2epub) builds -- annotated
+# books never see these bytes, so their style.css stays byte-identical.
+PDF2EPUB_CSS = """\
+.verse { text-indent: 0; margin: 0 0 0.9em 1em; }
+.verse p { margin: 0; text-indent: -1em; padding-left: 1em; }
+figure { margin: 1em 0; text-align: center; }
+figure img { max-width: 100%; }
+figcaption { font-size: 0.85em; color: #555; margin-top: 0.3em; }
+.endnotes { margin-top: 2em; border-top: 1px solid #999; padding-top: 0.5em; }
+.endnotes ul { list-style: none; padding-left: 0; }
+.endnotes li { margin: 0.2em 0; }
+a.fnref { text-decoration: none; }
+a.fnback { text-decoration: none; color: #888; margin-left: 0.4em; }
+"""
+
 XHTML_TMPL = """\
 <?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
@@ -246,13 +404,19 @@ CONTAINER_XML = """\
 """
 
 
-def build_opf(title: str, author: str, lang: str, chapters: List[Dict]) -> str:
+def build_opf(title: str, author: str, lang: str, chapters: List[Dict],
+              images: Optional[Dict[str, Dict]] = None) -> str:
     manifest = ['<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
                 '<item id="css" href="style.css" media-type="text/css"/>']
     spine = []
     for ch in chapters:
         manifest.append(f'<item id="{ch["id"]}" href="{ch["file"]}" media-type="application/xhtml+xml"/>')
         spine.append(f'<itemref idref="{ch["id"]}"/>')
+    # Sorted so manifest order never depends on dict/insertion order.
+    for epub_src in sorted(images or {}):
+        info = images[epub_src]
+        props = ' properties="cover-image"' if info.get("cover") else ""
+        manifest.append(f'<item id="{info["id"]}" href="{epub_src}" media-type="{info["media_type"]}"{props}/>')
     import uuid
     # Stable id (derived from the title): rebuilding doesn't change the book's
     # identity, so readers replace a re-sideloaded copy instead of duplicating
@@ -281,7 +445,15 @@ def build_nav(title: str, lang: str, chapters: List[Dict]) -> str:
     return XHTML_TMPL.format(lang=lang, title="Contents", body=body)
 
 
-def write_epub(out: Path, title: str, author: str, lang: str, chapters: List[Dict]) -> None:
+IMAGE_MEDIA_TYPES = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+
+
+def image_id(epub_src: str) -> str:
+    return "img-" + re.sub(r"[^A-Za-z0-9]+", "-", epub_src).strip("-")
+
+
+def write_epub(out: Path, title: str, author: str, lang: str, chapters: List[Dict],
+               cover: Optional[Tuple[str, Path]] = None, extended_css: bool = False) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
 
     # Fixed zip mtimes (matching dcterms:modified) so identical sources really
@@ -289,16 +461,41 @@ def write_epub(out: Path, title: str, author: str, lang: str, chapters: List[Dic
     def entry(name: str) -> zipfile.ZipInfo:
         return zipfile.ZipInfo(name, date_time=(2026, 1, 1, 0, 0, 0))
 
+    # Images referenced from chapter bodies (pdf2epub extension; empty for
+    # annotated books, which never populate a chapter's "images" key) plus
+    # an optional book.json cover, deduped by their in-EPUB path.
+    images: Dict[str, Dict] = {}
+    for ch in chapters:
+        for epub_src, abs_path in ch.get("images", []):
+            images.setdefault(epub_src, {
+                "path": abs_path, "id": image_id(epub_src),
+                "media_type": IMAGE_MEDIA_TYPES.get(Path(abs_path).suffix.lower(), "application/octet-stream"),
+                "cover": False,
+            })
+    if cover is not None:
+        epub_src, abs_path = cover
+        info = images.setdefault(epub_src, {
+            "path": abs_path, "id": image_id(epub_src),
+            "media_type": IMAGE_MEDIA_TYPES.get(Path(abs_path).suffix.lower(), "application/octet-stream"),
+            "cover": False,
+        })
+        info["cover"] = True
+
+    css_text = CSS + PDF2EPUB_CSS if extended_css else CSS
+
     with zipfile.ZipFile(out, "w") as z:
         # mimetype MUST be first and stored (uncompressed)
         z.writestr(entry("mimetype"), "application/epub+zip", compress_type=zipfile.ZIP_STORED)
         z.writestr(entry("META-INF/container.xml"), CONTAINER_XML, compress_type=zipfile.ZIP_DEFLATED)
-        z.writestr(entry("OEBPS/style.css"), CSS, compress_type=zipfile.ZIP_DEFLATED)
-        z.writestr(entry("OEBPS/content.opf"), build_opf(title, author, lang, chapters), compress_type=zipfile.ZIP_DEFLATED)
+        z.writestr(entry("OEBPS/style.css"), css_text, compress_type=zipfile.ZIP_DEFLATED)
+        z.writestr(entry("OEBPS/content.opf"), build_opf(title, author, lang, chapters, images), compress_type=zipfile.ZIP_DEFLATED)
         z.writestr(entry("OEBPS/nav.xhtml"), build_nav(title, lang, chapters), compress_type=zipfile.ZIP_DEFLATED)
         for ch in chapters:
             xhtml = XHTML_TMPL.format(lang=lang, title=html.escape(ch["title"]), body=ch["body"])
             z.writestr(entry("OEBPS/" + ch["file"]), xhtml, compress_type=zipfile.ZIP_DEFLATED)
+        for epub_src in sorted(images):
+            info = images[epub_src]
+            z.writestr(entry("OEBPS/" + epub_src), Path(info["path"]).read_bytes(), compress_type=zipfile.ZIP_DEFLATED)
 
 
 # --------------------------------------------------------------------------- #
@@ -336,9 +533,20 @@ def assemble(book_dir: Path, mode: str) -> Tuple[List[Dict], Dict]:
         prefix = f"ch{idx:02d}"
         link_map = {w: i for i, (w, _, _) in enumerate(gloss_rows)}
         linked: set = set()
-        title, body = chapter_body(md, mode, link_ctx=(prefix, link_map, linked))
+        # images_out is only populated on the mode=None (pdf2epub) path;
+        # chapter_body() ignores it entirely for annotated modes.
+        chapter_images: List[Tuple[str, str]] = []
+        title, body = chapter_body(md, mode, link_ctx=(prefix, link_map, linked),
+                                    prefix=prefix, images_out=chapter_images)
         body += glossary_section(gloss_rows, mode, prefix=prefix, linked=linked)
-        chapters.append({"id": prefix, "file": f"{prefix}.xhtml", "title": title, "body": body})
+        resolved_images = []
+        for rel_path, epub_src in chapter_images:
+            src_path = ((book_dir / ch["source"]).parent / rel_path).resolve()
+            if not src_path.is_file():
+                raise BuildError(f"{ch['source']}: missing image {rel_path} (resolved {src_path})")
+            resolved_images.append((epub_src, src_path))
+        chapters.append({"id": prefix, "file": f"{prefix}.xhtml", "title": title, "body": body,
+                          "images": resolved_images})
     return chapters, meta
 
 
@@ -379,14 +587,26 @@ def main(argv=None) -> int:
     if mode is not None or args.diagnostic:
         vocab().load_vocab(args.lists or vocab().LISTS_DIR)  # configures jieba segmenter
 
-    if args.diagnostic:
-        chapters, meta = assemble_diagnostic(args.book_dir)
-        title = meta.get("title", "Book") + " — pinyin render test"
-    else:
-        chapters, meta = assemble(args.book_dir, mode)
-        title = meta.get("title", "Book")
+    try:
+        if args.diagnostic:
+            chapters, meta = assemble_diagnostic(args.book_dir)
+            title = meta.get("title", "Book") + " — pinyin render test"
+            cover = None
+        else:
+            chapters, meta = assemble(args.book_dir, mode)
+            title = meta.get("title", "Book")
+            cover = None
+            if meta.get("cover"):
+                cover_path = (args.book_dir / meta["cover"]).resolve()
+                if not cover_path.is_file():
+                    raise BuildError(f"book.json cover not found: {meta['cover']} (resolved {cover_path})")
+                cover = (f"images/{cover_path.name}", cover_path)
+    except BuildError as e:
+        print(f"build error: {e}", file=sys.stderr)
+        return 1
 
-    write_epub(args.out, title, meta.get("author", ""), meta.get("language", "en"), chapters)
+    write_epub(args.out, title, meta.get("author", ""), meta.get("language", "en"), chapters,
+               cover=cover, extended_css=(not args.diagnostic and mode is None))
     print(f"wrote {args.out}  ({len(chapters)} sections, {'diagnostic' if args.diagnostic else mode or 'plain (no annotation)'})")
     return 0
 
