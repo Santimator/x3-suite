@@ -20,12 +20,12 @@ bulk text. Every byte in the EPUB traces back to the extraction.
 Full design rationale + open questions: [`DESIGN.md`](DESIGN.md).
 
 **Status: stage 0 (triage) implemented; stage 1 toolbox partially implemented
-(`extract_text.py`); stage 5 (build) exists as the shared epub-builder skill;
-the rest is specified for implementation in `BUILD_INSTRUCTIONS.md` at the
-repo root.** Until the remaining scripts exist, Claude Code performs those
-stages manually following the stage contracts below — that's the point of
-the design: each stage has a file interface, so a human, a model, or a
-script can fill any slot.
+(`extract_text.py`, `render_pages.py`); stage 5 (build) exists as the shared
+epub-builder skill; the rest is specified for implementation in
+`BUILD_INSTRUCTIONS.md` at the repo root.** Until the remaining scripts
+exist, Claude Code performs those stages manually following the stage
+contracts below — that's the point of the design: each stage has a file
+interface, so a human, a model, or a script can fill any slot.
 
 ## Workspace convention
 
@@ -68,8 +68,8 @@ graded-reader.
    orchestrating model reads the summary + sample pages and confirms the
    route.
 
-1. **Extract** (toolbox, `extract_text.py` implemented; `extract_ocr.py` /
-   `render_pages.py` planned) — parameterized deterministic tools the
+1. **Extract** (toolbox, `extract_text.py` + `render_pages.py` implemented;
+   `extract_ocr.py` planned) — parameterized deterministic tools the
    agent picks between and re-runs: `extract_text.py` (pdfplumber;
    `--dedupe`, `--pages`), `extract_ocr.py` (tesseract;
    `--lang`, `--dpi`, `--psm`), `render_pages.py` (page images, for the
