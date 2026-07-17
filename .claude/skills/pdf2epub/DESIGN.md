@@ -21,17 +21,42 @@ varies wildly by source. A taxonomy worth designing against:
 Our fixture (`workspace/goya-sueno`) is class B with a class E twist (theatre
 monologue — line breaks are authorial and must survive).
 
-## Mindset (inherited from graded-reader)
+## Mindset: deterministic-first, agent-on-error
 
-- **Deterministic scripts** measure, transform, assemble, and *gate*. They
-  never invent.
-- **LLM roles** handle what varies: choosing the route, restoring prose,
-  inferring structure.
-- **Every LLM step is followed by a deterministic gate** that catches
-  hallucination and omission — the pdf2epub analogue of graded-reader's
-  vocabulary gates. Trust comes from the gate, not the model.
-- **File-based seams between stages**, so any slot can be filled by a script,
-  Claude Code interactively, or a headless runner later.
+The suite's split (LLM judgment / deterministic mechanics) gets a sharper
+formulation here, because conversion — unlike graded-reader — starts from
+text that already exists. The model is excellent at *reading* — verifying
+that text is complete and correct, recognizing what kind of problem a page
+has — and unrigorous at *bulk generation*. So generation is never its job:
+
+- **The happy path is fully deterministic.** Extract → restore → build, no
+  model in the loop. Scripts transform; they never invent.
+- **The agent is the orchestrator and verifier, not the generator.** It
+  reads triage output and text samples, confirms the route, checks the
+  extraction is complete and faithful, and *diagnoses* failures ("this is
+  char-doubling", "these pages need OCR", "this block is verse").
+- **On error, the agent reaches for tools, not for prose.** Its output is
+  small structured *decisions* — a route, a per-block reflow policy, a
+  normalization-table entry, chapter anchors — which the deterministic
+  scripts then apply to the whole text. **The agent writes decisions, not
+  text**; every byte in the EPUB traces back to the extraction.
+- **Where generation is unavoidable** (vision transcription of a page
+  tesseract mangled; patching a span no tool can fix), it is last on the
+  escalation ladder, span-scoped, and sits behind a deterministic fidelity
+  gate that catches omission and invention. Trust comes from the gate.
+- **File-based seams between stages**, so any slot can be filled by a
+  script, Claude Code interactively, or a headless runner later.
+
+### The escalation ladder
+
+1. Deterministic extraction + deterministic fixes (char dedupe, furniture
+   removal, wordlist dehyphenation, heuristic reflow).
+2. Agent verification pass: read samples + coverage stats; pass → build.
+3. On failure: agent diagnoses, adjusts a decision (re-route pages to OCR,
+   flip a block to verse policy, add a normalization entry), re-runs step 1.
+4. Last resort, span-scoped: model transcribes or patches the specific
+   broken text, gated by the fidelity check, logged as a patch — never a
+   silent rewrite.
 
 ## What the fixture already proved
 
@@ -48,19 +73,21 @@ monologue — line breaks are authorial and must survive).
 
 ## Pipeline stages and the LLM/deterministic split
 
-| stage | actor | in → out | gate |
+| stage | actor | in → out | agent's role |
 |---|---|---|---|
-| 0 triage | script (`triage.py`) ✅ | source.pdf → triage.json + route | model confirms route from samples |
-| 1 extract | script | source.pdf → extract/pages (blocks w/ bbox, font, size) | none needed (no judgment) |
-| 2 restore | **LLM restorer** | raw pages → clean text, chunked | fidelity: length ratio + n-gram containment vs raw |
-| 3 structure | **LLM architect** | clean text + font signals → book.json + chapters/*.md | all paragraphs accounted for; no invented text |
-| 4 build | script | chapters + book.json → EPUB | (deterministic) |
-| 5 verify | script | EPUB → coverage + integrity report | human spot-check |
+| 0 triage | script (`triage.py`) ✅ | source.pdf → triage.json + route | confirm route from samples; re-route on evidence |
+| 1 extract | script | source.pdf → extract/pages (blocks w/ bbox, font, size) | pick the tool per page (text layer vs OCR) when triage is ambiguous |
+| 2 restore | script (`restore.py`, policy-driven) | raw pages + policy.json → clean text | **verify** completeness/faithfulness on samples; on failure edit policy.json and re-run; span-scoped patches only as last resort (gated) |
+| 3 structure | script applies **agent decisions** | clean text + anchors → book.json + chapters/*.md | propose title/author/chapter *anchors* (page/line refs + strings that must exist verbatim in the text) |
+| 4 build | script | chapters + book.json → EPUB | none |
+| 5 verify | script | EPUB → coverage + integrity report | read the report; human spot-check |
 
-Deterministic pre-passes shrink the LLM's job in stage 2: furniture removal
-(repetition across pages, from triage), char dedupe, provable dehyphenation
-(wordlist check). The restorer only handles residual judgment: paragraph
-reflow vs. deliberate breaks, ambiguous hyphens, OCR confusions.
+`policy.json` is the interface that keeps the agent efficient: instead of
+rewriting text it flips switches the restorer applies mechanically — per-block
+`reflow: prose|verse|preserve`, furniture patterns to drop, a punctuation
+normalization table, dehyphenation exceptions. The deterministic pre-passes
+(char dedupe, repetition-based furniture removal, wordlist dehyphenation)
+handle everything provable before the agent ever looks.
 
 ## The common bus
 
@@ -89,10 +116,10 @@ Stage 3 emits the **same intermediate format graded-reader uses**:
    paragraph end vs. per-chapter endnotes. **Leaning: endnotes with
    back-links** (the glossary link machinery in build_epub.py already does
    exactly this dance).
-4. **Fidelity vs. readability.** Does the restorer fix punctuation (the
-   fixture uses low-9 `‚` where `,` is meant) and obvious typos? **Leaning:
-   a logged, deterministic normalization table; the LLM proposes entries,
-   never silently edits.**
+4. **Fidelity vs. readability.** ~~Open~~ **Settled by the mindset:** all
+   edits (the fixture's low-9 `‚` for `,`, OCR confusions) go through the
+   normalization table in `policy.json` — the agent proposes entries, the
+   restorer applies them mechanically and logs them. No silent edits.
 5. **Verse detection.** Reflow destroys drama/poetry. Triage could flag
    "verse-like" pages (short ragged lines, no justification); the restorer
    then defaults to preserving breaks. Needed for the fixture. **Leaning:

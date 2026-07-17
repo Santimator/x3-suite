@@ -45,11 +45,12 @@ venv — system setuptools breaks its legacy `setup.py`.
 ### pdf2epub — convert PDFs into clean EPUBs *(stage 0 done, design open)*
 
 PDFs are page descriptions (where ink goes); EPUB is a document (what the
-text is). The pipeline recovers intent from ink: deterministic **triage**
-characterizes the source and picks a route (text layer / OCR / hybrid),
-deterministic extraction pulls raw text, an LLM *restorer* turns it into
-clean prose behind a fidelity gate, an LLM *architect* infers structure into
-the common book format, and a shared builder emits the EPUB.
+text is). The pipeline recovers intent from ink, **deterministic-first,
+agent-on-error**: triage characterizes the source, scripts extract and
+restore the text on the happy path, and the agent orchestrates and
+verifies — confirming routes, diagnosing failures, and emitting decisions
+(policy switches, chapter anchors) that scripts apply. The model never bulk-
+generates: every byte in the EPUB traces back to the extraction.
 
 Docs: [`.claude/skills/pdf2epub/SKILL.md`](.claude/skills/pdf2epub/SKILL.md) ·
 design + open questions: [`DESIGN.md`](.claude/skills/pdf2epub/DESIGN.md)
