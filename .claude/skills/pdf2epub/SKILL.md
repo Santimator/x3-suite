@@ -19,9 +19,8 @@ completeness, and diagnoses failures — and when it intervenes it emits
 bulk text. Every byte in the EPUB traces back to the extraction.
 Full design rationale + open questions: [`DESIGN.md`](DESIGN.md).
 
-**Status: stage 0 (triage) implemented; stage 1 toolbox implemented
-(`extract_text.py`, `render_pages.py`, `extract_ocr.py`); stage 5 (build)
-exists as the shared epub-builder skill; the rest is specified for
+**Status: stages 0-2 (triage, extract toolbox, restore) implemented; stage 5
+(build) exists as the shared epub-builder skill; the rest is specified for
 implementation in `BUILD_INSTRUCTIONS.md` at the repo root.** Until the
 remaining scripts exist, Claude Code performs those stages manually
 following the stage contracts below — that's the point of the design: each
@@ -79,14 +78,69 @@ graded-reader.
    `extract_ocr.py` degrades gracefully (exit 1, one-line hint) when the
    `tesseract` binary or `pytesseract` module is absent — never auto-installs.
 
-2. **Restore** (deterministic `restore.py` driven by `policy.json`, planned)
-   — reflow paragraphs across page breaks, dehyphenate, drop furniture,
-   normalize punctuation, preserve deliberate line breaks (verse/drama), all
-   as mechanical transforms configured by a policy file. The agent *verifies*
-   the result on samples; on failure it diagnoses, edits the policy (e.g.
-   flips a block to `verse`, adds a normalization entry), and re-runs.
-   Span-scoped model patches are the last resort, gated by a fidelity check
-   (length ratio + n-gram containment vs the raw extraction) and logged.
+2. **Restore** (deterministic `restore.py` driven by `policy.json`,
+   implemented) — reflow paragraphs across page breaks, dehyphenate, drop
+   furniture, normalize punctuation, preserve deliberate line breaks
+   (verse/drama), all as mechanical transforms configured by a policy file.
+   The agent *verifies* the result on samples; on failure it diagnoses,
+   edits the policy (e.g. flips a block to `verse`, adds a normalization
+   entry), and re-runs. Span-scoped model patches are the last resort, gated
+   by a fidelity check (length ratio + n-gram containment vs the raw
+   extraction) and logged.
+
+   ```bash
+   .venv/bin/python .claude/skills/pdf2epub/scripts/restore.py \
+       workspace/<slug>/extract --policy workspace/<slug>/policy.json \
+       --out workspace/<slug>/restore
+   ```
+
+   `policy.json` schema:
+   ```json
+   {
+     "furniture": ["^\\d+$", "^kupdf\\.net"],
+     "page_ranges": [
+       {"pages": "1", "treat": "front_matter"},
+       {"pages": "2-18", "treat": "body"}
+     ],
+     "reflow": "sentence",
+     "normalize": {"‚": ","},
+     "dehyphenate": true,
+     "dehyphenate_exceptions": []
+   }
+   ```
+   - `furniture`: regexes (`re.search`); a line matching any of them is
+     dropped entirely, everywhere (all treats) — counted per pattern.
+   - `page_ranges`: every extracted page must be covered by exactly one
+     range (1-indexed, inclusive `"A-B"` or single `"N"`); overlaps or gaps
+     are a restore error, never guessed. `treat`: `front_matter` — lines
+     pass through **verbatim**, one paragraph per surviving physical line,
+     no reflow/dehyphenation (the draft later decides what becomes title
+     metadata, or drops them); `body` — dehyphenate (if on) then reflow;
+     `skip` — the pages' content is dropped from the document (still counted
+     in the fidelity gate's input baseline, so a skip that eats real text
+     will fail the gate rather than silently vanishing).
+   - `reflow` (top-level default, overridable per `page_ranges` entry):
+     `prose` — join lines into paragraphs, breaking on vertical gap > 1.6×
+     the chunk's median line gap or on x0 indent drifting > 10pt from the
+     chunk's modal left margin; `sentence` — join a line to the next while
+     it lacks terminal punctuation (`.` `!` `?` `…` `:` `”` `»` `)`), each
+     completed unit becomes a paragraph; `verse` — preserve every line
+     break, emit the whole chunk as one ` ```verse ` fenced block.
+   - `dehyphenate`: a line ending `-` immediately followed by a line
+     starting lowercase is merged, hyphen dropped — unless the joined word
+     matches `dehyphenate_exceptions` (then merged but the hyphen is kept).
+     Applies within `body` chunks (all reflow modes), never to
+     `front_matter`.
+   - `normalize`: exact string replacements, applied last (after
+     reflow/dehyphenate), each occurrence counted per entry.
+   - `restore-report.json`: lines in/out, furniture dropped (per pattern),
+     joins made, hyphens resolved, normalizations (per entry), paragraphs
+     emitted, and the fidelity gate — `char_ratio` (non-whitespace chars
+     out / in, furniture excluded from "in") and `ngram_containment`
+     (fraction of the input's word 5-grams, on normalized text, found in
+     the output). Gate passes iff `0.98 ≤ char_ratio ≤ 1.02` and
+     `ngram_containment ≥ 0.995`; restore.py exits 1 on gate failure — that
+     exit code is the signal to look at the report and edit the policy.
 
 3. **Draft** (agent, planned) — the agent authors `draft.json`, the
    structured plan of the book: title/author, chapter boundaries as
