@@ -67,6 +67,9 @@ a deliberately pathological text layer (fake-bold double-drawn glyphs).
 ## Shared ground
 
 ```
+reference/book-format.md  the common book format (book.json + chapters/*.md +
+                          images/) — the EPUB builder's input contract that
+                          every tool targets
 reference/readers.md    Xteink X3 / CrossPoint device notes: fonts, CJK saga,
                         ruby support, SD-card font layout — read before
                         touching anything device-facing

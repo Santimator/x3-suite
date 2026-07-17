@@ -76,18 +76,57 @@ has — and unrigorous at *bulk generation*. So generation is never its job:
 | stage | actor | in → out | agent's role |
 |---|---|---|---|
 | 0 triage | script (`triage.py`) ✅ | source.pdf → triage.json + route | confirm route from samples; re-route on evidence |
-| 1 extract | script | source.pdf → extract/pages (blocks w/ bbox, font, size) | pick the tool per page (text layer vs OCR) when triage is ambiguous |
+| 1 extract | **toolbox** (agent-picked tool + params) | source.pdf → extract/pages (blocks w/ bbox, font, size) | pick the tool and its parameters; verify output; on failure reconsider tool or re-parameterize and re-run |
 | 2 restore | script (`restore.py`, policy-driven) | raw pages + policy.json → clean text | **verify** completeness/faithfulness on samples; on failure edit policy.json and re-run; span-scoped patches only as last resort (gated) |
-| 3 structure | script applies **agent decisions** | clean text + anchors → book.json + chapters/*.md | propose title/author/chapter *anchors* (page/line refs + strings that must exist verbatim in the text) |
-| 4 build | script | chapters + book.json → EPUB | none |
-| 5 verify | script | EPUB → coverage + integrity report | read the report; human spot-check |
+| 3 draft | **agent** | clean text + triage signals → draft.json | author the structured draft: what text goes where, chapter anchors, nav entries, image placements |
+| 4 prepare | script | draft.json → book.json + chapters/*.md + images/ | none — the draft is validated (anchors must exist verbatim) and cut mechanically; images resized/converted to spec |
+| 5 build | script | the book-format contract → EPUB | none |
+| 6 verify | script | EPUB → coverage + integrity report | read the report; human spot-check |
 
-`policy.json` is the interface that keeps the agent efficient: instead of
-rewriting text it flips switches the restorer applies mechanically — per-block
+### The toolbox (stage 1)
+
+"The agent verifies and reconsiders" only works if it has real alternatives
+to reach for. Extraction is therefore not one script but a small toolbox of
+parameterized, deterministic CLI tools, and the agent's moves are: pick →
+run → verify → reconsider (different tool) or re-parameterize (same tool,
+different flags):
+
+- `extract_text.py` — text-layer route. Flags: `--dedupe` (char-doubling
+  fix), `--layout/--no-layout`, `--pages A-B`.
+- `extract_ocr.py` — scanned route: render + tesseract. Flags: `--lang`
+  (from triage's guess), `--dpi`, `--psm` (layout mode), `--pages`.
+- `render_pages.py` — pages → PNG, so the agent can *look* at what a page
+  actually shows when text output makes no sense, and for last-resort
+  vision transcription of a page tesseract mangled.
+- Tools are per-page composable: a HYBRID book can use the text layer for
+  the body and OCR for two image-only pages.
+
+### The draft and the prepare step (stages 3–4)
+
+Between "clean text" and "EPUB" the agent authors **draft.json** — the
+structured plan of the book: spine order, chapter boundaries as verbatim
+anchors, TOC labels, which images survive and where they land, front-matter
+handling. It is the agent's whole creative output, and it is *checkable*:
+`prepare.py` validates every anchor exists in the text, every image ref
+resolves, every paragraph lands in exactly one chapter — then cuts chapters,
+resizes/grayscales images to device spec, and emits the builder's input.
+
+`policy.json` (stage 2) is the same idea one level down: per-block
 `reflow: prose|verse|preserve`, furniture patterns to drop, a punctuation
-normalization table, dehyphenation exceptions. The deterministic pre-passes
-(char dedupe, repetition-based furniture removal, wordlist dehyphenation)
-handle everything provable before the agent ever looks.
+normalization table, dehyphenation exceptions — switches the restorer
+applies mechanically. The deterministic pre-passes (char dedupe,
+repetition-based furniture removal, wordlist dehyphenation) handle
+everything provable before the agent ever looks.
+
+### The builder contract
+
+The builder consumes exactly one thing: the suite's common book format,
+**documented in `reference/book-format.md` (repo root)** — book.json +
+chapters/*.md + prepared images/. That document *is* the contract the agent
+must know when drafting and preparing; if a construct isn't in it, the
+builder doesn't support it. pdf2epub's needs (verse blocks, images,
+endnotes, cover) are specified there as extensions for the generalized
+builder to implement.
 
 ## The common bus
 

@@ -34,14 +34,19 @@ workspace/<slug>/
   source.pdf          the input (never modified)
   build/triage.json   stage 0 output
   extract/            stage 1 output (raw per-page extraction)
-  chapters/*.md       stage 2-3 output — the suite's common book format
-  book.json           stage 3 output (metadata + spine), graded-reader schema
-  build/<slug>.epub   stage 4 output
+  policy.json         stage 2 input — the agent's restore decisions
+  draft.json          stage 3 output — the agent's structured plan of the book
+  chapters/*.md       stage 4 output ┐
+  book.json           stage 4 output ├ the common book format (builder input)
+  images/             stage 4 output ┘ prepared: grayscale, device-width
+  build/<slug>.epub   stage 5 output
 ```
 
-Converted books converge on the same `chapters/*.md + book.json` intermediate
-that graded-reader produces, so the EPUB builder, `charset.py` font
-subsetting, and device lore in `reference/readers.md` (repo root) are shared.
+Converted books converge on the suite's common book format — **documented in
+`reference/book-format.md` (repo root); that spec is the builder's input
+contract and the agent must know it when drafting** — so the EPUB builder,
+`charset.py` font subsetting, and device lore in `reference/readers.md` are
+shared with graded-reader.
 
 ## Stages
 
@@ -60,10 +65,13 @@ subsetting, and device lore in `reference/readers.md` (repo root) are shared.
    orchestrating model reads the summary + sample pages and confirms the
    route.
 
-1. **Extract** (deterministic, planned) — route TEXT: pdfplumber with dedupe
-   → per-page blocks with font/size/bbox. Route OCR: render pages →
-   tesseract (lang from triage) or vision-model transcription. Never edits,
-   only extracts.
+1. **Extract** (toolbox, planned) — parameterized deterministic tools the
+   agent picks between and re-runs: `extract_text.py` (pdfplumber;
+   `--dedupe`, `--layout`, `--pages`), `extract_ocr.py` (tesseract;
+   `--lang`, `--dpi`, `--psm`), `render_pages.py` (page images, for the
+   agent's own eyes or last-resort vision transcription). Per-page
+   composable for HYBRID books. Tools never edit, only extract; the agent
+   verifies output and reconsiders tool or parameters on failure.
 
 2. **Restore** (deterministic `restore.py` driven by `policy.json`, planned)
    — reflow paragraphs across page breaks, dehyphenate, drop furniture,
@@ -74,17 +82,23 @@ subsetting, and device lore in `reference/readers.md` (repo root) are shared.
    Span-scoped model patches are the last resort, gated by a fidelity check
    (length ratio + n-gram containment vs the raw extraction) and logged.
 
-3. **Structure** (agent decisions applied by script, planned) — the agent
-   proposes title, author, and chapter boundaries as *anchors* (page/line
-   refs plus strings that must exist verbatim in the text); a script
-   validates the anchors and cuts `book.json` + `chapters/*.md`. Gate: every
-   source paragraph lands in exactly one chapter.
+3. **Draft** (agent, planned) — the agent authors `draft.json`, the
+   structured plan of the book: title/author, chapter boundaries as
+   *verbatim anchors*, TOC labels, image placements, front-matter handling.
+   Its whole creative output — and every claim in it is checkable.
 
-4. **Build** (deterministic, planned) — generalized sibling of
-   graded-reader's `build_epub.py`: X3-friendly EPUB (simple CSS, no
-   embedded fonts — see `reference/readers.md`).
+4. **Prepare** (deterministic `prepare.py`, planned) — validate the draft
+   (anchors exist, image refs resolve, every paragraph lands in exactly one
+   chapter), then cut `chapters/*.md` + `book.json` and resize/grayscale
+   images to device spec — emitting exactly the format
+   `reference/book-format.md` specifies.
 
-5. **Verify** (deterministic, planned) — EPUB integrity + coverage report
+5. **Build** (deterministic, planned) — generalized sibling of
+   graded-reader's `build_epub.py`, consuming the book-format contract:
+   X3-friendly EPUB (simple CSS, no embedded fonts — see
+   `reference/readers.md`).
+
+6. **Verify** (deterministic, planned) — EPUB integrity + coverage report
    (source text in vs. text out, per chapter).
 
 ## Setup
