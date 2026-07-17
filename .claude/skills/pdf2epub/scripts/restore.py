@@ -49,24 +49,97 @@ def parse_page_spec(spec: str):
     return lo, hi
 
 
-def assign_pages_to_ranges(page_ranges, all_page_nums):
-    """Map page_num -> its page_ranges entry. Every extracted page must be
-    covered by exactly one range -- ambiguity is a policy bug, not a guess
-    restore.py should make."""
-    assignment = {}
-    for r in page_ranges:
-        lo, hi = parse_page_spec(r["pages"])
-        for p in range(lo, hi + 1):
-            if p in assignment:
-                raise RestoreError(
-                    f"page {p} covered by multiple page_ranges "
-                    f"({assignment[p]['pages']!r} and {r['pages']!r})"
-                )
-            assignment[p] = r
-    missing = sorted(set(all_page_nums) - set(assignment))
-    if missing:
-        raise RestoreError(f"pages not covered by any page_range: {missing}")
-    return assignment
+def flatten_lines(pages: dict, all_page_nums) -> list:
+    """Every line across every page, in document order, each tagged with
+    its page number. The single ordered sequence page_ranges spans are cut
+    from -- a page-based range and an anchor-based range are just two ways
+    of picking a slice of it."""
+    flat = []
+    for p in all_page_nums:
+        for ln in pages[p]["lines"]:
+            entry = dict(ln)
+            entry["_page"] = p
+            flat.append(entry)
+    return flat
+
+
+def find_anchor_line_index(flat_lines: list, anchor: str, label: str,
+                            start_from: int = 0, occurrence: int = None) -> int:
+    """A page_ranges anchor matches one physical line's text exactly (unlike
+    draft.json's anchors, which match any substring of the restored prose --
+    here the natural unit already is a single extracted line). start_from
+    restricts the search to lines at or after it.
+
+    A repeated line (a refrain, say) is still an error by default -- never
+    guessed -- unless the policy explicitly disambiguates with a 1-indexed
+    `occurrence` (that's the agent's decision, not the script's)."""
+    hits = [i for i in range(start_from, len(flat_lines)) if flat_lines[i]["text"] == anchor]
+    if not hits:
+        raise RestoreError(f"{label}: anchor not found: {anchor!r}")
+    if occurrence is not None:
+        if not (1 <= occurrence <= len(hits)):
+            raise RestoreError(
+                f"{label}: occurrence {occurrence} out of range "
+                f"({len(hits)} hits for {anchor!r})"
+            )
+        return hits[occurrence - 1]
+    if len(hits) > 1:
+        raise RestoreError(
+            f"{label}: anchor ambiguous ({len(hits)} hits): {anchor!r} "
+            f"-- disambiguate with an explicit 1-indexed \"occurrence\""
+        )
+    return hits[0]
+
+
+def _range_label(r: dict) -> str:
+    return f"pages {r['pages']!r}" if "pages" in r else f"anchor {r['start_anchor']!r}"
+
+
+def resolve_range_span(r: dict, flat_lines: list):
+    """Return [start, end) into flat_lines for one page_ranges entry.
+    Either "pages": "A-B" (whole pages, the common case) or a
+    "start_anchor"/"end_anchor" pair (both required together) isolating an
+    exact line span -- e.g. a verse passage embedded mid-page, where
+    page-level granularity can't separate it from the surrounding prose."""
+    if "start_anchor" in r or "end_anchor" in r:
+        if "pages" in r:
+            raise RestoreError("page_ranges entry cannot mix 'pages' with start_anchor/end_anchor")
+        if "start_anchor" not in r or "end_anchor" not in r:
+            raise RestoreError("page_ranges anchor entry needs both start_anchor and end_anchor")
+        start = find_anchor_line_index(flat_lines, r["start_anchor"], "page_ranges start_anchor",
+                                        occurrence=r.get("start_anchor_occurrence"))
+        end = find_anchor_line_index(flat_lines, r["end_anchor"], "page_ranges end_anchor",
+                                      start_from=start, occurrence=r.get("end_anchor_occurrence"))
+        return start, end + 1
+    lo, hi = parse_page_spec(r["pages"])
+    idxs = [i for i, ln in enumerate(flat_lines) if lo <= ln["_page"] <= hi]
+    if not idxs:
+        raise RestoreError(f"page range {r['pages']!r} matches no extracted pages")
+    return idxs[0], idxs[-1] + 1
+
+
+def resolve_ranges(page_ranges: list, flat_lines: list) -> list:
+    """Resolve every page_ranges entry to a [start, end) span over
+    flat_lines, then require them to exactly partition it in document
+    order -- no gaps, no overlaps, whether the entries are page-based,
+    anchor-based, or a mix. Ambiguity is a policy bug, never guessed."""
+    spans = [(*resolve_range_span(r, flat_lines), r) for r in page_ranges]
+    spans.sort(key=lambda s: s[0])
+
+    cursor = 0
+    for start, end, r in spans:
+        if start != cursor:
+            raise RestoreError(
+                f"page_ranges gap or overlap at line index {cursor}: "
+                f"{_range_label(r)} starts at line index {start}"
+            )
+        cursor = end
+    if cursor != len(flat_lines):
+        raise RestoreError(
+            f"page_ranges do not cover the whole document: "
+            f"covered {cursor} of {len(flat_lines)} lines"
+        )
+    return spans
 
 
 # --------------------------------------------------------------------------- #
@@ -182,21 +255,18 @@ def verse_block(lines):
 # --------------------------------------------------------------------------- #
 # Chunk processing
 # --------------------------------------------------------------------------- #
-def process_chunk(range_entry, page_nums, pages, global_reflow, dehyphenate_on,
+def process_chunk(range_entry, lines, global_reflow, dehyphenate_on,
                    exceptions, furniture_compiled, furniture_counts):
     treat = range_entry["treat"]
     reflow_mode = range_entry.get("reflow", global_reflow)
 
     flat_lines = []
-    for p in page_nums:
-        for ln in pages[p]["lines"]:
-            hit = furniture_match(ln["text"], furniture_compiled)
-            if hit:
-                furniture_counts[hit] = furniture_counts.get(hit, 0) + 1
-                continue
-            entry = dict(ln)
-            entry["_page"] = p
-            flat_lines.append(entry)
+    for ln in lines:
+        hit = furniture_match(ln["text"], furniture_compiled)
+        if hit:
+            furniture_counts[hit] = furniture_counts.get(hit, 0) + 1
+            continue
+        flat_lines.append(dict(ln))
 
     if treat == "skip":
         # Furniture within a skipped page is still tallied above, but none
@@ -270,7 +340,7 @@ def render_markdown(units):
 def restore(extract_dir: Path, policy: dict) -> dict:
     pages = load_pages(extract_dir)
     all_page_nums = sorted(pages)
-    assignment = assign_pages_to_ranges(policy["page_ranges"], all_page_nums)
+    flat_lines = flatten_lines(pages, all_page_nums)
 
     furniture_compiled = compile_furniture(policy.get("furniture", []))
     furniture_counts = {}
@@ -278,26 +348,19 @@ def restore(extract_dir: Path, policy: dict) -> dict:
     # Raw "in" text for the fidelity gate: every extracted line, across every
     # page regardless of treat, minus furniture -- a deliberate skip still
     # has to justify itself against this baseline.
-    in_parts = []
-    for p in all_page_nums:
-        for ln in pages[p]["lines"]:
-            if furniture_match(ln["text"], furniture_compiled):
-                continue
-            in_parts.append(ln["text"])
-    in_text = "\n".join(in_parts)
+    in_text = "\n".join(
+        ln["text"] for ln in flat_lines if not furniture_match(ln["text"], furniture_compiled)
+    )
 
-    # Chunks in page order, one per page_ranges entry.
-    ranges_in_order = sorted(policy["page_ranges"], key=lambda r: parse_page_spec(r["pages"])[0])
+    spans = resolve_ranges(policy["page_ranges"], flat_lines)
 
     all_units = []
     joins_made = 0
     hyphens_resolved = 0
     lines_out_total = 0
-    for r in ranges_in_order:
-        lo, hi = parse_page_spec(r["pages"])
-        page_nums = [p for p in range(lo, hi + 1) if p in pages]
+    for start, end, r in spans:
         units, joins, hyph, lines_out = process_chunk(
-            r, page_nums, pages, policy.get("reflow", "sentence"),
+            r, flat_lines[start:end], policy.get("reflow", "sentence"),
             policy.get("dehyphenate", False), policy.get("dehyphenate_exceptions", []),
             furniture_compiled, furniture_counts,
         )
@@ -328,7 +391,7 @@ def restore(extract_dir: Path, policy: dict) -> dict:
 
     gate_pass = 0.98 <= char_ratio <= 1.02 and ngram_containment >= 0.995
 
-    lines_in_total = sum(len(pages[p]["lines"]) for p in all_page_nums)
+    lines_in_total = len(flat_lines)
     paragraphs_emitted = sum(1 for kind, _ in all_units if kind == "para") + \
         sum(1 for kind, _ in all_units if kind == "verse")
 
