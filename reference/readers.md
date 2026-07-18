@@ -22,7 +22,26 @@ CrossPoint's user guide confirms the same for its defaults: built-in fonts
 cover Latin/Cyrillic/Vietnamese, and **CJK is explicitly unsupported until you
 install a custom SD-card font**.
 
-## OPEN PROBLEM (2026-07): CJK SD fonts don't render on CrossPoint X3
+## RESOLVED (2026-07): CJK works on CrossPoint X3 — font must be builder-shaped
+
+Device-confirmed with the diagnostic EPUB rendered in LXGW WenKai:
+
+- **`WenKaiFull` (builder-faithful: broad latin-ext+cjk intervals, 22.5k
+  glyphs) loads and renders beautifully.** The interval-shape hypothesis was
+  right: our sparse charset-subset fonts (977 tiny intervals) silently fail
+  to load and revert the setting; the same font content with builder-shaped
+  intervals works. Upstream issue candidate: sparse-interval .cpfont fonts
+  pass validation but fail to load on-device.
+- **Ruby: confirmed broken** — `<rt>` leaks inline (石shí头tou).
+- **Interlinear: confirmed broken** — the CSS stacking collapses inline
+  (shí石tou头). No inline-block support.
+- **Plain: renders perfectly.** The X3 modes are `plain` and the marked-plain
+  pair `gloss-underline` / `gloss-pinyin` (see epub-builder/FORMAT.md).
+
+Practical recipe: WenKaiFull on the SD card + books built in a gloss-* mode.
+The section below is the (now historical) debugging record.
+
+## The debugging record (was: OPEN PROBLEM): CJK SD fonts on CrossPoint X3
 
 After flashing CrossPoint 1.4.1, our CJK `.cpfont` fonts are discovered and
 selectable, but opening a book shows no hanzi and the font setting **reverts to

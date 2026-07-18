@@ -2,7 +2,7 @@
   "title": "西游记 · 分级读物 (HSK 1-3)",
   "author": "Graded Reader Pipeline",
   "language": "zh-CN",
-  "pinyin_mode": "interlinear",
+  "pinyin_mode": "gloss-pinyin",
   "chapters": [
     {
       "source": "chapters/ch01.md",

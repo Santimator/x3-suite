@@ -8,12 +8,18 @@ things heavy epub libraries hide from you.
 Pinyin display is a parameter (the X3/CrossPoint renderer's ruby support is
 unconfirmed, so we don't bet the structure on it):
 
-  ruby         <ruby>汉<rt>hàn</rt></ruby>   -- compact, standard, needs a
-               renderer that supports <ruby>. If the reader doesn't, the <rt>
-               text typically leaks inline ("汉hàn").
-  interlinear  stacked spans, pinyin on a line above the hanzi via CSS only --
-               no <ruby> tag, so it renders anywhere. Safe e-ink fallback.
-  plain        hanzi only; pinyin appears solely in the per-chapter glossary.
+  ruby            <ruby>汉<rt>hàn</rt></ruby>  -- compact, standard, needs a
+                  renderer that supports <ruby>. On the X3 the <rt> text
+                  leaks inline ("汉hàn") -- device-confirmed unsupported.
+  interlinear     stacked spans via CSS inline-block. On the X3 the stacking
+                  collapses inline -- device-confirmed unsupported.
+  plain           hanzi only; pinyin appears solely in the per-chapter
+                  glossary. Renders everywhere.
+  gloss-underline plain body, but each glossary word's first occurrence is
+                  underlined (<u>), signalling "this word is in the glossary".
+  gloss-pinyin    plain body, but each glossary word's first occurrence gets
+                  word-level pinyin right after it: 猴子hóuzi (curated
+                  glossary pinyin, spaces stripped).
 
 The first occurrence of each glossary word in the chapter text is a tappable
 link (dotted underline) to its entry in the end-of-chapter glossary; each entry
@@ -58,7 +64,13 @@ def vocab():
     return _vocab_mod
 
 
-MODES = ("ruby", "interlinear", "plain")  # pinyin modes; None = no annotation
+# Pinyin modes; None = no annotation. The gloss-* modes render plain hanzi
+# but mark each glossary word's first occurrence: underlined, or followed by
+# word-level pinyin (猴子hóuzi). Device-tested on the X3: ruby leaks <rt>
+# inline and interlinear's CSS stacking collapses, so plain/gloss-* are the
+# CrossPoint-safe modes (see reference/readers.md).
+MODES = ("ruby", "interlinear", "plain", "gloss-underline", "gloss-pinyin")
+GLOSS_MODES = ("gloss-underline", "gloss-pinyin")
 
 
 class BuildError(Exception):
@@ -137,19 +149,37 @@ def render_paragraph(text: str, mode: str, link_ctx: Optional[Tuple] = None) -> 
     """
     if mode is None:
         return html.escape(text)
+    # gloss-* modes render body words plain; only the marking differs below.
+    word_mode = "plain" if mode in GLOSS_MODES else mode
     words = vocab().segment(text)
     parts: List[str] = []
     for w in words:
-        rendered = render_word(w, mode)
+        rendered = render_word(w, word_mode)
         if link_ctx:
             prefix, link_map, linked = link_ctx
-            idx = link_map.get(w)
-            if idx is not None and idx not in linked:
+            hit = link_map.get(w)
+            if hit is not None and hit[0] not in linked:
+                idx, row_pinyin = hit
                 linked.add(idx)
-                rendered = (
-                    f'<a class="gl" id="{prefix}-r{idx}" href="#{prefix}-g{idx}">'
-                    f"{rendered}</a>"
-                )
+                if mode == "gloss-underline":
+                    rendered = (
+                        f'<a class="glm" id="{prefix}-r{idx}" href="#{prefix}-g{idx}">'
+                        f"<u>{rendered}</u></a>"
+                    )
+                elif mode == "gloss-pinyin":
+                    # word-level pinyin, spaces stripped: 猴子hóuzi. Prefer the
+                    # curated glossary pinyin; fall back to pypinyin.
+                    py = (row_pinyin or "").replace(" ", "") or "".join(
+                        s for _, s in char_pinyin(w))
+                    rendered = (
+                        f'<a class="glm" id="{prefix}-r{idx}" href="#{prefix}-g{idx}">'
+                        f'{rendered}<span class="wpy">{html.escape(py)}</span></a>'
+                    )
+                else:
+                    rendered = (
+                        f'<a class="gl" id="{prefix}-r{idx}" href="#{prefix}-g{idx}">'
+                        f"{rendered}</a>"
+                    )
         parts.append(rendered)
     return "".join(parts)
 
@@ -369,6 +399,12 @@ ruby rt { font-size: 0.5em; }
 /* tappable glossary links: dotted underline under the word, hanzi color kept */
 a.gl { color: inherit; text-decoration: underline; text-decoration-style: dotted; }
 a.gback { text-decoration: none; color: #888; margin-left: 0.4em; }
+/* gloss-* modes: marked glossary words in otherwise-plain text.
+   The anchor carries no decoration; the <u> element (gloss-underline) or the
+   trailing .wpy pinyin (gloss-pinyin) is the visible mark — chosen because
+   they degrade gracefully on minimal engines like the X3's. */
+a.glm { color: inherit; text-decoration: none; }
+.wpy { font-size: 0.7em; color: #444; }
 """
 
 # Appended only for un-annotated (mode=None / pdf2epub) builds -- annotated
@@ -531,7 +567,7 @@ def assemble(book_dir: Path, mode: str) -> Tuple[List[Dict], Dict]:
         md = (book_dir / ch["source"]).read_text(encoding="utf-8")
         gloss_rows = load_glossary(book_dir / ch["glossary"]) if ch.get("glossary") else []
         prefix = f"ch{idx:02d}"
-        link_map = {w: i for i, (w, _, _) in enumerate(gloss_rows)}
+        link_map = {w: (i, p) for i, (w, p, _) in enumerate(gloss_rows)}
         linked: set = set()
         # images_out is only populated on the mode=None (pdf2epub) path;
         # chapter_body() ignores it entirely for annotated modes.
@@ -561,11 +597,20 @@ def assemble_diagnostic(book_dir: Path) -> Tuple[List[Dict], Dict]:
         "ruby": "Mode 1 — RUBY (needs &lt;ruby&gt; support)",
         "interlinear": "Mode 2 — INTERLINEAR (CSS stacking, no ruby)",
         "plain": "Mode 3 — PLAIN (pinyin only in glossary)",
+        "gloss-underline": "Mode 4 — GLOSS-UNDERLINE (glossary words underlined)",
+        "gloss-pinyin": "Mode 5 — GLOSS-PINYIN (glossary words + word pinyin)",
     }
     for idx, mode in enumerate(MODES, start=1):
-        title, body = chapter_body(md, mode)
+        # gloss-* modes need the link machinery to show their marking.
+        link_ctx = None
+        linked: set = set()
+        if mode in GLOSS_MODES:
+            link_map = {w: (i, p) for i, (w, p, _) in enumerate(gloss_rows)}
+            link_ctx = (f"diag{idx}", link_map, linked)
+        title, body = chapter_body(md, mode, link_ctx=link_ctx)
         banner = f'<h1>{labels[mode]}</h1><p style="text-indent:0;color:#777">If this page looks wrong, this mode is unsupported on your device.</p>'
-        body = banner + body + glossary_section(gloss_rows, mode)
+        body = banner + body + glossary_section(gloss_rows, mode, prefix=f"diag{idx}",
+                                                 linked=linked if mode in GLOSS_MODES else None)
         chapters.append({"id": f"diag{idx}", "file": f"diag{idx}.xhtml", "title": labels[mode].split("—")[0].strip(), "body": body})
     return chapters, meta
 

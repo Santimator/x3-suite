@@ -34,7 +34,13 @@ workspace/<slug>/
   becomes a TOC entry titled by the chapter's `#` heading.
 - `glossary` is optional and graded-reader-specific (TSV: word, pinyin,
   gloss; glossed words in the text link to their entry and back).
-- `pinyin_mode` (`ruby` / `interlinear` / `plain`) is graded-reader-specific.
+- `pinyin_mode` is graded-reader-specific. Five values:
+  `ruby` / `interlinear` (device-confirmed broken on the X3: rt leaks
+  inline / stacking collapses — kept for capable readers like Apple Books),
+  `plain` (hanzi only), and the X3-recommended marked-plain pair:
+  `gloss-underline` (glossary words' first occurrences underlined) and
+  `gloss-pinyin` (first occurrences followed by word-level pinyin, 猴子hóuzi,
+  taken from the curated glossary row with spaces stripped).
 
 ## Chapter markdown — core (implemented)
 

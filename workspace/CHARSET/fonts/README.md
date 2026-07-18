@@ -12,11 +12,11 @@ Fonts" is the WiFi download store; not needed for these.
 | `EBGaramond` | classical serif, reg+bold+italic | Warm Garamond book face — softer, more organic than the built-in Noto. **Try for Latin reading.** |
 | `ZLatinTest` | Noto Sans, single style | Plain control font (see diagnostics below) |
 
-## Chinese (CJK — still being debugged on the X3, see readers.md)
+## Chinese (CJK — WenKaiFull confirmed working on the X3)
 
 | Family | Coverage | Note |
 |---|---|---|
-| `WenKaiFull` | full CJK, builder-faithful (100 intervals, 22.5k glyphs, 3-6.5 MB/size) | **Best CJK bet on CrossPoint** — built exactly like the official web builder (broad latin-ext+cjk presets), unlike our sparse subsets |
+| `WenKaiFull` | full CJK, builder-faithful (100 intervals, 22.5k glyphs, 3-6.5 MB/size) | **CONFIRMED WORKING on the X3** — builder-shaped intervals; use this one. (The sparse-subset families below fail to load — kept as the bug repro.) |
 | `ZhTest` | letter-writer book only | Minimal CJK control — open 写信的老人 |
 | `WenKaiHSK` | current books (533 glyphs) | kaiti, light |
 | `NotoHSK` | current books (533 glyphs) | sans, light |
