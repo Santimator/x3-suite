@@ -44,7 +44,8 @@ Python that has `jieba` and `pypinyin` installed (see Setup).
   to `introduced`, files the recap, marks the outline entry, wires `book.json`.
 - **EPUB assembly** — done by the suite-shared builder skill
   (`.claude/skills/epub-builder/`): hand-built EPUB with selectable pinyin
-  display (`ruby` / `interlinear` / `plain`) and per-chapter glossary;
+  display (five modes; `gloss-pinyin` is the X3 default — see the builder's
+  FORMAT.md) and per-chapter glossary;
   glossed words in the text link to their glossary entry (and back).
   Annotation engages when `book.json` has `pinyin_mode`; the input contract
   is the builder's `FORMAT.md`.
@@ -54,12 +55,8 @@ Python that has `jieba` and `pypinyin` installed (see Setup).
   an OpenAI-compatible endpoint for the model steps (see "Two drivers").
 - **`scripts/selftest.py`** — pipeline self-test: cascade examples, every
   workspace book against its gates, epub build + link integrity. Run it after
-  changing scripts or lists.
-- **`scripts/charset.py`** — emits the exact character set the built book(s)
-  render (CHARSET.txt + codepoint INTERVALS.txt), for building small device
-  fonts — e-ink readers like the X3 can't hold a full 20k-glyph CJK font, but
-  a whole graded-reader library needs only a few hundred. See
-  `reference/readers.md` at the repo root (shared device notes).
+  changing scripts or lists. (Device fonts are prebuilt in `reference/fonts/`;
+  charset-subsetting was retired — see readers.md for why sparse fonts fail.)
 - **`prompts/planner.md`, `prompts/scribe.md`, `prompts/glossary_editor.md`** —
   the three LLM-role briefs.
 
@@ -184,7 +181,7 @@ override. `validate.py BOOKDIR` checks every chapter in `book.json` at once.
    so add-and-gloss words no longer flag and introduced words aren't re-glossed.
 8. **Assemble EPUB** (after chapters are accepted):
    ```
-   python ../epub-builder/scripts/build_epub.py BOOK --out BOOK/build/book.epub --pinyin-mode interlinear
+   python ../epub-builder/scripts/build_epub.py BOOK --out BOOK/build/book.epub
    ```
 
 ## Gates that are NOT automated
@@ -196,18 +193,16 @@ override. `validate.py BOOKDIR` checks every chapter in `book.json` at once.
   you haven't tried), opt in with `--pause-after 1`: the runner stops after
   chapter 1 so a human can confirm it reads naturally and the grading is
   *pleasant*, not merely legal, before the rest of the book generates.
-- **Pinyin display depends on the target device.** Ruby (`<ruby>`) is compact
-  and preferred, but a given e-reader may not support it (it can leak the `<rt>`
-  text inline). Before scaling, build the diagnostic EPUB and confirm on the
-  actual device:
+- **Pinyin display depends on the target device.** On the X3, ruby and
+  interlinear are device-confirmed broken; ship `gloss-pinyin` (the books'
+  default), `gloss-underline`, or `plain`. Ruby is kept for capable readers
+  (phones). For a NEW device, settle it empirically with the diagnostic EPUB
+  (chapter 1 rendered in all five modes on labeled pages), then set
+  `pinyin_mode` in `book.json`:
   ```
   python ../epub-builder/scripts/build_epub.py BOOK --out BOOK/build/render-test.epub --diagnostic
   ```
-  It renders chapter 1 three ways (ruby / interlinear / plain) on labeled pages.
-  Sideload once, see which looks right, set `pinyin_mode` in `book.json`
-  accordingly. `interlinear` is the safe fallback — CSS stacking, no ruby tag,
-  renders anywhere. See `reference/readers.md` at the repo root for the
-  Xteink X3 / CrossPoint situation.
+  Device notes: `reference/readers.md` at the repo root.
 
 ## Book layout
 
@@ -220,14 +215,16 @@ BOOK/
 ```
 
 Worked examples under `workspace/`: `journey-west` (first scaffold, HSK 1-3),
-`yugong-mountain` (愚公移山, HSK 1-3, 5 chapters), `twelve-zodiac` (十二生肖,
-HSK 1-4, 10 chapters) — each with plan, glossaries, and built EPUBs.
+`yugong-mountain` (愚公移山, HSK 1-3, 5 ch), `twelve-zodiac` (十二生肖,
+HSK 1-4, 10 ch), `letter-writer` (写信的老人, original story, HSK 1-4, 7 ch)
+— each with plan, glossaries, and built EPUBs.
 
 ## Build order (when starting a new reader)
 
 1. Scaffold against a small list and ONE chapter (already done for HSK 1-3).
 2. Get validate + build_epub green on that one chapter end to end.
-3. Confirm ruby/pinyin renders on the target reader via the diagnostic EPUB.
+3. Confirm the pinyin mode renders on the target reader (diagnostic EPUB;
+   on the X3 that's settled: gloss-pinyin / gloss-underline / plain).
 4. Only then run the full loop for the remaining chapters.
 
 ## Setup

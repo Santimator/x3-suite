@@ -50,7 +50,7 @@ builder doesn't support it — extend the contract first, then the builder.
 
 ## Consumers
 
-- graded-reader: `run_book.py` shells out to it; `selftest.py` and
-  `charset.py` import `build_epub` for in-memory assembly.
+- graded-reader: `run_book.py` shells out to it; `selftest.py` imports
+  `build_epub` for in-memory assembly.
 - pdf2epub: stage 5 of its pipeline (its `prepare.py` emits FORMAT.md-shaped
   input).

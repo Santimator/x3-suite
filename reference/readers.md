@@ -1,244 +1,105 @@
-# Target reader notes — Xteink X3 / CrossPoint
+# Device notes — Xteink X3 (CrossPoint firmware)
 
-The deliverable EPUB is meant to drop into a Calibre-Web-Automated ingest folder
-and ultimately render on an **Xteink X3** (ESP32-C3, ~400 KB RAM) running either
-the stock firmware or **CrossPoint** (open-source replacement firmware;
-CrossPoint 1.4 is current as of mid-2026). A CJK-focused fork
-(`crosspoint-reader-cjk`) also exists but supports the **X4 only**.
+The suite's EPUBs target an **Xteink X3** (ESP32-C3, ~400 KB RAM, 528×792
+e-ink) running **CrossPoint** (open-source firmware; 1.4.1 as of mid-2026),
+fed through a Calibre-Web-Automated ingest folder. Everything below is
+**device-confirmed** (photos, 2026-07) unless marked otherwise.
 
-## CONFIRMED on-device (stock firmware, 2026-07): no CJK glyphs
+## The working recipe (confirmed end-to-end)
 
-Device test with `letter-writer.epub` on a stock-firmware X3:
+1. **Firmware:** CrossPoint (web-flash from https://crosspointreader.com/;
+   stock is restorable the same way). Stock firmware ships no CJK glyphs at
+   all — hanzi render as tofu boxes — so it is not an option for Chinese.
+2. **Font:** `reference/fonts/WenKaiFull/` → copy the folder to the SD card
+   under `/fonts/`, power-cycle (fonts scan once at boot), select
+   *WenKaiFull* under Settings → Reader → Font Family. Full-CJK LXGW WenKai
+   (kaiti style), glyphs streamed from SD. `EBGaramond/` is the matching
+   Latin upgrade. Install details: `reference/fonts/README.md`.
+3. **Books:** build with `pinyin_mode: gloss-pinyin` (or `gloss-underline` /
+   `plain`) — see the mode verdicts below.
 
-- **Every Han character renders as a tofu box (□).** Latin text — including
-  pinyin *with tone marks* (yuǎn fāng) and the English glossary — renders
-  perfectly. Diagnosis: the stock font has Latin + Latin-Extended coverage and
-  **zero CJK glyphs**. This is a font problem, not a markup/encoding problem.
-- **Ruby `<rt>` pinyin did not appear** above (or inline with) the body text —
-  the stock engine appears to drop ruby annotation text entirely. So even with
-  a CJK font, stock likely shows hanzi-only body text.
+## Rendering verdicts (what the engine actually does)
 
-CrossPoint's user guide confirms the same for its defaults: built-in fonts
-cover Latin/Cyrillic/Vietnamese, and **CJK is explicitly unsupported until you
-install a custom SD-card font**.
+| Feature | Verdict |
+|---|---|
+| `<ruby>` pinyin | **Broken** — `<rt>` leaks inline: 石shí头tou |
+| Interlinear (CSS inline-block stacking) | **Broken** — collapses inline: shí石tou头 |
+| Plain hanzi body | **Perfect** |
+| `gloss-*` marked-plain modes | Work (plain text + `<u>` / trailing Latin) |
+| Embedded EPUB fonts (`@font-face`) | Ignored — the renderer only rasterizes pre-converted `.cpfont` bitmaps; never fatten the books with fonts |
+| Glossary/internal links | Harmless; not tappable (no touchscreen) — kept for phone reading |
 
-## RESOLVED (2026-07): CJK works on CrossPoint X3 — font must be builder-shaped
+Keep chapter CSS trivial: the engine honors basic text properties only.
+`ruby`/`interlinear` modes remain in the builder for capable readers
+(Apple Books renders ruby beautifully) — never for the X3.
 
-Device-confirmed with the diagnostic EPUB rendered in LXGW WenKai:
+## Building `.cpfont` fonts — the rules that matter
 
-- **`WenKaiFull` (builder-faithful: broad latin-ext+cjk intervals, 22.5k
-  glyphs) loads and renders beautifully.** The interval-shape hypothesis was
-  right: our sparse charset-subset fonts (977 tiny intervals) silently fail
-  to load and revert the setting; the same font content with builder-shaped
-  intervals works. Upstream issue candidate: sparse-interval .cpfont fonts
-  pass validation but fail to load on-device.
-- **Ruby: confirmed broken** — `<rt>` leaks inline (石shí头tou).
-- **Interlinear: confirmed broken** — the CSS stacking collapses inline
-  (shí石tou头). No inline-block support.
-- **Plain: renders perfectly.** The X3 modes are `plain` and the marked-plain
-  pair `gloss-underline` / `gloss-pinyin` (see epub-builder/FORMAT.md).
+CrossPoint's converter is `lib/EpdFont/scripts/fontconvert_sdcard.py`
+(same script the https://crosspointreader.com/fonts web builder wraps — note
+the builder requires you to *upload* a base TTF/OTF; it ships no fonts, and
+the official catalog contains zero CJK families).
 
-Practical recipe: WenKaiFull on the SD card + books built in a gloss-* mode.
-The section below is the (now historical) debugging record.
-
-## The debugging record (was: OPEN PROBLEM): CJK SD fonts on CrossPoint X3
-
-After flashing CrossPoint 1.4.1, our CJK `.cpfont` fonts are discovered and
-selectable, but opening a book shows no hanzi and the font setting **reverts to
-built-in Noto**. Investigated deeply — findings, so the next person doesn't
-repeat the dead ends:
-
-- **Not a file-format problem.** Firmware 1.4.1 expects `CPFONT_VERSION 4`; our
-  files are v4, magic matches. `SdCardFont::load()` is byte-identical in 1.4.0
-  and 1.4.1; re-implementing its every check in Python, our files pass all of
-  them (header, style TOC, all interval-table validations, path/name buffers).
-- **Not a memory-at-load problem.** `load()` allocates almost nothing (kern=0,
-  ligatures=0, one small interval table); the big buffers are in `prewarm()` at
-  *render* time. The lite single-style 71 KB build reverts too — ruling size out.
-- **Nobody has done it.** Mainline's font catalog (`sd-fonts.yaml`) is 21
-  families, **all Latin — zero CJK**. "Viable CJK rendering" (1.3.0 notes) was a
-  capability claim, never a shipped/validated font. There is **no known-working
-  CJK `.cpfont` in existence** to compare against.
-- **The CJK fork can't help.** `crosspoint-reader-cjk` has a real CJK font
-  system (`.bin` fonts, LRU cache) but its `platformio.ini` symlinks an
-  `open-x4-sdk` for all hardware drivers — it's built for **X4 hardware** and
-  would break an X3's display/input. Same chip, different board.
-
-**Update — the interval-shape hypothesis.** Comparing our build method with the
-official web builder's (it wraps the same `fontconvert_sdcard.py`, with broad
-preset ranges; the 1.4.0 notes show the official pipeline also passes a Noto
-punctuation fallback): every official font uses **few, broad intervals** (a
-builder-style `latin-ext,cjk` WenKai build: 100 intervals / 22,563 glyphs),
-while our charset-subset fonts used **977 sparse intervals / 1,223 glyphs** — a
-structural shape no official font has ever exercised on-device. Both pass the
-parser's checks, but only one shape has field history. `WenKaiFull/` in
-`workspace/CHARSET/fonts/` is a builder-faithful full-CJK build (3–6.5 MB per
-size, glyphs streamed from SD) to test this: if it loads where the subsets
-reverted, the sparse-interval shape is the trigger — a precise upstream bug
-report — and Chinese works meanwhile.
-
-**Isolation experiment (ship these two control fonts):**
-- `ZLatinTest` (Latin-only) → open any English book. Renders + sticks ⇒ SD
-  fonts work, so the failure is *CJK-specific* (render/layout path with
-  high/multibyte codepoints) — worth an upstream issue with the above evidence.
-  Reverts too ⇒ the whole SD-font subsystem is broken on this unit (reflash, or
-  a different/reformatted SD card).
-- `ZhTest` (CJK, one book's charset) → open 写信的老人, to confirm the CJK-vs-Latin split.
-
-**Bottom line:** proper CJK reading on the X3 is currently unproven in either
-firmware. Realistic options: (a) run the isolation test and, if it's a
-CJK-specific bug, file it upstream; (b) read Chinese on the **stock firmware**
-(it's a Chinese-market device — likely has a CJK font; test a plain, non-ruby
-EPUB); (c) accept Latin-only on CrossPoint for now (Garamond below); (d) use a
-different reader for Chinese. See the fresh device test needed in "How to
-settle ruby".
-
-## The fix is reader-side (books are fine)
-
-Embedding a font in the EPUB (`@font-face`) will NOT help on this class of
-device: the renderer uses pre-converted bitmap fonts (`.cpfont`) and cannot
-rasterize an embedded TTF. Do not fatten the books; fix the device:
-
-1. **Flash CrossPoint** (supports X3 + X4): https://crosspointreader.com/ —
-   web-flash from the browser; stock firmware can be restored later.
-2. **Install a CJK font on the SD card.** Options, best first:
-   - **Use the prebuilt fonts in `workspace/CHARSET/fonts/`** (recommended) —
-     the folder mirrors the SD layout (one subfolder per family), so copy the
-     whole `fonts/` folder to the SD card root as-is; see its README.
-     Two families, both regular+bold, subset to the full HSK 1-4 pipeline
-     universe (1223 glyphs), built with CrossPoint's own
-     `fontconvert_sdcard.py` (see "Building the font offline" below):
-     - `LXGWWenKai-GradedReader_{12,14,16,18}.cpfont` — **霞鹜文楷 (LXGW
-       WenKai)**, the open-source kaiti: brush-written regular-script style
-       like HSK textbook typography, canonical handwritten stroke shapes,
-       the e-reader community's favorite for Chinese. SIL OFL 1.1.
-       0.35–0.73 MB per size. **Pick this one for reading.**
-     - `NotoSansSC-GradedReader_{12,14,16,18}.cpfont` — Noto Sans SC, a
-       clean print-style sans; crisper at very small sizes. OFL. Backup.
-   - Grab a prebuilt full-CJK `.cpfont` from
-     https://github.com/crosspoint-reader/crosspoint-fonts — works, but full
-     CJK is 20k+ glyphs and the CJK fork warns big fonts can OOM the ESP32.
-   - Layout matters: the firmware scans `/fonts/` (or `/.fonts/`) for
-     **family folders** — loose `.cpfont` files are ignored. One folder per
-     family, size files inside:
-     `/fonts/LXGWWenKai-GradedReader/LXGWWenKai-GradedReader_12.cpfont` etc.
-     The scan runs **once at boot**, so power-cycle after copying. Fonts
-     then appear under **Settings → Reader → Font Family**. ("Manage Fonts"
-     is the WiFi download store — not needed for SD fonts.)
-
-   **Note on the web font builder** (https://crosspointreader.com/fonts): it
-   is a wrapper around the converter script and **requires you to upload a
-   base TTF/OTF yourself** — it ships no fonts. If you have nothing to feed
-   it, use the offline build below (or the prebuilt files above) instead.
-
-   **If selecting the font "doesn't stick"** (books show no hanzi and the
-   setting reverts to a built-in Noto): the firmware clears
-   `sdFontFamilyName` whenever `loadFamily()` fails at book-open time. Our
-   full fonts pass every *structural* check in the 1.4.x parser (verified by
-   re-implementing `SdCardFont::load()` against the files), so the remaining
-   suspect is heap exhaustion on the ESP32-C3 while allocating the resident
-   tables (intervals/advance/prewarm × styles). Use the lean variant in
-   `workspace/CHARSET/fonts/` first:
-   `WenKaiHSK_{12,14,16,18}.cpfont` and `NotoHSK_...` — single style,
-   books-only charset (533 glyphs, 71-155 KB/file), ~5× lighter resident
-   footprint. Bold headings render in regular weight; acceptable trade.
-   Note the official crosspoint-fonts catalog ships **no CJK family at
-   all** — CJK on this device is community-pioneer territory.
-3. **Re-run the diagnostic EPUB** (below) to pick the pinyin mode — ruby
-   support under CrossPoint is still unconfirmed; `interlinear` is the likely
-   winner, `plain` the safe floor.
-
-## Subsetting: the graded-reader advantage
-
-A graded reader's character universe is small and *known*. `scripts/charset.py`
-scans the built book(s) and emits exactly what a font must cover:
-
-```
-python scripts/charset.py workspace/BOOK [workspace/BOOK2 ...] --out-dir DIR
-```
-
-- `CHARSET.txt` — every distinct character (all four current books together:
-  **536 chars, 403 hanzi**) for `pyftsubset --text-file=...`
-- `INTERVALS.txt` — merged codepoint ranges for CrossPoint's
-  `fontconvert_sdcard.py --intervals ...` or the custom-range field of the web
-  font builder (https://crosspointreader.com/fonts)
-
-With `--include-lists` the charset covers every character of every vocab-list
-word plus all tone-marked pinyin (currently 1224 chars) — the font then covers
-anything the pipeline can write at this level, not just the current books.
-Font source suggestion: Noto Sans SC / Noto Serif SC (OFL-licensed).
-
-### Building the font offline (what produced `workspace/CHARSET/fonts/`)
-
-The web builder needs a base font uploaded; this is the same thing headless:
+1. **Use broad preset intervals — never sparse custom ranges.** This is the
+   hard-won one: fonts subset to a book's exact charset (hundreds of tiny
+   Unicode intervals) pass every structural check in the firmware's parser
+   yet **silently fail to load on-device** — the font lists in the picker,
+   but opening a book reverts the setting to built-in Noto. The identical
+   font content built with broad presets (`latin-ext,cjk` → ~100 wide
+   intervals, 22.5k glyphs) loads and renders. Glyphs stream from SD, so the
+   big font costs no RAM. *Upstream issue candidate; verified on 1.4.1.*
+2. **Layout:** one folder per family — `/fonts/<Family>/<Family>_<size>.cpfont`;
+   loose files are ignored. Scan happens at boot only.
+3. **Reproducible build** (what produced `reference/fonts/`):
 
 ```bash
 pip install freetype-py fonttools
 curl -sSLO https://raw.githubusercontent.com/crosspoint-reader/crosspoint-reader/master/lib/EpdFont/scripts/fontconvert_sdcard.py
 curl -sSLO https://raw.githubusercontent.com/crosspoint-reader/crosspoint-reader/master/lib/EpdFont/scripts/cpfont_version.py
-curl -sSLo noto.otf      https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/SubsetOTF/SC/NotoSansSC-Regular.otf
-curl -sSLo noto-bold.otf https://raw.githubusercontent.com/notofonts/noto-cjk/main/Sans/SubsetOTF/SC/NotoSansSC-Bold.otf
 
-# INTERVALS.txt -> the converter's (0xA-0xB),(0x20-0x7E),... syntax
-python3 -c "
-segs = open('INTERVALS.txt').read().strip().split(',')
-print(','.join(f'({a}-{b or a})' for a, _, b in (s.partition('-') for s in segs)))" > intervals_arg.txt
+# WenKaiFull: LXGW WenKai + Noto Sans SC fallback, full CJK presets.
+# TTF sources: github.com/lxgw/LxgwWenKai releases, or Ubuntu's
+# fonts-lxgw-wenkai package; Noto from github.com/notofonts/noto-cjk.
+python3 fontconvert_sdcard.py --intervals latin-ext,cjk \
+    --sizes 12,14,16,18 \
+    --regular LXGWWenKai-Regular.ttf --fallback-regular NotoSansSC-Regular.otf \
+    --name WenKaiFull --output-dir WenKaiFull/
 
-python3 fontconvert_sdcard.py --intervals "$(cat intervals_arg.txt)" \
-    --sizes 12,14,16,18 --regular noto.otf --bold noto-bold.otf \
-    --name NotoSansSC-GradedReader --output-dir fonts/
+# EBGaramond: Latin only, three real styles (Ubuntu: fonts-ebgaramond).
+python3 fontconvert_sdcard.py --intervals latin-ext \
+    --sizes 12,14,16,18 \
+    --regular EBGaramond12-Regular.otf --bold EBGaramond12-Bold.otf \
+    --italic EBGaramond12-Italic.otf \
+    --name EBGaramond --output-dir EBGaramond/
 ```
 
-Copy the resulting `.cpfont` files into a family folder on the SD card —
-`/fonts/<FontName>/<FontName>_SIZE.cpfont` — power-cycle the reader (fonts
-scan at boot), then pick the family under Settings → Reader → Font Family.
-Rebuild only when `charset.py` reports characters outside the current set.
+## Font style guide
 
-The WenKai build is identical except for the sources: `LXGWWenKai-Regular.ttf`
-+ `LXGWWenKai-Bold.ttf` as `--regular`/`--bold` with the Noto files as
-`--fallback-regular`/`--fallback-bold` (WenKai lacks exactly one of our
-glyphs, the ↩ back-link arrow — the fallback supplies it). When github.com
-is unreachable, the Ubuntu archive carries the TTFs as `fonts-lxgw-wenkai`
-(`apt-get download fonts-lxgw-wenkai && dpkg-deb -x ...`); upstream is
-https://github.com/lxgw/LxgwWenKai (releases).
+- **LXGW WenKai (楷体/kaiti)** — models brush-written stroke shapes, the
+  typographic tradition HSK textbooks use. Best for learners: what you read
+  is what you should write. SIL OFL.
+- **EB Garamond** — classical book serif for Latin text; warmer and less
+  tiring than the built-in Noto. SIL OFL.
+- Alternatives if taste differs: Noto Sans/Serif SC (print-style, sturdier
+  at tiny sizes), TW-Kai (traditional-oriented), Ma Shan Zheng (true brush
+  calligraphy — pretty, tiring as body text).
 
-### Font style guide (which family for what)
+## Alternative firmware (evaluated, not needed)
 
-- **LXGW WenKai (楷体 style)** — the "pretty and readable" pick: models real
-  brush-written stroke order and shapes, the same typographic tradition HSK
-  textbooks use for body text. Best for learners: what you read is what you
-  should write.
-- **Noto Sans SC (black/sans style)** — sturdier at tiny sizes and for UI.
-- Other open kaiti/brush options if taste differs: TW-Kai (Taiwan MOE,
-  traditional-oriented), AR PL UKai (older, Arphic license), Ma Shan Zheng
-  (Google Fonts, true brush calligraphy — pretty but tiring for body text).
-  Making a font from scratch is a different hobby: ~1200 hand-drawn glyphs
-  even for our subset. Unnecessary — WenKai already is the thing.
-
-## Ruby — still not confirmed under CrossPoint
-
-Nothing in CrossPoint's release notes, user guide, or the CJK fork mentions
-`<ruby>`/`<rt>`. On stock firmware the annotation text is dropped. Do not bet
-the structure on ruby: `build_epub.py` keeps pinyin display a parameter
-(`ruby` / `interlinear` / `plain`).
-
-### How to settle it (one device test)
-
-```
-python scripts/build_epub.py BOOK --out render-test.epub --diagnostic
-```
-
-One EPUB, chapter 1 rendered three ways on labeled pages. Flip through, pick
-the cleanest, set `pinyin_mode` in the book's `book.json`, rebuild. Re-test
-only after firmware changes.
+- **Papyrix** (bigbag/papyrix-reader): supports X3+X4, has a purpose-built
+  CJK path (streaming `.bin` fonts, full-BMP direct indexing) and strong
+  typography (Knuth-Plass justification). The fallback plan if CrossPoint's
+  CJK ever regresses; unnecessary now that WenKaiFull works.
+- **crosspoint-reader-cjk** fork: real CJK system but built against the
+  **X4 hardware SDK** — do not flash on an X3.
 
 ## Sources
 
-- https://github.com/crosspoint-reader/crosspoint-reader (X3+X4; USER_GUIDE:
-  default fonts have no CJK; SD fonts enable it; docs/sd-card-fonts.md)
-- https://github.com/crosspoint-reader/crosspoint-fonts (prebuilt .cpfont, CI)
-- https://crosspointreader.com/ + /fonts (web flasher; browser font builder
-  with Chinese-Simplified preset and custom ranges)
-- https://github.com/aBER0724/crosspoint-reader-cjk (X4 only; warns large CJK
-  fonts OOM the ESP32-C3 — motivates subsetting)
-- On-device photo evidence, stock X3, 2026-07 (tofu boxes; rt dropped)
+- https://github.com/crosspoint-reader/crosspoint-reader (firmware, converter,
+  docs/sd-card-fonts.md; font catalog in lib/EpdFont/scripts/sd-fonts.yaml)
+- https://crosspointreader.com/ (web flasher; /fonts builder)
+- https://github.com/lxgw/LxgwWenKai · https://github.com/notofonts/noto-cjk
+- https://github.com/bigbag/papyrix-reader ·
+  https://github.com/aBER0724/crosspoint-reader-cjk
+- On-device photo evidence: stock tofu (2026-07); CrossPoint + WenKaiFull
+  five-mode diagnostic (2026-07)

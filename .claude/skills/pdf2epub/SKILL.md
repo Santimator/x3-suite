@@ -46,9 +46,9 @@ workspace/<slug>/
 Converted books converge on the suite's common book format — **documented in
 the epub-builder skill's contract,
 [`.claude/skills/epub-builder/FORMAT.md`](../epub-builder/FORMAT.md); the
-agent must know it when drafting** — so the EPUB builder, `charset.py` font
-subsetting, and device lore in `reference/readers.md` are shared with
-graded-reader.
+agent must know it when drafting** — so the EPUB builder, the device fonts
+in `reference/fonts/`, and device lore in `reference/readers.md` are shared
+with graded-reader.
 
 ## Stages
 

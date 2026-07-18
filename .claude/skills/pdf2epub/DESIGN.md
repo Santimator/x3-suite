@@ -136,8 +136,9 @@ Stage 3 emits the **same intermediate format graded-reader uses**:
 
 - One EPUB builder for the whole suite (generalize `build_epub.py`: pinyin
   becomes an optional feature, not the spine of the script).
-- `charset.py` subsetting works on converted books too — which matters the
-  day we convert a *Chinese* PDF and need device fonts for exactly its glyphs.
+- Device fonts are shared too: `reference/fonts/WenKaiFull` covers full CJK,
+  so a converted *Chinese* PDF needs no per-book font work (charset-level
+  subsetting was retired — sparse-interval fonts fail on-device; readers.md).
 - Workspace conventions, selftest patterns, and device lore
   (`reference/readers.md`) are shared instead of duplicated.
 

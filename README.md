@@ -41,7 +41,8 @@ Write leveled Chinese books chapter-by-chapter: a *planner* outlines, a
 *scribe* drafts each chapter against a mechanically-built vocabulary brief,
 deterministic validation gates the HSK level (out-of-list ≤ 5%, stretch
 ≤ 15%), a *glossary editor* prunes the harvested glossary, and the builder
-emits a pinyin-annotated EPUB (`ruby` / `interlinear` / `plain`).
+emits a pinyin-annotated EPUB (`gloss-pinyin` on the X3: plain hanzi with
+word-level pinyin on each glossary word's first appearance).
 
 Docs: [`.claude/skills/graded-reader/SKILL.md`](.claude/skills/graded-reader/SKILL.md)
 
@@ -86,16 +87,16 @@ converted end-to-end (`build/goya-sueno.epub`).
 ## Shared ground
 
 ```
-reference/readers.md    Xteink X3 / CrossPoint device notes: fonts, CJK saga,
-                        ruby support, SD-card font layout — read before
-                        touching anything device-facing
+reference/readers.md    Xteink X3 / CrossPoint device notes: confirmed
+                        rendering verdicts, font build rules, SD layout —
+                        read before touching anything device-facing
 workspace/<slug>/       one folder per book/job (source, chapters/, book.json,
                         build/ outputs)
-workspace/CHARSET/      exact-charset font subsetting output + prebuilt
-                        .cpfont families for the device (see its README)
+reference/fonts/        SD-ready .cpfont families for the device: WenKaiFull
+                        (Chinese, confirmed working) + EBGaramond (Latin)
 ```
 
 Device facts that shape every tool (details in `reference/readers.md`):
 embedded EPUB fonts are useless (the reader rasterizes only pre-converted
-`.cpfont` bitmaps), ruby annotation support is unconfirmed, RAM is ~400 KB —
-keep books lean and CSS simple.
+`.cpfont` bitmaps), ruby and interlinear pinyin are confirmed broken (use the
+`gloss-*` modes), RAM is ~400 KB — keep books lean and CSS simple.
