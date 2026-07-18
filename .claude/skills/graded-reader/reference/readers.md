@@ -45,6 +45,19 @@ repeat the dead ends:
   `open-x4-sdk` for all hardware drivers — it's built for **X4 hardware** and
   would break an X3's display/input. Same chip, different board.
 
+**Update — the interval-shape hypothesis.** Comparing our build method with the
+official web builder's (it wraps the same `fontconvert_sdcard.py`, with broad
+preset ranges; the 1.4.0 notes show the official pipeline also passes a Noto
+punctuation fallback): every official font uses **few, broad intervals** (a
+builder-style `latin-ext,cjk` WenKai build: 100 intervals / 22,563 glyphs),
+while our charset-subset fonts used **977 sparse intervals / 1,223 glyphs** — a
+structural shape no official font has ever exercised on-device. Both pass the
+parser's checks, but only one shape has field history. `WenKaiFull/` in
+`workspace/CHARSET/fonts/` is a builder-faithful full-CJK build (3–6.5 MB per
+size, glyphs streamed from SD) to test this: if it loads where the subsets
+reverted, the sparse-interval shape is the trigger — a precise upstream bug
+report — and Chinese works meanwhile.
+
 **Isolation experiment (ship these two control fonts):**
 - `ZLatinTest` (Latin-only) → open any English book. Renders + sticks ⇒ SD
   fonts work, so the failure is *CJK-specific* (render/layout path with

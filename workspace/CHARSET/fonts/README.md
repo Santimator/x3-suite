@@ -16,6 +16,7 @@ Fonts" is the WiFi download store; not needed for these.
 
 | Family | Coverage | Note |
 |---|---|---|
+| `WenKaiFull` | full CJK, builder-faithful (100 intervals, 22.5k glyphs, 3-6.5 MB/size) | **Best CJK bet on CrossPoint** — built exactly like the official web builder (broad latin-ext+cjk presets), unlike our sparse subsets |
 | `ZhTest` | letter-writer book only | Minimal CJK control — open 写信的老人 |
 | `WenKaiHSK` | current books (533 glyphs) | kaiti, light |
 | `NotoHSK` | current books (533 glyphs) | sans, light |
