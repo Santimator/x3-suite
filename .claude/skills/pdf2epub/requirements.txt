@@ -1,0 +1,11 @@
+# Stage 0-1 (triage + text-route extraction)
+pdfplumber
+pypdf
+
+# Stage 1 (page rendering: the agent's eyes, and OCR's input)
+pypdfium2
+Pillow
+
+# Stage 1 (OCR route). Needs the system tesseract binary too:
+#   apt install tesseract-ocr tesseract-ocr-spa  (or the source language)
+pytesseract
