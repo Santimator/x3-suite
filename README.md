@@ -148,3 +148,19 @@ Device facts that shape every tool (details in `reference/readers.md`):
 embedded EPUB fonts are useless (the reader rasterizes only pre-converted
 `.cpfont` bitmaps), ruby and interlinear pinyin are confirmed broken (use the
 `gloss-*` modes), RAM is ~400 KB — keep books lean and CSS simple.
+
+## License
+
+The code and documentation are **MIT** licensed — see [`LICENSE`](LICENSE).
+
+Two kinds of bundled third-party content keep their own terms:
+
+- **Fonts** (`reference/fonts/*.cpfont`) are conversions of open-source fonts
+  (LXGW WenKai, Zilla Slab, EB Garamond, Noto CJK) under the **SIL Open Font
+  License 1.1** — notices, sources, and the license text in
+  [`reference/fonts/ATTRIBUTION.md`](reference/fonts/ATTRIBUTION.md) and
+  [`reference/fonts/OFL.txt`](reference/fonts/OFL.txt).
+- **Sample book texts** under `workspace/` are either original to this project
+  or public-domain source material (e.g. 西游记, 愚公移山, O. Henry's *The Gift
+  of the Magi*, the 1793 entremés *Los alcaldes encontrados*), retold or
+  converted as pipeline demonstrations.
