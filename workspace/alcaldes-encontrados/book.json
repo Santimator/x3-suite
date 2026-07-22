@@ -1,0 +1,10 @@
+{
+  "title": "Los alcaldes encontrados",
+  "author": "Tirso de Molina",
+  "language": "es",
+  "chapters": [
+    {
+      "source": "chapters/ch01.md"
+    }
+  ]
+}

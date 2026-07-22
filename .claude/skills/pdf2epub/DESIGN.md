@@ -18,8 +18,9 @@ varies wildly by source. A taxonomy worth designing against:
 | D | scan + embedded OCR | unknown quality | trust it or redo it? |
 | E | complex layout | varies | columns, footnotes, tables, figures, verse |
 
-Our fixture (`workspace/goya-sueno`) is class B with a class E twist (theatre
-monologue — line breaks are authorial and must survive).
+Our fixture (`workspace/alcaldes-encontrados`) is class D with a class E twist
+(a verse entremés — the OCR text layer is trusted but noisy, and line breaks
+are metrical and must survive).
 
 ## Mindset: deterministic-first, agent-on-error
 

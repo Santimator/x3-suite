@@ -1,0 +1,233 @@
+{
+  "source": "workspace/alcaldes-encontrados/source.pdf",
+  "pages": 16,
+  "metadata": {
+    "CreationDate": "D:20131021173656Z",
+    "Author": "Tirso de Molina",
+    "Producer": "ABBYY FineReader 8.0 Professional Edition",
+    "ModDate": "D:20131028110941+01'00'",
+    "Title": "Entremes. Los alcaldes encontrados"
+  },
+  "fonts": [
+    "Helvetica",
+    "Helvetica-Bold",
+    "Helvetica-BoldOblique",
+    "Times-Bold",
+    "Times-BoldItalic",
+    "Times-Italic",
+    "Times-Roman"
+  ],
+  "route": "TEXT",
+  "flags": [
+    "broken_spacing",
+    "page_furniture"
+  ],
+  "language_guess": "es",
+  "text_pages": 16,
+  "image_only_pages": 0,
+  "median_chars_per_page": 434,
+  "doubled_line_ratio": 0.0,
+  "stray_single_ratio": 0.028,
+  "furniture_candidates": [
+    "#"
+  ],
+  "per_page": [
+    {
+      "chars": 329,
+      "lines": 21,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 66,
+      "stray_singles": 2,
+      "image_count": 1,
+      "image_coverage": 0.985,
+      "first_line": "ENTREMÉS·",
+      "last_line": "Ver"
+    },
+    {
+      "chars": 488,
+      "lines": 28,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 109,
+      "stray_singles": 2,
+      "image_count": 1,
+      "image_coverage": 0.989,
+      "first_line": "2",
+      "last_line": "Ino-"
+    },
+    {
+      "chars": 458,
+      "lines": 28,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 107,
+      "stray_singles": 5,
+      "image_count": 1,
+      "image_coverage": 0.984,
+      "first_line": "Inocente, escuchad.",
+      "last_line": "Dom."
+    },
+    {
+      "chars": 457,
+      "lines": 29,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 101,
+      "stray_singles": 2,
+      "image_count": 1,
+      "image_coverage": 1.0,
+      "first_line": "4",
+      "last_line": "Dorn."
+    },
+    {
+      "chars": 356,
+      "lines": 22,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 78,
+      "stray_singles": 3,
+      "image_count": 1,
+      "image_coverage": 0.997,
+      "first_line": "s",
+      "last_line": "Al-"
+    },
+    {
+      "chars": 424,
+      "lines": 24,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 89,
+      "stray_singles": 0,
+      "image_count": 1,
+      "image_coverage": 0.985,
+      "first_line": "6",
+      "last_line": "de-"
+    },
+    {
+      "chars": 464,
+      "lines": 28,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 121,
+      "stray_singles": 6,
+      "image_count": 1,
+      "image_coverage": 0.984,
+      "first_line": "f",
+      "last_line": "plar"
+    },
+    {
+      "chars": 363,
+      "lines": 23,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 88,
+      "stray_singles": 0,
+      "image_count": 1,
+      "image_coverage": 0.987,
+      "first_line": "8",
+      "last_line": "Sa-"
+    },
+    {
+      "chars": 409,
+      "lines": 26,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 99,
+      "stray_singles": 0,
+      "image_count": 1,
+      "image_coverage": 0.987,
+      "first_line": "9",
+      "last_line": "Dom*"
+    },
+    {
+      "chars": 429,
+      "lines": 26,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 105,
+      "stray_singles": 3,
+      "image_count": 1,
+      "image_coverage": 0.987,
+      "first_line": "ΙΟ",
+      "last_line": "Dorn."
+    },
+    {
+      "chars": 421,
+      "lines": 24,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 92,
+      "stray_singles": 1,
+      "image_count": 1,
+      "image_coverage": 0.984,
+      "first_line": "II",
+      "last_line": "Dom."
+    },
+    {
+      "chars": 541,
+      "lines": 28,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 118,
+      "stray_singles": 3,
+      "image_count": 1,
+      "image_coverage": 0.99,
+      "first_line": "T2",
+      "last_line": "Al-"
+    },
+    {
+      "chars": 435,
+      "lines": 23,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 95,
+      "stray_singles": 3,
+      "image_count": 1,
+      "image_coverage": 0.995,
+      "first_line": "l",
+      "last_line": "Vom*"
+    },
+    {
+      "chars": 549,
+      "lines": 26,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 116,
+      "stray_singles": 4,
+      "image_count": 1,
+      "image_coverage": 0.99,
+      "first_line": "^ι 4",
+      "last_line": "Dom."
+    },
+    {
+      "chars": 538,
+      "lines": 25,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 120,
+      "stray_singles": 6,
+      "image_count": 1,
+      "image_coverage": 0.99,
+      "first_line": "Dom. ¡Haï tal atar de Christiano!",
+      "last_line": "E\"¡•Ή s"
+    },
+    {
+      "chars": 434,
+      "lines": 22,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 90,
+      "stray_singles": 5,
+      "image_count": 1,
+      "image_coverage": 0.985,
+      "first_line": "τβ",
+      "last_line": "nadillas· Año de 1793."
+    }
+  ],
+  "sample_pages": {
+    "1": "ENTREMÉS·\nLOS ALCALDES\nENCONTRADOS·\nPERSONAS.\nUna Mesonera. Domingo, Alcalde.\nUna Mujer. Escribano.\nVejete, Alcalde. Un Preso.\nSalen los dos Alcaldes y el Escribana\nen\nVe]. * ^ TO me * ga, Escribano: no\n•J^N me tenga·\nEsc. Tengase, vues^rced, señor Al\ncalde.\nDom. No le tengáis, y caígase : de-\nxadle·\nVe], i Domingo?\nDom. ¿Mojarrilla?\nVej. Menos brio;\nque sois villano vos.\nDom. Y vos judio·\nVer",
+    "6": "6\n¿álzase Domingo y cae Mojarrilla*,\ntorciéndose el banco.\nVej. Tonto , esperad·\nDom. i De qué sirve enojarse?\n¿No ha de poder un hombre le*\nyantarse?\nEsc. Siéntese , Alcalde, ya.\nVej. Por vida de éstas;\nque, si puedo, en un palo he de\nponello.\nDom. De linage venís, que sabe ha-\ncello.\nDiga , Escriben*\nSale un preso.\nEsc. Aqueste viene preso,\nporque se hizo justicia.\nDom. \\ Pues por eso !\nSoltadlo luego.\nVej. Préndanlo al momento.\nDorn. ¡Qué devoto que sos ÓQ\\ pren\ndimiento!\nVej. Hacerse uno justicia , es gran\nde-",
+    "11": "II\nDom. En vuestra lei esperan , no en\nla mia.\nEsc. Siéntense, Alcaldes, ya; tengan\nprudencia;\nque maltratarse asi es grande in\ndecencia.\nDom. Ya me siento ; mas no tengo de\nvelle.\nSiéntanse de espaldas.\nVejj. Ni yo tampoco. Asi nos estare\nmos.\nDom. Águilas imperiales parecemos.\nSale la Graciosa.\nEsc. Esta moza está presa por va\nliente.\nDorn. Mirad lo que decís.\nEsc. Verdad os hablo.\nDam. Qué bonita que sos, válgaos el\ndiablo.\nGra. ι Han visto , qué manera de sen\ntarse!\n¿Qué parecen el viejo y el mancebo?\nDom."
+  }
+}

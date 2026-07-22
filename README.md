@@ -80,9 +80,12 @@ implementation plan for the remaining stages:
 .venv/bin/python .claude/skills/pdf2epub/scripts/selftest.py
 ```
 
-Test fixture: `workspace/goya-sueno/` — an 18-page Spanish theatre text with
-a deliberately pathological text layer (fake-bold double-drawn glyphs),
-converted end-to-end (`build/goya-sueno.epub`).
+Test fixture: `workspace/alcaldes-encontrados/` — a 16-page 1793 printing of
+the public-domain Spanish entremés *Los alcaldes encontrados*, scanned with an
+ABBYY OCR text layer. The pipeline strips its page-number/catchword furniture,
+normalizes the OCR marks, and reflows the verse, converting it end-to-end
+(`build/alcaldes-encontrados.epub`) while faithfully preserving the residual
+OCR noise — never inventing corrections.
 
 ## Shared ground
 

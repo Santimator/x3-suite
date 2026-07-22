@@ -20,10 +20,15 @@ bulk text. Every byte in the EPUB traces back to the extraction.
 Full design rationale + open questions: [`DESIGN.md`](DESIGN.md).
 
 **Status: fully implemented (stages 0-2 and 4-6, plus `selftest.py`) and
-proven end-to-end on the test fixture — `workspace/goya-sueno/build/
-goya-sueno.epub` exists, passes `verify.py`, and is a clean read. Stage 3
-(draft) is always the agent, by design.** See `BUILD_INSTRUCTIONS.md` at
-the repo root for the full implementation history.
+proven end-to-end on the test fixture — `workspace/alcaldes-encontrados/build/
+alcaldes-encontrados.epub` exists and passes `verify.py`. The fixture is a
+1793 printing of the entremés *Los alcaldes encontrados* (an ABBYY-OCR'd
+scan): the pipeline strips its page-number/catchword furniture, normalizes
+the OCR junk marks, and reflows the verse, faithfully preserving the residual
+OCR noise rather than inventing corrections — exactly the "every byte traces
+back to the extraction" contract. Stage 3 (draft) is always the agent, by
+design.** See `BUILD_INSTRUCTIONS.md` at the repo root for the full
+implementation history.
 
 ## Workspace convention
 
@@ -161,11 +166,11 @@ with graded-reader.
    `draft.json` schema:
    ```json
    {
-     "title": "Prefiero que me quite el sueño Goya…",
-     "author": "Rodrigo García",
+     "title": "Los alcaldes encontrados",
+     "author": "Tirso de Molina",
      "language": "es",
      "chapters": [
-       {"toc_label": "Monólogo", "start_anchor": "Prefiero que me quite el sueño Goya a que lo haga cualquier hijo"}
+       {"toc_label": "Los alcaldes encontrados", "start_anchor": "PERSONAS."}
      ],
      "images": [],
      "front_matter": "drop"
@@ -241,19 +246,28 @@ PASS and a clean content-diff of `workspace/yugong-mountain` — see
 
 ## Test fixture
 
-`workspace/goya-sueno/source.pdf` — *Prefiero que me quite el sueño Goya a
-que lo haga cualquier hijo de puta* (Rodrigo García / La Carnicería Teatro),
-18 pages, Spanish theatre monologue, converted (`build/goya-sueno.epub`).
-Deliberately pathological: every glyph double-drawn (fake bold), scrambled
-subset font names, no geometric paragraph signal (uniform line gaps, no
-indents) — paragraph boundaries are recoverable only from terminal
-punctuation, so `reflow: sentence` is the right policy for almost the whole
-book. One exception: a twelve-line poem is embedded mid-page-15
-("Y cavo profundo en mi…"), set apart only by extra vertical whitespace
-before/after — invisible to `reflow: sentence` (nothing in it ends with
-terminal punctuation, so it would otherwise run into one wall of prose) and
-un-isolable by page-level `page_ranges` (it starts and ends mid-page,
-interleaved with ordinary prose on both pages 15 and 16). Caught by eye
-against the page renders, not by any gate; `workspace/goya-sueno/policy.json`
-carves it out with an anchor-based `page_ranges` entry (`reflow: verse`).
-Triage output lives next to the source.
+`workspace/alcaldes-encontrados/source.pdf` — *Los alcaldes encontrados*, a
+16-page 1793 printing of a Spanish entremés (attributed to Tirso de Molina;
+public domain),
+converted (`build/alcaldes-encontrados.epub`). It is a scanned book with an
+ABBYY-FineReader OCR text layer — a different, and more common, kind of hard
+source than a born-digital PDF: the pathology isn't doubled glyphs but
+**OCR noise**. Triage routes it TEXT and flags `page_furniture` +
+`broken_spacing`.
+
+The committed `policy.json` handles it deterministically: **furniture**
+patterns drop the per-page numbers (many OCR-mangled — `ΙΟ`, `T2`, `τβ`, bare
+`s`/`f`/`l`) and the printer's catchwords at each page foot (`Ver`, `Ino-`,
+`Sa-`…); **normalize** maps the pervasive OCR middot `·`→`.` and strips the
+stray `*` marks (which would otherwise be eaten as Markdown emphasis by the
+builder); the body is a verse play, so it reflows `verse` (line structure
+kept) while the three decorative title lines are dropped as front matter via
+`draft.json`. Dehyphenation is deliberately left **off** — on a short verse
+text, merging the handful of wrapped words moves more of the fidelity gate's
+n-gram budget than it's worth, and keeping the physical lines is truer to the
+verse anyway.
+
+Residual OCR errors in the letters themselves (`vues^rced`, `Escribana` for
+*Escribano*) are **preserved, not guessed away** — that is the pipeline's
+whole contract. The fixture proves the mechanics end to end; it is not
+claimed to be a clean scholarly read. Triage output lives next to the source.

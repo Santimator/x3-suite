@@ -2,11 +2,17 @@
 """pdf2epub pipeline self-test: run after changing any pdf2epub script.
 
 Runs the full deterministic chain (triage -> extract_text -> restore ->
-prepare -> build -> verify) on the goya-sueno fixture into a temp
+prepare -> build -> verify) on the alcaldes-encontrados fixture into a temp
 directory, using the committed policy.json/draft.json as the only agent
 decisions -- exactly what an interactive run produces, replayed. Also
 exercises the OCR roundtrip from extract_ocr.py's own check, skipped with
 a notice if the tesseract binary isn't installed.
+
+The fixture is a 1793 printing of the entremés "Los alcaldes encontrados"
+(attributed to Tirso de Molina; ABBYY-OCR'd scan, public domain): a verse play whose text
+layer carries page-number and printer's-catchword furniture, OCR junk marks
+(middots, stray asterisks) and broken spacing -- a different set of
+pathologies from a clean born-digital PDF, which is the point of a fixture.
 
 No network, no LLM. Exit 0 = all good: python scripts/selftest.py
 """
@@ -34,7 +40,7 @@ sys.path.insert(0, str(SCRIPTS.parents[1] / "epub-builder" / "scripts"))
 import build_epub  # noqa: E402
 
 REPO = SCRIPTS.parents[3]
-FIXTURE = REPO / "workspace" / "goya-sueno"
+FIXTURE = REPO / "workspace" / "alcaldes-encontrados"
 
 _all_ok = True
 
@@ -55,16 +61,15 @@ def run_chain(work: Path) -> None:
     print("1. triage")
     t_report = triage_mod.triage(source, samples=3)
     check("route is TEXT", t_report["route"] == "TEXT", t_report["route"])
-    check("doubled_chars flagged", "doubled_chars" in t_report["flags"], t_report["flags"])
+    check("page_furniture flagged", "page_furniture" in t_report["flags"], t_report["flags"])
 
     print("2. extract_text")
     extract_dir = work / "extract"
     e_report = extract_text.run(source, extract_dir, None, "auto")
-    check("18 pages processed", e_report["pages_processed"] == 18, e_report["pages_processed"])
-    check("all pages deduped", len(e_report["dedupe_pages"]) == 18, e_report["dedupe_pages"])
-    p2 = json.loads((extract_dir / "pages.jsonl").read_text(encoding="utf-8").splitlines()[1])
-    check("page 2 first line dedupe-clean", p2["lines"][0]["text"].startswith("mismo la FNAC"),
-          p2["lines"][0]["text"])
+    check("16 pages processed", e_report["pages_processed"] == 16, e_report["pages_processed"])
+    check("no doubled-glyph dedupe on this source", e_report["dedupe_pages"] == [], e_report["dedupe_pages"])
+    p1 = json.loads((extract_dir / "pages.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    check("page 1 first line is the title", p1["lines"][0]["text"] == "ENTREMÉS·", p1["lines"][0]["text"])
 
     print("3. restore")
     restore_dir = work / "restore"
@@ -74,11 +79,12 @@ def run_chain(work: Path) -> None:
     (restore_dir / "restored.md").write_text(markdown, encoding="utf-8")
     (restore_dir / "restore-report.json").write_text(json.dumps(r_report, indent=2))
     check("fidelity gate passes", r_report["gate_pass"], r_report)
-    check("no low-9 comma remains", "‚" not in markdown)
-    check("no line ends mid-word", not any(l.rstrip().endswith("-") for l in markdown.splitlines()))
-    check("opens with the expected sentence",
-          markdown.startswith("Prefiero que me quite el sueño Goya a que lo haga cualquier hijo de puta."),
-          markdown[:80])
+    check("page-number + catchword furniture dropped",
+          len(r_report["furniture_dropped"]) >= 20, len(r_report["furniture_dropped"]))
+    check("middots normalized to periods", "·" not in markdown)
+    check("OCR junk asterisks stripped", "*" not in markdown)
+    check("body kept as a verse block", "```verse" in markdown)
+    check("opens with the title line", markdown.startswith("ENTREMÉS."), markdown[:40])
 
     print("4. prepare")
     p_report = prepare_mod.prepare(work, restore_dir)
@@ -86,11 +92,13 @@ def run_chain(work: Path) -> None:
     check("every paragraph assigned exactly once",
           total_assigned == p_report["total_paragraphs_in_restored"],
           f"{total_assigned} != {p_report['total_paragraphs_in_restored']}")
+    check("title lines dropped as front matter",
+          p_report["front_matter_dropped_paragraphs"] == 3, p_report["front_matter_dropped_paragraphs"])
     check("ch01.md exists", (work / "chapters" / "ch01.md").exists())
     check("book.json exists", (work / "book.json").exists())
 
     print("5. build")
-    epub_path = work / "build" / "goya-sueno.epub"
+    epub_path = work / "build" / "alcaldes-encontrados.epub"
     chapters, meta = build_epub.assemble(work, None)
     build_epub.write_epub(epub_path, meta["title"], meta.get("author", ""),
                            meta.get("language", "es"), chapters, extended_css=True)
@@ -135,7 +143,7 @@ def run_ocr_roundtrip(work: Path) -> None:
     extract_ocr.run(synth, ocr_dir, None, "spa", 300, 6)
     p1 = json.loads((ocr_dir / "pages.jsonl").read_text(encoding="utf-8").splitlines()[0])
     p1_text = " ".join(ln["text"] for ln in p1["lines"])
-    check("OCR'd page 1 contains the opening phrase", "Prefiero que me quite" in p1_text, p1_text[:200])
+    check("OCR'd page 1 contains the title word", "ALCALDES" in p1_text.upper(), p1_text[:200])
 
 
 def main() -> int:

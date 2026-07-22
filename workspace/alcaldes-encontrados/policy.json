@@ -1,0 +1,46 @@
+{
+  "furniture": [
+    "^2$",
+    "^4$",
+    "^6$",
+    "^8$",
+    "^9$",
+    "^s$",
+    "^f$",
+    "^l$",
+    "^ΙΟ$",
+    "^II$",
+    "^T2$",
+    "^τβ$",
+    "^\\^ι 4$",
+    "^Ver$",
+    "^Ino-$",
+    "^Al-$",
+    "^de-$",
+    "^plar$",
+    "^Sa-$",
+    "^Dom\\*$",
+    "^Vom\\*$",
+    "^E\"¡•Ή s$"
+  ],
+  "page_ranges": [
+    {
+      "start_anchor": "ENTREMÉS·",
+      "end_anchor": "ENCONTRADOS·",
+      "treat": "front_matter"
+    },
+    {
+      "start_anchor": "PERSONAS.",
+      "end_anchor": "nadillas· Año de 1793.",
+      "treat": "body",
+      "reflow": "verse"
+    }
+  ],
+  "reflow": "sentence",
+  "normalize": {
+    "·": ".",
+    "*": ""
+  },
+  "dehyphenate": false,
+  "dehyphenate_exceptions": []
+}
