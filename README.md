@@ -17,6 +17,43 @@ they all converge on the **common book format** — `chapters/*.md +
 book.json` in a `workspace/<slug>/` folder — which the shared
 **epub-builder** consumes.
 
+## Architecture
+
+One builder, two AI tools, both emitting the builder's format:
+
+```
+epub-builder (infrastructure)   the book format's contract (FORMAT.md),
+                                build_epub.py, and the shared verify_epub.py
+  ├─ graded-reader  (AI tool)   writes leveled Chinese books
+  └─ pdf2epub       (AI tool)   converts PDFs into clean EPUBs
+```
+
+Each AI tool has the **same shape**, and it's the shape worth copying for a
+new one:
+
+- **A briefing** — the `SKILL.md` (plus role prompts for graded-reader) that
+  tells the model how to undertake the task and when to defer to a tool.
+- **Deterministic tools for the parts models are bad at** — segmenting and
+  grading vocabulary, extracting and OCR-ing a PDF, reflowing text, cutting
+  chapters, assembling and verifying the EPUB. Scripts measure, transform,
+  and check; they never invent.
+- **A deterministic gate after every model step** — vocabulary rate gates for
+  the writer; a restore fidelity gate and an EPUB coverage+integrity gate for
+  the converter. The model proposes; a gate disposes.
+
+So the division of labour is constant: **the model supplies judgement
+(prose, a restore policy, chapter structure), scripts supply mechanics and
+verification, and trust comes from the gates, not the model.** Where the
+model needs to touch model-unfriendly ground directly — e.g. a one-off OCR
+fix in pdf2epub — it does so through a *guarded* path: a deterministic check
+bounds and prints the edit (see pdf2epub stage 2b). The model can adjust
+parameters and re-run, or make a small, bounded correction; it can't quietly
+rewrite.
+
+The tools are plain CLI scripts with typed JSON/file I/O, so any agent that
+can run a shell and read files drives them — Claude Code, or graded-reader's
+optional headless runner against any OpenAI-compatible endpoint.
+
 ## Infrastructure
 
 ### epub-builder — the shared EPUB builder
@@ -28,9 +65,15 @@ allowed to hand it — is
 Pinyin annotation is an opt-in feature (`pinyin_mode` in book.json); generic
 books build with zero CJK dependencies.
 
+It also ships `verify_epub.py` — the one structural-integrity check (mimetype,
+manifest⇄zip parity, well-formed XML, link resolution) that both tasks share,
+so "is this a sound EPUB?" has a single implementation.
+
 ```bash
 .venv/bin/python .claude/skills/epub-builder/scripts/build_epub.py \
     workspace/<slug> --out workspace/<slug>/build/<slug>.epub
+.venv/bin/python .claude/skills/epub-builder/scripts/verify_epub.py \
+    workspace/<slug>/build/<slug>.epub
 ```
 
 ## Tasks
@@ -73,9 +116,7 @@ verifies — confirming routes, diagnosing failures, and emitting decisions
 generates: every byte in the EPUB traces back to the extraction.
 
 Docs: [`.claude/skills/pdf2epub/SKILL.md`](.claude/skills/pdf2epub/SKILL.md) ·
-design + open questions: [`DESIGN.md`](.claude/skills/pdf2epub/DESIGN.md) ·
-implementation plan for the remaining stages:
-[`BUILD_INSTRUCTIONS.md`](BUILD_INSTRUCTIONS.md)
+design + open questions: [`DESIGN.md`](.claude/skills/pdf2epub/DESIGN.md)
 
 ```bash
 .venv/bin/pip install -r .claude/skills/pdf2epub/requirements.txt

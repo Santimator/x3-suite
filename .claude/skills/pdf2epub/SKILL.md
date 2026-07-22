@@ -27,8 +27,7 @@ scan): the pipeline strips its page-number/catchword furniture, normalizes
 the OCR junk marks, and reflows the verse, faithfully preserving the residual
 OCR noise rather than inventing corrections — exactly the "every byte traces
 back to the extraction" contract. Stage 3 (draft) is always the agent, by
-design.** See `BUILD_INSTRUCTIONS.md` at the repo root for the full
-implementation history.
+design.**
 
 ## Workspace convention
 
@@ -267,10 +266,10 @@ prepare → build → verify) on the test fixture into a temp directory, using
 its committed `policy.json`/`draft.json`, plus the OCR roundtrip from
 `extract_ocr.py`'s own check (skipped with a notice if `tesseract` isn't
 installed). Run this after changing any pdf2epub script. Changes under
-`epub-builder/` also require
-`.venv/bin/python .claude/skills/graded-reader/scripts/selftest.py` to
-PASS and a clean content-diff of `workspace/yugong-mountain` — see
-`BUILD_INSTRUCTIONS.md`'s ground rules.
+`epub-builder/` are shared infrastructure, so also require
+`.venv/bin/python .claude/skills/graded-reader/scripts/selftest.py` to PASS
+and a clean content-diff of `workspace/yugong-mountain` (the annotated path's
+output bytes are frozen — never let a builder change alter them).
 
 ## Test fixture
 
