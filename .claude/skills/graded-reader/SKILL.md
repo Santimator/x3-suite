@@ -187,6 +187,13 @@ substantial".
    ```
    python ../epub-builder/scripts/build_epub.py BOOK --out BOOK/build/book.epub
    ```
+9. **Verify the EPUB** (deterministic, shared with pdf2epub): confirm the
+   output is a structurally sound EPUB — mimetype first/stored, manifest ⇄
+   zip parity, well-formed XHTML/OPF, and every glossary link/fragment
+   resolves.
+   ```
+   python ../epub-builder/scripts/verify_epub.py BOOK/build/book.epub
+   ```
 
 ## Gates that are NOT automated
 

@@ -3,14 +3,16 @@
 its visible text still covers the restored source.
 
 Two independent checks, both deterministic:
-  1. Integrity -- mimetype first and stored, every manifest item exists in
-     the zip and vice versa, every internal href/fragment resolves, every
-     XHTML/OPF entry is well-formed XML.
+  1. Integrity -- delegated to the builder's shared verify_epub.py
+     (mimetype first/stored, manifest <-> zip parity, internal links and
+     fragments resolve, XHTML/OPF well-formed). One implementation, used by
+     both suite tasks.
   2. Coverage -- strip tags from the spine's XHTML, normalize whitespace,
      and run it through the same fidelity gate restore.py uses
      (char_ratio, ngram_containment) against restore/restored.md. This is
-     the last check in the pipeline: if prepare.py silently dropped a
-     paragraph, or the builder mangled something, this is what catches it.
+     conversion-specific (it needs the restored source), so it stays here.
+     If prepare.py silently dropped a paragraph, or the builder mangled
+     something, this is what catches it.
 
 Usage:
   verify.py workspace/<slug> --epub PATH [--restored RESTOREDIR]
@@ -21,9 +23,13 @@ import json
 import posixpath
 import re
 import sys
-import xml.dom.minidom
 import zipfile
 from pathlib import Path
+
+# The EPUB integrity check + OPF parsing are builder-level infrastructure,
+# shared with graded-reader; import them from the epub-builder skill.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "epub-builder" / "scripts"))
+from verify_epub import check_integrity, load_opf, parse_manifest, parse_spine  # noqa: E402
 
 WHITESPACE = re.compile(r"\s+")
 TAG_RE = re.compile(r"<[^>]+>")
@@ -38,88 +44,6 @@ def word_ngrams(text: str, n: int = 5):
     if len(words) < n:
         return set()
     return {tuple(words[i:i + n]) for i in range(len(words) - n + 1)}
-
-
-# --------------------------------------------------------------------------- #
-# OPF parsing (the format is our own build_epub.py's output, so a light
-# regex parse is fine -- no need for a full namespace-aware XML stack).
-# --------------------------------------------------------------------------- #
-def parse_manifest(opf_xml: str) -> dict:
-    items = {}
-    for m in re.finditer(r"<item\s+([^>]+?)/>", opf_xml):
-        attrs = dict(re.findall(r'([\w:-]+)="([^"]*)"', m.group(1)))
-        if "id" in attrs:
-            items[attrs["id"]] = attrs
-    return items
-
-
-def parse_spine(opf_xml: str):
-    return re.findall(r'<itemref\s+idref="([^"]+)"', opf_xml)
-
-
-def load_opf(z: zipfile.ZipFile):
-    container = z.read("META-INF/container.xml").decode("utf-8")
-    m = re.search(r'full-path="([^"]+)"', container)
-    if not m:
-        raise ValueError("META-INF/container.xml has no rootfile full-path")
-    opf_path = m.group(1)
-    opf_dir = posixpath.dirname(opf_path)
-    opf_xml = z.read(opf_path).decode("utf-8")
-    return opf_path, opf_dir, opf_xml
-
-
-# --------------------------------------------------------------------------- #
-# Integrity
-# --------------------------------------------------------------------------- #
-def check_integrity(z: zipfile.ZipFile, opf_path: str, opf_dir: str, manifest: dict, spine: list) -> list:
-    errors = []
-    names = z.namelist()
-
-    if not names or names[0] != "mimetype":
-        errors.append("mimetype is not the first zip entry")
-    elif z.getinfo("mimetype").compress_type != zipfile.ZIP_STORED:
-        errors.append("mimetype is not stored uncompressed")
-
-    expected = {"mimetype", "META-INF/container.xml", opf_path}
-    for item in manifest.values():
-        expected.add(posixpath.normpath(posixpath.join(opf_dir, item["href"])))
-    actual = set(names)
-    missing = sorted(expected - actual)
-    extra = sorted(actual - expected)
-    if missing:
-        errors.append(f"manifest items missing from zip: {missing}")
-    if extra:
-        errors.append(f"zip entries not registered in manifest: {extra}")
-
-    for idref in spine:
-        if idref not in manifest:
-            errors.append(f"spine itemref {idref!r} has no matching manifest item")
-    if not spine:
-        errors.append("spine is empty")
-
-    for n in names:
-        if n.endswith((".xhtml", ".opf")):
-            try:
-                xml.dom.minidom.parseString(z.read(n))
-            except Exception as e:
-                errors.append(f"{n}: not well-formed XML ({e})")
-
-    for n in names:
-        if not n.endswith(".xhtml"):
-            continue
-        text = z.read(n).decode("utf-8")
-        ids = set(re.findall(r'id="([^"]+)"', text))
-        doc_dir = posixpath.dirname(n)
-        for href in re.findall(r'(?:href|src)="([^"]+)"', text):
-            if href.startswith(("#", "http://", "https://", "mailto:")):
-                if href.startswith("#") and href[1:] not in ids:
-                    errors.append(f"{n}: dead fragment link #{href[1:]}")
-                continue
-            target = posixpath.normpath(posixpath.join(doc_dir, href.split("#", 1)[0]))
-            if target not in actual:
-                errors.append(f"{n}: dead link {href!r} (resolved {target})")
-
-    return errors
 
 
 # --------------------------------------------------------------------------- #

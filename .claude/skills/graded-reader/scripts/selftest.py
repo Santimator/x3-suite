@@ -11,17 +11,15 @@ Exit 0 = all good. No test framework needed:  python scripts/selftest.py
 from __future__ import annotations
 
 import json
-import re
 import sys
 import tempfile
-import xml.dom.minidom
-import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 # the EPUB builder is suite-shared infrastructure, not a graded-reader script
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "epub-builder" / "scripts"))
 import build_epub  # noqa: E402
+import verify_epub  # noqa: E402
 import validate as validate_mod  # noqa: E402
 import vocab as vocab_mod  # noqa: E402
 
@@ -76,7 +74,7 @@ def main() -> int:
                 f"out {r['out_of_list_rate']:.1%}, stretch {r['stretch_rate']:.1%}",
             )
 
-    print("3. epub build + glossary links")
+    print("3. epub build + structural integrity (shared builder verifier)")
     for book in books:
         with tempfile.NamedTemporaryFile(suffix=".epub", delete=True) as tmp:
             out = Path(tmp.name)
@@ -86,27 +84,11 @@ def main() -> int:
             chapters, meta = build_epub.assemble(book, meta_mode)
             build_epub.write_epub(out, meta["title"], meta.get("author", ""),
                                   meta.get("language", "zh"), chapters)
-            with zipfile.ZipFile(out) as z:
-                names = z.namelist()
-                all_ok &= check(f"{book.name}: mimetype stored first", names[0] == "mimetype")
-                malformed = []
-                for n in names:
-                    if n.endswith((".xhtml", ".opf")):
-                        try:
-                            xml.dom.minidom.parseString(z.read(n))
-                        except Exception:
-                            malformed.append(n)
-                all_ok &= check(f"{book.name}: xhtml well-formed", not malformed, str(malformed))
-                dead = []
-                for n in names:
-                    if not n.endswith(".xhtml") or "nav" in n:
-                        continue
-                    html = z.read(n).decode("utf-8")
-                    ids = set(re.findall(r'id="([^"]+)"', html))
-                    for href in re.findall(r'href="#([^"]+)"', html):
-                        if href not in ids:
-                            dead.append(f"{n}#{href}")
-                all_ok &= check(f"{book.name}: glossary links resolve", not dead, str(dead))
+            # mimetype-first/stored, manifest<->zip parity, well-formed XML,
+            # and glossary link/fragment resolution -- all in the one shared
+            # builder-level check, so this stays in lockstep with pdf2epub.
+            report = verify_epub.verify_integrity(out)
+            all_ok &= check(f"{book.name}: EPUB structurally sound", report["pass"], str(report["errors"]))
 
     print("PASS" if all_ok else "FAIL")
     return 0 if all_ok else 1
