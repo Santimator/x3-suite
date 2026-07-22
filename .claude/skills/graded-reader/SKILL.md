@@ -136,6 +136,10 @@ override. `validate.py BOOKDIR` checks every chapter in `book.json` at once.
 
 **Once per book — Planner.** Produce `plan.json` per `prompts/planner.md`
 (outline + per-chapter beats; seed obvious story names into `lists/personal.tsv`).
+Aim for a **substantial book**: follow the source story's events across enough
+chapters (roughly 8–12 for a short tale, more for a longer source) and make each
+a meaty episode (~450+ chars), not a summary — see planner.md's "Make the book
+substantial".
 
 **Then, for each chapter `N`:**
 

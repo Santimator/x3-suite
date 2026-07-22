@@ -10,11 +10,13 @@ fed through a Calibre-Web-Automated ingest folder. Everything below is
 1. **Firmware:** CrossPoint (web-flash from https://crosspointreader.com/;
    stock is restorable the same way). Stock firmware ships no CJK glyphs at
    all — hanzi render as tofu boxes — so it is not an option for Chinese.
-2. **Font:** `reference/fonts/WenKaiFull/` → copy the folder to the SD card
-   under `/fonts/`, power-cycle (fonts scan once at boot), select
-   *WenKaiFull* under Settings → Reader → Font Family. Full-CJK LXGW WenKai
-   (kaiti style), glyphs streamed from SD. `EBGaramond/` is the matching
-   Latin upgrade. Install details: `reference/fonts/README.md`.
+2. **Font:** copy a family folder from `reference/fonts/` to the SD card under
+   `/fonts/`, power-cycle (fonts scan once at boot), select it under Settings →
+   Reader → Font Family. **`WenZilla/`** is the recommended Chinese font — LXGW
+   WenKai kaiti for hanzi + NV Zilla Slab for Latin/pinyin, so mixed
+   hanzi+pinyin reads nicely. **`WenKaiFull/`** is the pure-kaiti baseline
+   (device-confirmed); `EBGaramond/` is the Latin book face. Glyphs stream from
+   SD. Install details: `reference/fonts/README.md`.
 3. **Books:** build with `pinyin_mode: gloss-pinyin` (or `gloss-underline` /
    `plain`) — see the mode verdicts below.
 
@@ -65,6 +67,20 @@ python3 fontconvert_sdcard.py --intervals latin-ext,cjk \
     --regular LXGWWenKai-Regular.ttf --fallback-regular NotoSansSC-Regular.otf \
     --name WenKaiFull --output-dir WenKaiFull/
 
+# WenZilla (recommended): Latin from NV Zilla Slab, CJK from LXGW WenKai.
+# The primary supplies Latin+pinyin; the fallback fills every CJK codepoint
+# (per-codepoint: primary first, fallback second — so Latin stays Zilla).
+# Zilla source: github.com/nicoverbruggen/ebook-fonts (fonts/extra,
+# NV_Zilla_Slab-Regular.ttf). First patch in the 8 pinyin glyphs Zilla lacks:
+python3 ../fonts/synth_pinyin.py            # NV_Zilla_Slab-Regular.ttf -> ...-Pinyin.ttf
+python3 fontconvert_sdcard.py --intervals latin-ext,cjk \
+    --sizes 12,14,16,18 \
+    --regular NV_Zilla_Slab-Pinyin.ttf --fallback-regular LXGWWenKai-Regular.ttf \
+    --name WenZilla --output-dir WenZilla/
+# Regular only: bold/italic would duplicate the 22k CJK bitmaps per style (~4x
+# size) for no CJK gain, since WenKai has no bold/italic. Use EBGaramond for
+# Latin books that need italic/bold.
+
 # EBGaramond: Latin only, three real styles (Ubuntu: fonts-ebgaramond).
 python3 fontconvert_sdcard.py --intervals latin-ext \
     --sizes 12,14,16,18 \
@@ -78,6 +94,10 @@ python3 fontconvert_sdcard.py --intervals latin-ext \
 - **LXGW WenKai (楷体/kaiti)** — models brush-written stroke shapes, the
   typographic tradition HSK textbooks use. Best for learners: what you read
   is what you should write. SIL OFL.
+- **NV Zilla Slab** — a slab serif (Mozilla's Zilla Slab, e-reader-tuned by
+  nicoverbruggen) used for the Latin/pinyin half of WenZilla: even weight,
+  sturdy at small e-ink sizes, and a friendlier companion to kaiti hanzi than
+  WenKai's own Latin. SIL OFL.
 - **EB Garamond** — classical book serif for Latin text; warmer and less
   tiring than the built-in Noto. SIL OFL.
 - Alternatives if taste differs: Noto Sans/Serif SC (print-style, sturdier

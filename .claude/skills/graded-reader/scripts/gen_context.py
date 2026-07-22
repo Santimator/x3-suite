@@ -90,7 +90,9 @@ def render_brief(book_dir: Path, n: int, vocab_detail: str, length: int, v: voca
     out.append(f"- Out-of-list budget: ≤ {val.get('threshold',0.05):.0%} of tokens. "
                f"Compositional combinations of known characters are allowed sparingly "
                f"(≤ {val.get('max_stretch',0.15):.0%}); they get glossed once.")
-    out.append(f"- Length: about **{length} characters** of prose. Short sentences. Lots of repetition is good.")
+    out.append(f"- Length: at least **{length} characters** of prose — write a full, meaty episode, "
+               f"not a summary. Keep sentences short and repetition frequent; reach the length "
+               f"through more scenes, dialogue, and concrete detail, never through fancier words.")
     out.append("- Use only the words listed below (plus the story names). Do not invent plot beyond the summary.\n")
 
     if introduced:
@@ -144,7 +146,8 @@ def main(argv=None) -> int:
     ap.add_argument("--chapter", type=int, required=True)
     ap.add_argument("--out", type=Path, default=None, help="write brief here (default: stdout)")
     ap.add_argument("--vocab-detail", choices=["grouped", "words", "none"], default="grouped")
-    ap.add_argument("--length", type=int, default=220, help="target chapter length in characters")
+    ap.add_argument("--length", type=int, default=450, help="minimum chapter length in characters "
+                    "(chapters should be meaty episodes, not summaries)")
     ap.add_argument("--lists", type=Path, default=vocab_mod.LISTS_DIR)
     args = ap.parse_args(argv)
 

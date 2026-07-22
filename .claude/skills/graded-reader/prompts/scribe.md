@@ -34,6 +34,11 @@ guidance behind it.
    density.
 5. **Continuity.** Respect the story-so-far recap; don't contradict earlier
    chapters or re-introduce things already in the introduced set.
+6. **Write a full episode, not a sketch.** Hit the brief's length (a meaty
+   chapter, not a summary). Get there the graded-reader way — play the scene out
+   with dialogue, small concrete actions, and repetition — never by reaching for
+   harder or rarer words to pad it. If the beat feels thin, dramatize it (show
+   the moment happening) rather than narrating it in one line.
 
 ## Output
 

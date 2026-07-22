@@ -92,8 +92,10 @@ reference/readers.md    Xteink X3 / CrossPoint device notes: confirmed
                         read before touching anything device-facing
 workspace/<slug>/       one folder per book/job (source, chapters/, book.json,
                         build/ outputs)
-reference/fonts/        SD-ready .cpfont families for the device: WenKaiFull
-                        (Chinese, confirmed working) + EBGaramond (Latin)
+reference/fonts/        SD-ready .cpfont families for the device: WenZilla
+                        (recommended Chinese hybrid — WenKai kaiti + Zilla Slab
+                        Latin/pinyin), WenKaiFull (pure kaiti, confirmed
+                        working) + EBGaramond (Latin)
 ```
 
 Device facts that shape every tool (details in `reference/readers.md`):
