@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from render_pages import render_page  # noqa: E402
+from restore import effective_restored  # noqa: E402
 
 
 class PrepareError(Exception):
@@ -143,8 +144,9 @@ def prepare(book_dir: Path, restored_dir: Path):
     draft = json.loads((book_dir / "draft.json").read_text(encoding="utf-8"))
     validate_draft(draft)
 
-    restored_text_raw = (restored_dir / "restored.md").read_text(encoding="utf-8")
-    paragraphs = load_paragraphs(restored_dir / "restored.md")
+    source_md = effective_restored(restored_dir)  # corrected.md if the agent wrote one
+    restored_text_raw = source_md.read_text(encoding="utf-8")
+    paragraphs = load_paragraphs(source_md)
     offsets = paragraph_offsets(paragraphs)
     restored_text = restored_text_raw.rstrip("\n")
 

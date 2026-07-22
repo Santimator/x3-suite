@@ -40,7 +40,8 @@ workspace/<slug>/
   build/triage.json   stage 0 output
   extract/            stage 1 output (raw per-page extraction)
   policy.json         stage 2 input — the agent's restore decisions
-  restore/            stage 2 output (restored.md + restore-report.json)
+  restore/            stage 2 output (restored.md + restore-report.json;
+                      optional corrected.md from the guarded stage 2b)
   draft.json          stage 3 output — the agent's structured plan of the book
   chapters/*.md       stage 4 output ┐
   book.json           stage 4 output ├ the common book format (builder input)
@@ -88,9 +89,10 @@ with graded-reader.
    (verse/drama), all as mechanical transforms configured by a policy file.
    The agent *verifies* the result on samples; on failure it diagnoses,
    edits the policy (e.g. flips a block to `verse`, adds a normalization
-   entry), and re-runs. Span-scoped model patches are the last resort, gated
-   by a fidelity check (length ratio + n-gram containment vs the raw
-   extraction) and logged.
+   entry), and re-runs. **Favour the policy** — a fix expressed as a rule
+   (furniture, reflow, especially a `normalize` entry) replays from source
+   and stays auditable. One-off OCR damage that isn't worth a rule takes the
+   guarded-correction path (stage 2b).
 
    ```bash
    .venv/bin/python .claude/skills/pdf2epub/scripts/restore.py \
@@ -157,6 +159,32 @@ with graded-reader.
      the output). Gate passes iff `0.98 ≤ char_ratio ≤ 1.02` and
      `ngram_containment ≥ 0.995`; restore.py exits 1 on gate failure — that
      exit code is the signal to look at the report and edit the policy.
+
+2b. **Correct** (agent, guarded, optional) — for a genuine one-off the policy
+   shouldn't carry (a single `teh`→`the`, a dropped accent, a name mangled in
+   exactly one spot), the agent may hand-edit a copy of the restored text:
+   copy `restore/restored.md` to `restore/corrected.md` and fix it directly.
+   `restored.md` stays the immutable mechanical baseline. **Prefer the policy
+   (`normalize`) for anything systematic** — corrected.md is for the local
+   fix that's more natural to make by hand than to write a rule for.
+
+   `review_edits.py` is the deterministic guard that keeps this honest: it
+   bounds the diff to small, local corrections (default: ≤ 2% of chars
+   changed, no single changed run > 24 chars, ≤ 1% net growth) and **prints
+   it** for review. A rewrite or invented text trips the bound and exits 1 —
+   the signal that the change belongs in the policy, not a free edit. The
+   guarantee shifts from "replays byte-for-byte from the PDF" to "every
+   change is small, local, and shown to you".
+
+   ```bash
+   .venv/bin/python .claude/skills/pdf2epub/scripts/review_edits.py \
+       workspace/<slug>/restore        # diffs corrected.md vs restored.md
+   ```
+
+   Downstream is transparent: if `corrected.md` exists, prepare cuts it and
+   verify's coverage checks against it (review_edits having bounded it vs
+   `restored.md`); if it doesn't, everything runs from `restored.md` as
+   before. Skip this stage entirely on the policy-only path.
 
 3. **Draft** (agent) — the agent authors `draft.json`, the structured plan
    of the book: title/author, chapter boundaries as *verbatim anchors*, TOC

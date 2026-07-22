@@ -33,6 +33,7 @@ import extract_text  # noqa: E402
 import prepare as prepare_mod  # noqa: E402
 import render_pages  # noqa: E402
 import restore as restore_mod  # noqa: E402
+import review_edits  # noqa: E402
 import triage as triage_mod  # noqa: E402
 import verify as verify_mod  # noqa: E402
 
@@ -118,6 +119,31 @@ def run_chain(work: Path) -> None:
     v_report = verify_mod.verify(epub_path, restore_dir)
     check("integrity passes", v_report["integrity_pass"], v_report["integrity_errors"])
     check("coverage passes", v_report["coverage_pass"], v_report)
+
+    print("6b. guarded correction path (corrected.md)")
+    restored_text = (restore_dir / "restored.md").read_text(encoding="utf-8")
+    # A genuine one-off OCR error: the opening stage direction reads
+    # "el Escribana" (fem.) for the male character Escribano. Exactly the kind
+    # of local fix that's more natural to make by hand than to write a rule for.
+    check("fixture has the one-off OCR error", "el Escribana" in restored_text)
+    corrected_text = restored_text.replace("el Escribana", "el Escribano", 1)
+    (restore_dir / "corrected.md").write_text(corrected_text, encoding="utf-8")
+
+    edit_report = review_edits.review(restored_text, corrected_text)
+    check("small local fix passes the edit guard", edit_report["pass"], edit_report["reasons"])
+    # A wholesale insertion must be rejected (that's a rewrite, not a fix).
+    bulk = restored_text.replace("```verse", "```verse\n" + "invento " * 40, 1)
+    check("a bulk rewrite fails the edit guard", not review_edits.review(restored_text, bulk)["pass"])
+
+    # prepare + build + verify now flow from corrected.md, transparently.
+    prepare_mod.prepare(work, restore_dir)
+    ch01 = (work / "chapters" / "ch01.md").read_text(encoding="utf-8")
+    check("correction reaches the chapter", "el Escribano" in ch01 and "el Escribana" not in ch01)
+    chapters, meta = build_epub.assemble(work, None)
+    build_epub.write_epub(epub_path, meta["title"], meta.get("author", ""),
+                           meta.get("language", "es"), chapters, extended_css=True)
+    v2 = verify_mod.verify(epub_path, restore_dir)
+    check("coverage passes against corrected.md", v2["coverage_pass"], v2)
 
 
 def run_ocr_roundtrip(work: Path) -> None:

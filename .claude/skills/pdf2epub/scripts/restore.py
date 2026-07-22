@@ -29,6 +29,19 @@ class RestoreError(Exception):
     pass
 
 
+def effective_restored(restore_dir: Path) -> Path:
+    """The restored text downstream stages should build/verify against.
+
+    `restored.md` is the immutable mechanical output. If the agent has taken
+    the guarded-correction path (see review_edits.py) and written a
+    `corrected.md` beside it, that is what became the book — so prepare cuts
+    it and verify's coverage checks against it. review_edits.py separately
+    bounds corrected.md vs restored.md, so the extraction guarantee still
+    holds even though prepare/verify look at the corrected copy."""
+    corrected = restore_dir / "corrected.md"
+    return corrected if corrected.exists() else (restore_dir / "restored.md")
+
+
 # --------------------------------------------------------------------------- #
 # Loading
 # --------------------------------------------------------------------------- #

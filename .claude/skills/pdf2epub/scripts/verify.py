@@ -28,6 +28,9 @@ from pathlib import Path
 
 # The EPUB integrity check + OPF parsing are builder-level infrastructure,
 # shared with graded-reader; import them from the epub-builder skill.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from restore import effective_restored  # noqa: E402
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "epub-builder" / "scripts"))
 from verify_epub import check_integrity, load_opf, parse_manifest, parse_spine  # noqa: E402
 
@@ -75,7 +78,10 @@ def verify(epub_path: Path, restored_dir: Path) -> dict:
 
     integrity_errors = check_integrity(z, opf_path, opf_dir, manifest, spine)
 
-    restored_text = (restored_dir / "restored.md").read_text(encoding="utf-8")
+    # Coverage compares the EPUB against the text it was actually built from:
+    # corrected.md when the agent took the guarded-correction path, else
+    # restored.md. review_edits.py separately bounds corrected vs restored.
+    restored_text = effective_restored(restored_dir).read_text(encoding="utf-8")
     out_text = spine_text(z, opf_dir, manifest, spine)
 
     chars_in = nonwhitespace_chars(restored_text)
