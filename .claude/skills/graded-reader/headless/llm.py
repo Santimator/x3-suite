@@ -13,8 +13,8 @@ standard library so there's nothing extra to install and nothing to break.
 Config (see config.example.json):
   base_url      OpenAI-compatible root, e.g. https://integrate.api.nvidia.com/v1
   model         model id, e.g. qwen/qwen3.5-397b-a17b
-  api_key_file  path (relative to the skill dir) to a gitignored file holding
-                the key; falls back to the api_key_env environment variable.
+  api_key_file  path (relative to this headless/ dir) to a gitignored file
+                holding the key; falls back to the api_key_env environment var.
   api_key_env   env var name to read the key from if the file is absent.
   temperature, max_tokens, timeout  generation params.
 """
@@ -28,7 +28,8 @@ import urllib.request
 from pathlib import Path
 from typing import Dict, Optional
 
-SKILL_DIR = Path(__file__).resolve().parent.parent
+# config.json + secrets/ live here in headless/, next to this module.
+SKILL_DIR = Path(__file__).resolve().parent
 DEFAULT_CONFIG = SKILL_DIR / "config.json"
 
 

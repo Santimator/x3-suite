@@ -37,12 +37,14 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 
-SCRIPTS = Path(__file__).resolve().parent
-sys.path.insert(0, str(SCRIPTS))
+HERE = Path(__file__).resolve().parent          # headless/ (this driver lives apart from the core tools)
+SKILL = HERE.parent                             # the graded-reader skill dir
+SCRIPTS = SKILL / "scripts"                     # the deterministic tools, run as subprocesses
+sys.path.insert(0, str(HERE))
 import llm as llm_mod  # noqa: E402
 
-PROMPTS = SCRIPTS.parent / "prompts"
-PY = sys.executable  # run sibling scripts with the same interpreter (the venv)
+PROMPTS = SKILL / "prompts"
+PY = sys.executable  # run the deterministic scripts with the same interpreter (the venv)
 
 
 def read(p: Path) -> str:

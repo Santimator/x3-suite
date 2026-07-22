@@ -56,8 +56,10 @@ S=.claude/skills/graded-reader/scripts
 # EPUB assembly: the shared epub-builder (see Infrastructure above)
 ```
 
-Two drivers: Claude Code interactively, or the headless `run_book.py` against
-any OpenAI-compatible endpoint. On Debian/Ubuntu install `jieba` inside a
+Two drivers: Claude Code interactively, or the optional headless runner in
+`.claude/skills/graded-reader/headless/` (`run_book.py`) against any
+OpenAI-compatible endpoint — kept out of the core so the skill is just the
+briefing plus deterministic tools. On Debian/Ubuntu install `jieba` inside a
 venv — system setuptools breaks its legacy `setup.py`.
 
 ### pdf2epub — convert PDFs into clean EPUBs *(fully implemented and proven end-to-end on its test fixture)*

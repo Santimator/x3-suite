@@ -49,10 +49,11 @@ Python that has `jieba` and `pypinyin` installed (see Setup).
   glossed words in the text link to their glossary entry (and back).
   Annotation engages when `book.json` has `pinyin_mode`; the input contract
   is the builder's `FORMAT.md`.
-- **`scripts/llm.py`** — minimal OpenAI-compatible chat client (stdlib only).
-  The swappable model seam for the headless runner. Reads `config.json`.
-- **`scripts/run_book.py`** — headless runner: drives the whole loop by calling
-  an OpenAI-compatible endpoint for the model steps (see "Two drivers").
+- **`headless/`** — *optional* alternative driver, kept out of the core so the
+  skill proper is just the briefing + deterministic tools. `run_book.py` drives
+  the whole loop against any OpenAI-compatible endpoint (for running without
+  Claude Code); `llm.py` is its stdlib model seam; `config.example.json` +
+  `secrets/` configure it. Ignore it entirely when Claude Code is the driver.
 - **`scripts/selftest.py`** — pipeline self-test: cascade examples, every
   workspace book against its gates, epub build + link integrity. Run it after
   changing scripts or lists. (Device fonts are prebuilt in `reference/fonts/`;
@@ -92,21 +93,24 @@ exact same scripts:
   Code follows the orchestration loop below itself: runs the scripts as Bash
   tools, writes each chapter and curates each glossary inline. No `config.json`
   needed. Best for chapter 1 and the human-QA gate.
-- **`run_book.py` drives** (headless, any model) — calls an OpenAI-compatible
-  endpoint for the model steps. Default is NVIDIA NIM (free tier) with Kimi K2
-  (most natural Chinese prose; one-line swap to Qwen / a local Ollama or vLLM
-  server). By default it runs the **whole book in one go** — readers are cheap
-  to regenerate, so the convenience wins. Setup:
+- **`headless/run_book.py` drives** (headless, any model) — the optional
+  driver in `headless/`, for running without Claude Code. Calls an
+  OpenAI-compatible endpoint for the model steps. Default is NVIDIA NIM (free
+  tier) with Kimi K2 (most natural Chinese prose; one-line swap to Qwen / a
+  local Ollama or vLLM server). By default it runs the **whole book in one
+  go** — readers are cheap to regenerate, so the convenience wins. Config
+  lives in `headless/` (found by absolute path, so run from the repo root):
   ```
-  cp config.example.json config.json            # then set model / base_url
-  printf '%s' 'nvapi-...' > secrets/nim.key      # gitignored
-  python scripts/run_book.py BOOK                # whole book, unattended
-  python scripts/run_book.py BOOK --pause-after 1  # opt-in QA stop after ch1
-  python scripts/run_book.py BOOK --from 3       # resume from chapter 3
+  H=.claude/skills/graded-reader/headless
+  cp $H/config.example.json $H/config.json      # then set model / base_url
+  printf '%s' 'nvapi-...' > $H/secrets/nim.key   # gitignored
+  .venv/bin/python $H/run_book.py workspace/BOOK                 # whole book, unattended
+  .venv/bin/python $H/run_book.py workspace/BOOK --pause-after 1 # opt-in QA stop after ch1
+  .venv/bin/python $H/run_book.py workspace/BOOK --from 3        # resume from chapter 3
   ```
-  `config.json` and `secrets/` are gitignored. The runner stops (doesn't guess)
-  if a chapter still fails after the rework cap — add-and-gloss stays a
-  human/Claude-Code judgement call.
+  `headless/config.json` and `headless/secrets/` are gitignored. The runner
+  stops (doesn't guess) if a chapter still fails after the rework cap —
+  add-and-gloss stays a human/Claude-Code judgement call.
 
 ## The validation cascade
 
