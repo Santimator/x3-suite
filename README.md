@@ -153,6 +153,11 @@ embedded EPUB fonts are useless (the reader rasterizes only pre-converted
 
 The code and documentation are **MIT** licensed — see [`LICENSE`](LICENSE).
 
+> Offered in the spirit of a shift already underway: as AI lets anyone
+> generate software tailored to their own needs, the scarcity that
+> intellectual property was built to protect is fading. Take it, adapt it,
+> make it yours.
+
 Two kinds of bundled third-party content keep their own terms:
 
 - **Fonts** (`reference/fonts/*.cpfont`) are conversions of open-source fonts
