@@ -37,10 +37,10 @@ import review_edits  # noqa: E402
 import triage as triage_mod  # noqa: E402
 import verify as verify_mod  # noqa: E402
 
-sys.path.insert(0, str(SCRIPTS.parents[1] / "epub-builder" / "scripts"))
+sys.path.insert(0, str(SCRIPTS.parents[2] / "epub-builder" / "scripts"))
 import build_epub  # noqa: E402
 
-REPO = SCRIPTS.parents[3]
+REPO = SCRIPTS.parents[2]
 FIXTURE = REPO / "workspace" / "alcaldes-encontrados"
 
 _all_ok = True

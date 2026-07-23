@@ -43,7 +43,7 @@ Python that has `jieba` and `pypinyin` installed (see Setup).
   accepted: writes the gloss-once chapter glossary, appends newly-glossed words
   to `introduced`, files the recap, marks the outline entry, wires `book.json`.
 - **EPUB assembly** — done by the suite-shared builder skill
-  (`.claude/skills/epub-builder/`): hand-built EPUB with selectable pinyin
+  (`epub-builder/`): hand-built EPUB with selectable pinyin
   display (five modes; `gloss-pinyin` is the X3 default — see the builder's
   FORMAT.md) and per-chapter glossary;
   glossed words in the text link to their glossary entry (and back).
@@ -101,7 +101,7 @@ exact same scripts:
   go** — readers are cheap to regenerate, so the convenience wins. Config
   lives in `headless/` (found by absolute path, so run from the repo root):
   ```
-  H=.claude/skills/graded-reader/headless
+  H=services/graded-reader/headless
   cp $H/config.example.json $H/config.json      # then set model / base_url
   printf '%s' 'nvapi-...' > $H/secrets/nim.key   # gitignored
   .venv/bin/python $H/run_book.py workspace/BOOK                 # whole book, unattended
@@ -189,14 +189,14 @@ substantial".
    so add-and-gloss words no longer flag and introduced words aren't re-glossed.
 8. **Assemble EPUB** (after chapters are accepted):
    ```
-   python ../epub-builder/scripts/build_epub.py BOOK --out BOOK/build/book.epub
+   python ../../epub-builder/scripts/build_epub.py BOOK --out BOOK/build/book.epub
    ```
 9. **Verify the EPUB** (deterministic, shared with pdf2epub): confirm the
    output is a structurally sound EPUB — mimetype first/stored, manifest ⇄
    zip parity, well-formed XHTML/OPF, and every glossary link/fragment
    resolves.
    ```
-   python ../epub-builder/scripts/verify_epub.py BOOK/build/book.epub
+   python ../../epub-builder/scripts/verify_epub.py BOOK/build/book.epub
    ```
 
 ## Gates that are NOT automated
@@ -215,7 +215,7 @@ substantial".
   (chapter 1 rendered in all five modes on labeled pages), then set
   `pinyin_mode` in `book.json`:
   ```
-  python ../epub-builder/scripts/build_epub.py BOOK --out BOOK/build/render-test.epub --diagnostic
+  python ../../epub-builder/scripts/build_epub.py BOOK --out BOOK/build/render-test.epub --diagnostic
   ```
   Device notes: `reference/readers.md` at the repo root.
 

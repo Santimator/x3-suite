@@ -24,15 +24,15 @@ builder doesn't support it — extend the contract first, then the builder.
 
 ```bash
 # generic book (no annotation — no CJK dependencies needed)
-.venv/bin/python .claude/skills/epub-builder/scripts/build_epub.py \
+.venv/bin/python epub-builder/scripts/build_epub.py \
     workspace/<slug> --out workspace/<slug>/build/<slug>.epub
 
 # graded-reader book (pinyin_mode in book.json engages annotation)
-.venv/bin/python .claude/skills/epub-builder/scripts/build_epub.py \
+.venv/bin/python epub-builder/scripts/build_epub.py \
     workspace/yugong-mountain --out workspace/yugong-mountain/build/book.epub
 
 # pinyin render test for a new device (one EPUB, chapter 1 in all 3 modes)
-.venv/bin/python .claude/skills/epub-builder/scripts/build_epub.py \
+.venv/bin/python epub-builder/scripts/build_epub.py \
     workspace/yugong-mountain --out render-test.epub --diagnostic
 ```
 

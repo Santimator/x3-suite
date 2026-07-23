@@ -31,7 +31,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from restore import effective_restored  # noqa: E402
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "epub-builder" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "epub-builder" / "scripts"))
 from verify_epub import check_integrity, load_opf, parse_manifest, parse_spine  # noqa: E402
 
 WHITESPACE = re.compile(r"\s+")

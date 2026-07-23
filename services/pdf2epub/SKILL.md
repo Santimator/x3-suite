@@ -50,7 +50,7 @@ workspace/<slug>/
 
 Converted books converge on the suite's common book format — **documented in
 the epub-builder skill's contract,
-[`.claude/skills/epub-builder/FORMAT.md`](../epub-builder/FORMAT.md); the
+[`epub-builder/FORMAT.md`](../../epub-builder/FORMAT.md); the
 agent must know it when drafting** — so the EPUB builder, the device fonts
 in `reference/fonts/`, and device lore in `reference/readers.md` are shared
 with graded-reader.
@@ -61,7 +61,7 @@ with graded-reader.
    pathologies, recommend a route:
 
    ```bash
-   .venv/bin/python .claude/skills/pdf2epub/scripts/triage.py \
+   .venv/bin/python services/pdf2epub/scripts/triage.py \
        workspace/<slug>/source.pdf --out workspace/<slug>/build/triage.json
    ```
 
@@ -94,7 +94,7 @@ with graded-reader.
    guarded-correction path (stage 2b).
 
    ```bash
-   .venv/bin/python .claude/skills/pdf2epub/scripts/restore.py \
+   .venv/bin/python services/pdf2epub/scripts/restore.py \
        workspace/<slug>/extract --policy workspace/<slug>/policy.json \
        --out workspace/<slug>/restore
    ```
@@ -176,7 +176,7 @@ with graded-reader.
    change is small, local, and shown to you".
 
    ```bash
-   .venv/bin/python .claude/skills/pdf2epub/scripts/review_edits.py \
+   .venv/bin/python services/pdf2epub/scripts/review_edits.py \
        workspace/<slug>/restore        # diffs corrected.md vs restored.md
    ```
 
@@ -225,12 +225,12 @@ with graded-reader.
    order") — prepare.py never guesses.
 
    ```bash
-   .venv/bin/python .claude/skills/pdf2epub/scripts/prepare.py \
+   .venv/bin/python services/pdf2epub/scripts/prepare.py \
        workspace/<slug>   # expects draft.json; restore/ defaults to workspace/<slug>/restore
    ```
 
 5. **Build** (deterministic, exists) — the suite-shared **epub-builder**
-   skill (`.claude/skills/epub-builder/`): X3-friendly EPUB, no CJK
+   skill (`epub-builder/`): X3-friendly EPUB, no CJK
    dependencies for generic books. The FORMAT.md extensions (verse blocks,
    images, endnotes, emphasis, cover) are implemented on the un-annotated
    path; the annotated (graded-reader) path is untouched and frozen.
@@ -244,7 +244,7 @@ with graded-reader.
    silently dropped.
 
    ```bash
-   .venv/bin/python .claude/skills/pdf2epub/scripts/verify.py \
+   .venv/bin/python services/pdf2epub/scripts/verify.py \
        workspace/<slug> --epub workspace/<slug>/build/<slug>.epub
    ```
 
@@ -252,13 +252,13 @@ with graded-reader.
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r .claude/skills/pdf2epub/requirements.txt
+.venv/bin/pip install -r services/pdf2epub/requirements.txt
 ```
 
 ## Self-test
 
 ```bash
-.venv/bin/python .claude/skills/pdf2epub/scripts/selftest.py
+.venv/bin/python services/pdf2epub/scripts/selftest.py
 ```
 
 No network, no LLM. Runs the full chain (triage → extract_text → restore →
@@ -267,7 +267,7 @@ its committed `policy.json`/`draft.json`, plus the OCR roundtrip from
 `extract_ocr.py`'s own check (skipped with a notice if `tesseract` isn't
 installed). Run this after changing any pdf2epub script. Changes under
 `epub-builder/` are shared infrastructure, so also require
-`.venv/bin/python .claude/skills/graded-reader/scripts/selftest.py` to PASS
+`.venv/bin/python services/graded-reader/scripts/selftest.py` to PASS
 and a clean content-diff of `workspace/yugong-mountain` (the annotated path's
 output bytes are frozen — never let a builder change alter them).
 

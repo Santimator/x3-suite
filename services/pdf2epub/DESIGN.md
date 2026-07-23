@@ -122,8 +122,8 @@ everything provable before the agent ever looks.
 ### The builder contract
 
 The builder is now its own skill — suite infrastructure at
-`.claude/skills/epub-builder/` — and consumes exactly one thing: the common
-book format **documented in its [`FORMAT.md`](../epub-builder/FORMAT.md)** —
+`epub-builder/` — and consumes exactly one thing: the common
+book format **documented in its [`FORMAT.md`](../../epub-builder/FORMAT.md)** —
 book.json + chapters/*.md + prepared images/. That document *is* the
 contract the agent must know when drafting and preparing; if a construct
 isn't in it, the builder doesn't support it. pdf2epub's needs (verse blocks,

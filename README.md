@@ -10,23 +10,29 @@ folder. One mindset across all of them:
 > measure, validate, track state, and assemble — they never invent. Trust
 > comes from the gates, not the model.
 
-The suite splits into **tasks** and **infrastructure**, each a Claude Code
-skill under `.claude/skills/` whose `SKILL.md` is its canonical
-documentation. Tasks (graded-reader, pdf2epub) own their steps and tools;
-they all converge on the **common book format** — `chapters/*.md +
-book.json` in a `workspace/<slug>/` folder — which the shared
-**epub-builder** consumes.
+The suite is one **builder** plus two **services** (the AI tools), each a
+self-contained directory at the repo root. Every service converges on the
+**common book format** — `chapters/*.md + book.json` in a `workspace/<slug>/`
+folder — which the builder consumes. Each directory's `SKILL.md` is its
+canonical documentation.
 
 ## Architecture
 
-One builder, two AI tools, both emitting the builder's format:
+One builder, two services, both emitting the builder's format:
 
 ```
-epub-builder (infrastructure)   the book format's contract (FORMAT.md),
-                                build_epub.py, and the shared verify_epub.py
-  ├─ graded-reader  (AI tool)   writes leveled Chinese books
-  └─ pdf2epub       (AI tool)   converts PDFs into clean EPUBs
+epub-builder/               infrastructure — the book format's contract
+                            (FORMAT.md), build_epub.py, shared verify_epub.py
+services/
+  ├─ graded-reader/         service — writes leveled Chinese books
+  └─ pdf2epub/              service — converts PDFs into clean EPUBs
+workspace/<slug>/           one folder per book/job (inputs → build/ outputs)
+reference/                  device notes + SD-ready fonts for the X3
 ```
+
+The layout is agent-agnostic: `AGENTS.md` at the root is the entry point for
+any coding agent, and `.claude/skills/` symlinks the three directories so
+Claude Code still auto-loads them as skills.
 
 Each AI tool has the **same shape**, and it's the shape worth copying for a
 new one:
@@ -61,7 +67,7 @@ optional headless runner against any OpenAI-compatible endpoint.
 One builder for every task, hand-built XHTML/OPF, deterministic output
 (same source → byte-identical EPUB). Its input contract — what tasks are
 allowed to hand it — is
-[`.claude/skills/epub-builder/FORMAT.md`](.claude/skills/epub-builder/FORMAT.md).
+[`epub-builder/FORMAT.md`](epub-builder/FORMAT.md).
 Pinyin annotation is an opt-in feature (`pinyin_mode` in book.json); generic
 books build with zero CJK dependencies.
 
@@ -70,9 +76,9 @@ manifest⇄zip parity, well-formed XML, link resolution) that both tasks share,
 so "is this a sound EPUB?" has a single implementation.
 
 ```bash
-.venv/bin/python .claude/skills/epub-builder/scripts/build_epub.py \
+.venv/bin/python epub-builder/scripts/build_epub.py \
     workspace/<slug> --out workspace/<slug>/build/<slug>.epub
-.venv/bin/python .claude/skills/epub-builder/scripts/verify_epub.py \
+.venv/bin/python epub-builder/scripts/verify_epub.py \
     workspace/<slug>/build/<slug>.epub
 ```
 
@@ -87,12 +93,12 @@ deterministic validation gates the HSK level (out-of-list ≤ 5%, stretch
 emits a pinyin-annotated EPUB (`gloss-pinyin` on the X3: plain hanzi with
 word-level pinyin on each glossary word's first appearance).
 
-Docs: [`.claude/skills/graded-reader/SKILL.md`](.claude/skills/graded-reader/SKILL.md)
+Docs: [`services/graded-reader/SKILL.md`](services/graded-reader/SKILL.md)
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r .claude/skills/graded-reader/requirements.txt
-S=.claude/skills/graded-reader/scripts
+.venv/bin/pip install -r services/graded-reader/requirements.txt
+S=services/graded-reader/scripts
 
 .venv/bin/python $S/validate.py workspace/twelve-zodiac       # grade a book
 .venv/bin/python $S/selftest.py                               # full pipeline check
@@ -100,7 +106,7 @@ S=.claude/skills/graded-reader/scripts
 ```
 
 Two drivers: Claude Code interactively, or the optional headless runner in
-`.claude/skills/graded-reader/headless/` (`run_book.py`) against any
+`services/graded-reader/headless/` (`run_book.py`) against any
 OpenAI-compatible endpoint — kept out of the core so the skill is just the
 briefing plus deterministic tools. On Debian/Ubuntu install `jieba` inside a
 venv — system setuptools breaks its legacy `setup.py`.
@@ -115,12 +121,12 @@ verifies — confirming routes, diagnosing failures, and emitting decisions
 (policy switches, chapter anchors) that scripts apply. The model never bulk-
 generates: every byte in the EPUB traces back to the extraction.
 
-Docs: [`.claude/skills/pdf2epub/SKILL.md`](.claude/skills/pdf2epub/SKILL.md) ·
-design + open questions: [`DESIGN.md`](.claude/skills/pdf2epub/DESIGN.md)
+Docs: [`services/pdf2epub/SKILL.md`](services/pdf2epub/SKILL.md) ·
+design + open questions: [`DESIGN.md`](services/pdf2epub/DESIGN.md)
 
 ```bash
-.venv/bin/pip install -r .claude/skills/pdf2epub/requirements.txt
-.venv/bin/python .claude/skills/pdf2epub/scripts/selftest.py
+.venv/bin/pip install -r services/pdf2epub/requirements.txt
+.venv/bin/python services/pdf2epub/scripts/selftest.py
 ```
 
 Test fixture: `workspace/alcaldes-encontrados/` — a 16-page 1793 printing of

@@ -17,13 +17,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 # the EPUB builder is suite-shared infrastructure, not a graded-reader script
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "epub-builder" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "epub-builder" / "scripts"))
 import build_epub  # noqa: E402
 import verify_epub  # noqa: E402
 import validate as validate_mod  # noqa: E402
 import vocab as vocab_mod  # noqa: E402
 
-REPO = Path(__file__).resolve().parents[4]
+REPO = Path(__file__).resolve().parents[3]
 WORKSPACE = REPO / "workspace"
 
 # One canonical token per cascade tier (see validate.py docstring).

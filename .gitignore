@@ -3,6 +3,6 @@ __pycache__/
 *.pyc
 
 # graded-reader headless runner: LLM config + API keys (never commit)
-.claude/skills/graded-reader/headless/config.json
-.claude/skills/graded-reader/headless/secrets/*
-!.claude/skills/graded-reader/headless/secrets/README.md
+services/graded-reader/headless/config.json
+services/graded-reader/headless/secrets/*
+!services/graded-reader/headless/secrets/README.md
