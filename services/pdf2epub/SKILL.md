@@ -53,6 +53,11 @@ Extraction is a jumble of split words, scrambled columns, or nonsense letters �
 **vision route, and do not fight it** — no policy of furniture regexes and
 normalize entries will rescue a garbage OCR layer; transcribe instead.
 
+**Third entry point — bring your own transcript.** If the user has a better OCR
+(or a hand transcription), they can drop it next to the PDF as
+`source-transcript.{md,txt}` and skip our OCR entirely. See "Bring your own
+transcript" below; triage detects the sidecar and reports route `TRANSCRIPT`.
+
 Full design rationale + open questions: [`DESIGN.md`](DESIGN.md).
 
 **Status: fully implemented. The cheap route is deterministic scripts (stages
@@ -70,6 +75,7 @@ One folder per conversion job, mirroring graded-reader books:
 ```
 workspace/<slug>/
   source.pdf          the input (never modified)
+  source-transcript.md  optional — bring-your-own text; its presence skips OCR
   build/triage.json   stage 0 output
   extract/            stage 1 output (raw per-page extraction)
   policy.json         stage 2 input — the agent's restore decisions
@@ -152,6 +158,40 @@ space. The un-annotated build path already minimizes `line-height`
 (`PDF2EPUB_CSS`); you just supply clean structure. See
 `reference/readers.md` § "Screen text capacity".
 
+## Bring your own transcript (the sidecar)
+
+Our OCR is deliberately simple, and for a hard scan a purpose-built OCR (or the
+user's own careful transcription) will beat it. So the user can supply one: a
+file named **`source-transcript.{md,txt}`** (any of `.md`/`.markdown`/`.txt`/
+`.text`) next to `source.pdf`. Its mere presence tells the pipeline to **skip
+triage's route heuristics, extract, and OCR** — triage detects the sidecar and
+reports route `TRANSCRIPT`, with the file's size, format, and a preview.
+
+**The agent decides what the transcript needs — there is no fixed rule.** You
+are handed the text; you judge, by reading it (and cross-checking the rendered
+pages when in doubt), how far it already is from a proper EPUB and do only
+what's missing:
+
+- **Already clean and structured** (headings, verse fences, speaker labels,
+  paragraphs) → adapt it into `chapters/*.md` + `book.json` and build. Near-zero
+  processing; don't re-flow what the user laid out on purpose.
+- **Raw-ish text** (a better OCR's dump: real words, but page furniture, mid-line
+  column wraps, no chapter structure) → do the restoration work yourself, the
+  same moves as the vision route (drop furniture, re-join wrapped lines, rebuild
+  paragraphs, keep verse whole, add headings/labels), writing `chapters/*.md`
+  directly. The PDF pages are still the visual ground truth to check against.
+- **Anywhere between** → do the in-between amount. The point of the sidecar is
+  that *the agent*, not a script and not a file extension, sizes up the text and
+  finishes the job.
+
+The `looks_structured` hint in `triage.json` (does it contain Markdown headings
+or fences?) is only a nudge; trust your own read. Don't run `restore.py`/
+`policy.json`/`draft.json` on a transcript — those cut a machine-extracted blob,
+and here you're doing the shaping by hand. Then **build and verify** as usual;
+on this route, as on the vision route, `verify.py` coverage is a completeness
+check against your own chapters and a human read is the real gate. If the
+sidecar is empty, triage says so — treat it as absent and re-triage the PDF.
+
 ## Stages (the "bueno, barato" route)
 
 These stages are the deterministic cheap route — a clean text layer flows
@@ -169,11 +209,15 @@ stages 1–4 (you replace them) and use only 0 (triage, to decide), 5 (build),
    ```
 
    Routes: `TEXT` (usable text layer), `OCR` (scanned), `HYBRID` (per-page
-   mix). Flags: `doubled_chars` / `doubled_lines` (fake-bold double draw —
+   mix), and `TRANSCRIPT` (a `source-transcript.{md,txt}` sidecar exists — its
+   presence overrides the heuristics and skips extract/OCR; the report carries
+   the transcript's path, size, format, an `looks_structured` hint, and a
+   preview). Flags: `doubled_chars` / `doubled_lines` (fake-bold double draw —
    fixed deterministically via char dedupe), `broken_spacing`,
    `page_furniture` (repeating headers/footers → drop candidates). The
    orchestrating model reads the summary + sample pages and confirms the
-   route.
+   route — on `TRANSCRIPT`, it reads the sidecar and follows "Bring your own
+   transcript" above.
 
 1. **Extract** (toolbox, implemented) — parameterized deterministic tools
    the agent picks between and re-runs: `extract_text.py` (pdfplumber;

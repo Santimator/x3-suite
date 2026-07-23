@@ -43,6 +43,43 @@ STOPWORDS = {
 # Real one-letter words; anything else of length 1 suggests broken spacing.
 OK_SINGLE = set("aeoyiu")
 
+# A user may drop a better transcription next to the PDF to bypass our OCR
+# entirely: <stem>-transcript.<ext> (e.g. source-transcript.md). Priority
+# order when several exist — the first wins, the rest are reported as extras.
+TRANSCRIPT_EXTS = ("md", "markdown", "txt", "text")
+
+
+def find_transcripts(pdf_path: Path):
+    """Sibling transcript files `<stem>-transcript.<ext>`, priority-ordered.
+
+    Lets the user bring their own OCR / hand transcription; when present the
+    whole triage→extract→OCR front end is skipped and the agent works from
+    this text. Returns a list (may be empty)."""
+    stem = pdf_path.stem
+    return [
+        cand
+        for ext in TRANSCRIPT_EXTS
+        if (cand := pdf_path.with_name(f"{stem}-transcript.{ext}")).exists()
+    ]
+
+
+def transcript_report(paths):
+    """Describe the chosen transcript for the agent — content is *not*
+    interpreted here; the agent reads it and decides how to structure it.
+    `looks_structured` is only an advisory hint, never a routing decision."""
+    chosen = paths[0]
+    text = chosen.read_text(encoding="utf-8", errors="replace")
+    return {
+        "path": str(chosen),
+        "format": chosen.suffix.lstrip("."),
+        "chars": len(text),
+        "lines": text.count("\n") + 1,
+        "empty": not text.strip(),
+        "looks_structured": bool(re.search(r"(?m)^#{1,6}\s|```", text)),
+        "preview": text[:1200],
+        "extras": [str(p) for p in paths[1:]],
+    }
+
 
 def normalized(line: str) -> str:
     return re.sub(r"\s+", "", line)
@@ -158,7 +195,14 @@ def triage(pdf_path: Path, samples: int):
     if furniture:
         flags.append("page_furniture")
 
-    if len(text_pages) >= 0.9 * len(pages):
+    transcripts = find_transcripts(pdf_path)
+    if transcripts:
+        # A user-supplied transcript overrides our own OCR. We still analyse
+        # the PDF (page count, language, images remain useful context and the
+        # visual ground truth), but the text comes from the sidecar and the
+        # agent, not from extract/OCR.
+        route = "TRANSCRIPT"
+    elif len(text_pages) >= 0.9 * len(pages):
         route = "TEXT"
     elif len(text_pages) <= 0.1 * len(pages):
         route = "OCR"
@@ -184,6 +228,7 @@ def triage(pdf_path: Path, samples: int):
         "doubled_line_ratio": round(doubled_ratio, 3),
         "stray_single_ratio": round(stray_ratio, 3),
         "furniture_candidates": furniture,
+        "transcript": transcript_report(transcripts) if transcripts else None,
         "per_page": [
             {k: v for k, v in p.items() if k != "clean_text"} for p in pages
         ],
@@ -204,6 +249,20 @@ def summarize(r):
     ]
     if r["furniture_candidates"]:
         lines.append("furniture: " + " | ".join(r["furniture_candidates"][:5]))
+    if r.get("transcript"):
+        t = r["transcript"]
+        if t["empty"]:
+            note = "!! transcript is EMPTY — falling back means re-triaging without it"
+        else:
+            hint = ("looks structured (has headings/fences)"
+                    if t["looks_structured"] else "looks like raw text")
+            note = (f"TRANSCRIPT provided: {t['path']} "
+                    f"({t['chars']} chars, .{t['format']}, {hint}). "
+                    "OCR/extract skipped — read it and decide how to turn it "
+                    "into chapters (see SKILL.md § sidecar).")
+            if t["extras"]:
+                note += f"  [ignoring extra transcripts: {', '.join(t['extras'])}]"
+        lines.insert(0, note)
     return "\n".join(lines)
 
 

@@ -37,7 +37,10 @@ are metrical and must survive).
 > is inverted: vision transcription is the *primary* engine, not the last rung.
 > The principle that unifies both: **the ground truth is the printed page, and
 > the agent uses whatever gets closest to it cheaply** — the text layer when
-> it's clean, its own eyes when it isn't.
+> it's clean, its own eyes when it isn't, and a **user-supplied transcript**
+> (`source-transcript.{md,txt}` sidecar, route `TRANSCRIPT`) when the user has
+> a better OCR than ours. On the sidecar route the agent reads the given text
+> and decides how much shaping it still needs — no fixed rule.
 
 The rest of this section describes the **cheap route** (good text layer). The
 suite's split (LLM judgment / deterministic mechanics) gets a sharper
