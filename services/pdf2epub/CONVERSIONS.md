@@ -8,13 +8,15 @@ fixture's exact bytes would only prove the scripts didn't change — not that th
 toolbox is *capable*.
 
 So the proof is this: the committed sample conversions under `workspace/` —
-their `source.pdf` + `policy.json` + `draft.json` (the agent's decisions) and
-the built `build/<slug>.epub` (the result). This file is the annotated log of
-producing them: what each source was, which tools and parameters the agent
-reached for, and — most usefully — **where a tool was missing or rough**, so we
-can add or polish it. Re-run any of them by hand to check the scripts still
-behave (`triage → extract_text → restore → prepare → build_epub → verify`); read
-the EPUB to judge quality. That *is* the test.
+their `source.pdf`, the agent's decisions (a `policy.json`/`draft.json` on the
+cheap route, or a hand-written `chapters/*.md` transcription on the vision
+route), and the built `build/<slug>.epub` (the result). This file is the
+annotated log of producing them: what each source was, which route it took and
+why, which tools the agent reached for, and — most usefully — **where a tool
+was missing or rough**, so we can add or polish it. Re-run a cheap-route one by
+hand to check the scripts still behave (`triage → extract_text → restore →
+prepare → build_epub → verify`); on the vision route the test is a read. Either
+way, reading the EPUB is the final judge. That *is* the test.
 
 ## The examples (four classes on purpose)
 
@@ -31,11 +33,18 @@ that secretly only fit the entremés would break on the paper.
 
 ## Per-conversion notes
 
-### alcaldes-encontrados (OCR verse entremés)
-Route TEXT. Furniture: page numbers + printer's catchwords, enumerated as exact
-regexes. `normalize` maps the OCR middot `·`→`.` and strips stray `*`. Body is
-`verse`; the three title lines drop as front matter. Dehyphenation **off** (see
-gap #2). One chapter. Faithful; residual OCR errors preserved by design.
+### alcaldes-encontrados (scan → **vision route**)
+The reference vision-route conversion. Originally taken through the cheap route
+(policy furniture regexes + normalize + verse reflow); the result read faithful
+to the OCR — and the OCR was garbage (`Ve]. ^ TO me ga` for `Vej. No me tenga`,
+every verse line shredded at the column width), so on-device it was unreadable.
+Re-done by **reading all 16 rendered pages by eye** and writing
+`chapters/ch01.md` directly: OCR fixed letter by letter, column-broken verse
+re-joined into whole metrical lines, speaker labels and italic stage directions
+restored, 1793 orthography kept, furniture simply not transcribed. No
+`policy.json`/`draft.json` — the agent replaces those stages. `verify.py` shows
+`char_ratio ≈ 0.99` (complete); the read is the gate. This is the conversion
+that motivated the two-route redesign.
 
 ### gurruminos (OCR verse entremés)
 Same shape as alcaldes but messier OCR (garbled page numbers `Zj`/`IO`/`1$`,

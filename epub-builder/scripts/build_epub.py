@@ -410,7 +410,13 @@ a.glm { color: inherit; text-decoration: none; }
 # Appended only for un-annotated (mode=None / pdf2epub) builds -- annotated
 # books never see these bytes, so their style.css stays byte-identical.
 PDF2EPUB_CSS = """\
-.verse { text-indent: 0; margin: 0 0 0.9em 1em; }
+/* Tight interlineado — on a small e-ink screen the reader adds space by
+   choosing a bigger font / landscape; our job is to waste no vertical room.
+   Overrides the base 1.9/2.4/2.2 for un-annotated books only. */
+body { line-height: 1.3; }
+h1 { line-height: 1.3; margin: 0.3em 0 0.6em; }
+h2 { line-height: 1.25; margin: 0.6em 0 0.3em; }
+.verse { text-indent: 0; margin: 0 0 0.7em 1em; }
 .verse p { margin: 0; text-indent: -1em; padding-left: 1em; }
 figure { margin: 1em 0; text-align: center; }
 figure img { max-width: 100%; }

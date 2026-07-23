@@ -35,6 +35,29 @@ Keep chapter CSS trivial: the engine honors basic text properties only.
 `ruby`/`interlinear` modes remain in the builder for capable readers
 (Apple Books renders ruby beautifully) — never for the X3.
 
+## Screen text capacity (measured on-device, 2026)
+
+The panel is 528×792 px. At the default reading size the text column holds
+about:
+
+| | chars/line | lines/screen |
+|---|---|---|
+| Prose (justified) | ~34–37 | ~19–21 |
+| Verse (hanging indent) | wraps ~36 | ~10–12 |
+
+**~36 characters is the effective line width.** These are *facts to design
+against, not targets to hit*:
+
+- **Don't cap verse line length.** Metrical lines stay whole; if one is too
+  wide the reader handles it by bumping the font down or rotating to landscape.
+  Our job is the opposite — **waste no vertical space**: `line-height` is
+  minimized on the un-annotated path (`PDF2EPUB_CSS`), so the reader, not our
+  CSS, decides how airy the page is.
+- **Prose is width-agnostic** — the engine reflows it; just reconstruct real
+  paragraphs (don't preserve column-broken short lines).
+- **Small screen ⇒ structure matters.** ~12–20 lines per screen means clear
+  chapters/acts/scenes and headings beat one long undifferentiated chapter.
+
 ## Building `.cpfont` fonts — the rules that matter
 
 CrossPoint's converter is `lib/EpdFont/scripts/fontconvert_sdcard.py`

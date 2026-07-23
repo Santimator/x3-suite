@@ -22,13 +22,30 @@ Our fixture (`workspace/alcaldes-encontrados`) is class D with a class E twist
 (a verse entremés — the OCR text layer is trusted but noisy, and line breaks
 are metrical and must survive).
 
-## Mindset: deterministic-first, agent-on-error
+## Mindset: two routes, chosen by whether the text layer is trustworthy
 
-The suite's split (LLM judgment / deterministic mechanics) gets a sharper
+> **Revised 2026-07 after on-device evidence.** The "deterministic-first,
+> generation-never" mindset below is correct — but *only for sources whose
+> text layer is trustworthy* (class A/B). It quietly assumed the extraction is
+> ground truth. For a scan whose OCR is garbage (class C/D, the common hard
+> case), that assumption is false, and holding to "every byte traces back to
+> the extraction" faithfully carries garbage onto the device
+> (`qdueejaáqmuiepfouir`). The resolution is **two routes** (see SKILL.md):
+> the **cheap route** below for good sources, and a **vision route** for bad
+> ones where the agent reads the *rendered page* — the real ground truth — and
+> writes the clean chapters directly. On the vision route the escalation ladder
+> is inverted: vision transcription is the *primary* engine, not the last rung.
+> The principle that unifies both: **the ground truth is the printed page, and
+> the agent uses whatever gets closest to it cheaply** — the text layer when
+> it's clean, its own eyes when it isn't.
+
+The rest of this section describes the **cheap route** (good text layer). The
+suite's split (LLM judgment / deterministic mechanics) gets a sharper
 formulation here, because conversion — unlike graded-reader — starts from
 text that already exists. The model is excellent at *reading* — verifying
 that text is complete and correct, recognizing what kind of problem a page
-has — and unrigorous at *bulk generation*. So generation is never its job:
+has — and unrigorous at *bulk generation*. So on this route generation is
+never its job:
 
 - **The happy path is fully deterministic.** Extract → restore → build, no
   model in the loop. Scripts transform; they never invent.
@@ -146,11 +163,16 @@ Stage 3 emits the **same intermediate format graded-reader uses**:
 
 ## Open questions
 
-1. **OCR engine** (route OCR/HYBRID). Options: (a) tesseract — free,
-   deterministic, mediocre on odd layouts; (b) vision-LLM transcription of
-   rendered pages — excellent, costs tokens, *requires* the fidelity gate;
-   (c) hybrid: tesseract first, vision only for pages below a confidence
-   threshold. **Leaning (c).**
+1. **OCR engine** (route OCR/HYBRID). ~~Leaning hybrid.~~ **Settled 2026-07:
+   the agent's own vision is the OCR engine for bad sources.** Tesseract on odd
+   layouts (verse, columns, old type) produces exactly the garbage that started
+   this redesign; a vision-LLM reading the rendered page does not, and it is the
+   *same agent already driving the pipeline* — no extra service, no token
+   surprise beyond the pages it must read anyway. `extract_ocr.py` (tesseract)
+   stays in the toolbox as a cheap first look and for bulk clean scans, but the
+   primary scanned-book path is vision transcription (SKILL.md § "Vision
+   transcription"). The "fidelity gate" it was said to require is *not* a gate
+   against the OCR — it is completeness plus a human read.
 2. **Images/figures.** Keep (grayscale, downscaled to device width) or drop?
    E-ink + tiny screen argues for a size cap and dropping decorative images;
    content figures should survive. **Leaning: keep with cap, restorer flags
