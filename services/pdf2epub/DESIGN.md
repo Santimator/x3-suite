@@ -140,8 +140,9 @@ Stage 3 emits the **same intermediate format graded-reader uses**:
 - Device fonts are shared too: `reference/fonts/WenKaiFull` covers full CJK,
   so a converted *Chinese* PDF needs no per-book font work (charset-level
   subsetting was retired — sparse-interval fonts fail on-device; readers.md).
-- Workspace conventions, selftest patterns, and device lore
-  (`reference/readers.md`) are shared instead of duplicated.
+- Workspace conventions and device lore (`reference/readers.md`) are shared
+  instead of duplicated. (Verification isn't: graded-reader has objective gates
+  and a self-test; pdf2epub is proven by worked conversions — `CONVERSIONS.md`.)
 
 ## Open questions
 

@@ -52,15 +52,18 @@ python3 -m venv .venv
 .venv/bin/pip install -r services/pdf2epub/requirements.txt
 ```
 
-Run a service's self-test after changing it — this is the acceptance check:
+How each service is verified differs, by design:
 
-```bash
-.venv/bin/python services/graded-reader/scripts/selftest.py
-.venv/bin/python services/pdf2epub/scripts/selftest.py
-```
+- **graded-reader** has a deterministic self-test (its gates are objective —
+  vocabulary level, EPUB integrity):
+  `.venv/bin/python services/graded-reader/scripts/selftest.py`
+- **pdf2epub** does **not** — whether it works is whether an agent can convert
+  a real PDF to a faithful EPUB a human finds sound. Its proof is the worked
+  conversions under `workspace/` + [`services/pdf2epub/CONVERSIONS.md`](services/pdf2epub/CONVERSIONS.md);
+  to sanity-check the scripts, re-run a sample by hand and read the EPUB.
 
-Changes under `epub-builder/` are shared infrastructure: run **both**
-self-tests, and keep the annotated (graded-reader) EPUB output byte-identical
+Changes under `epub-builder/` are shared infrastructure: run the graded-reader
+self-test **and** keep its annotated EPUB output byte-identical
 (`workspace/yugong-mountain` is the canary).
 
 ## Conventions

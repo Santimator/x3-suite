@@ -126,15 +126,18 @@ design + open questions: [`DESIGN.md`](services/pdf2epub/DESIGN.md)
 
 ```bash
 .venv/bin/pip install -r services/pdf2epub/requirements.txt
-.venv/bin/python services/pdf2epub/scripts/selftest.py
 ```
 
-Test fixture: `workspace/alcaldes-encontrados/` — a 16-page 1793 printing of
-the public-domain Spanish entremés *Los alcaldes encontrados*, scanned with an
-ABBYY OCR text layer. The pipeline strips its page-number/catchword furniture,
-normalizes the OCR marks, and reflows the verse, converting it end-to-end
-(`build/alcaldes-encontrados.epub`) while faithfully preserving the residual
-OCR noise — never inventing corrections.
+Proof by worked conversion, not self-test: whether pdf2epub works is whether an
+agent can turn a real PDF into a faithful EPUB a human finds sound, so the proof
+is the committed samples under `workspace/` — public-domain Spanish plays
+(`alcaldes-encontrados`, `gurruminos`, the 3-act `el-espanol-de-oran`), each
+with its `policy.json`/`draft.json` and a built, verified EPUB — annotated,
+with the tool gaps they surfaced, in
+[`services/pdf2epub/CONVERSIONS.md`](services/pdf2epub/CONVERSIONS.md). The
+pipeline strips furniture, normalizes OCR marks, recovers spacing, and reflows
+verse or prose, faithfully preserving residual OCR noise — never inventing
+corrections.
 
 ## Shared ground
 

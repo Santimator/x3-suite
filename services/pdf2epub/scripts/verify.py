@@ -8,11 +8,11 @@ Two independent checks, both deterministic:
      fragments resolve, XHTML/OPF well-formed). One implementation, used by
      both suite tasks.
   2. Coverage -- strip tags from the spine's XHTML, normalize whitespace,
-     and run it through the same fidelity gate restore.py uses
-     (char_ratio, ngram_containment) against restore/restored.md. This is
-     conversion-specific (it needs the restored source), so it stays here.
-     If prepare.py silently dropped a paragraph, or the builder mangled
-     something, this is what catches it.
+     and run it through the same fidelity gate restore.py uses (char_ratio,
+     ngram_containment) against the book's own chapters/*.md (what actually
+     went into the EPUB). This catches a builder mangle/drop; prepare's
+     paragraph accounting separately guarantees the restored -> chapters step.
+     Conversion-specific (needs the book), so it stays here.
 
 Usage:
   verify.py workspace/<slug> --epub PATH [--restored RESTOREDIR]
@@ -28,9 +28,6 @@ from pathlib import Path
 
 # The EPUB integrity check + OPF parsing are builder-level infrastructure,
 # shared with graded-reader; import them from the epub-builder skill.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from restore import effective_restored  # noqa: E402
-
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "epub-builder" / "scripts"))
 from verify_epub import check_integrity, load_opf, parse_manifest, parse_spine  # noqa: E402
 
@@ -67,6 +64,22 @@ def spine_text(z: zipfile.ZipFile, opf_dir: str, manifest: dict, spine: list) ->
     return "\n".join(parts)
 
 
+def book_chapters_text(book_dir: Path) -> str:
+    """The coverage baseline: the concatenated text of the chapters that went
+    into the book (book.json's spine). Structural markdown the builder renders
+    as structure — verse fences and heading markers — is stripped so only prose
+    content is compared. This reflects the guarded-correction path for free
+    (chapters are cut from corrected.md when present)."""
+    book = json.loads((book_dir / "book.json").read_text(encoding="utf-8"))
+    parts = []
+    for ch in book["chapters"]:
+        t = (book_dir / ch["source"]).read_text(encoding="utf-8")
+        t = re.sub(r"(?m)^```.*$", "", t)   # verse fences
+        t = re.sub(r"(?m)^#+\s*", "", t)     # heading markers (keep the text)
+        parts.append(t)
+    return "\n".join(parts)
+
+
 # --------------------------------------------------------------------------- #
 # Driver
 # --------------------------------------------------------------------------- #
@@ -78,10 +91,13 @@ def verify(epub_path: Path, restored_dir: Path) -> dict:
 
     integrity_errors = check_integrity(z, opf_path, opf_dir, manifest, spine)
 
-    # Coverage compares the EPUB against the text it was actually built from:
-    # corrected.md when the agent took the guarded-correction path, else
-    # restored.md. review_edits.py separately bounds corrected vs restored.
-    restored_text = effective_restored(restored_dir).read_text(encoding="utf-8")
+    # Coverage compares the EPUB against *what actually went into the book* —
+    # the chapters/*.md prepare cut, not restored.md. Comparing against
+    # restored.md would penalise content prepare intentionally dropped (front
+    # matter). The restored -> chapters step loses nothing by construction and
+    # is separately guaranteed by prepare's paragraph accounting; this check
+    # catches the remaining hop, chapters -> EPUB (a builder mangle/drop).
+    restored_text = book_chapters_text(restored_dir.parent)
     out_text = spine_text(z, opf_dir, manifest, spine)
 
     chars_in = nonwhitespace_chars(restored_text)

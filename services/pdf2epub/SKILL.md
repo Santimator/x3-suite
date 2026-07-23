@@ -19,15 +19,16 @@ completeness, and diagnoses failures — and when it intervenes it emits
 bulk text. Every byte in the EPUB traces back to the extraction.
 Full design rationale + open questions: [`DESIGN.md`](DESIGN.md).
 
-**Status: fully implemented (stages 0-2 and 4-6, plus `selftest.py`) and
-proven end-to-end on the test fixture — `workspace/alcaldes-encontrados/build/
-alcaldes-encontrados.epub` exists and passes `verify.py`. The fixture is a
-1793 printing of the entremés *Los alcaldes encontrados* (an ABBYY-OCR'd
-scan): the pipeline strips its page-number/catchword furniture, normalizes
-the OCR junk marks, and reflows the verse, faithfully preserving the residual
-OCR noise rather than inventing corrections — exactly the "every byte traces
-back to the extraction" contract. Stage 3 (draft) is always the agent, by
-design.**
+**Status: fully implemented (stages 0-2 and 4-6). Proven by the worked
+conversions under `workspace/` — OCR'd verse plays (`alcaldes-encontrados`,
+`gurruminos`) and a longer 3-act comedia (`el-espanol-de-oran`), each with its
+`policy.json`/`draft.json` and a built, verified EPUB. The pipeline strips
+page-number/catchword furniture, normalizes OCR junk marks, recovers spacing
+where the text layer dropped it, and reflows verse or prose — faithfully
+preserving residual OCR noise rather than inventing corrections ("every byte
+traces back to the extraction"). Stage 3 (draft) is always the agent, by
+design. There is no deterministic self-test — see the "Verifying" section and
+[`CONVERSIONS.md`](CONVERSIONS.md).**
 
 ## Workspace convention
 
@@ -74,10 +75,14 @@ with graded-reader.
 
 1. **Extract** (toolbox, implemented) — parameterized deterministic tools
    the agent picks between and re-runs: `extract_text.py` (pdfplumber;
-   `--dedupe`, `--pages`), `extract_ocr.py` (tesseract;
+   `--dedupe`, `--pages`, `--space-recover`), `extract_ocr.py` (tesseract;
    `--lang`, `--dpi`, `--psm`), `render_pages.py` (page images, for the
-   agent's own eyes or last-resort vision transcription). Per-page
-   composable for HYBRID books. Tools never edit, only extract; the agent
+   agent's own eyes or last-resort vision transcription). `--space-recover`
+   rebuilds inter-word spaces from glyph gaps — reach for it when triage
+   flags `broken_spacing` (born-digital PDFs that render justified text with
+   no space glyphs come out word-runtogether otherwise; tune `--space-ratio`
+   if a page over/under-splits). Per-page composable for HYBRID books. Tools
+   never edit, only extract; the agent
    verifies output and reconsiders tool or parameters on failure.
    `extract_ocr.py` degrades gracefully (exit 1, one-line hint) when the
    `tesseract` binary or `pytesseract` module is absent — never auto-installs.
@@ -255,21 +260,25 @@ python3 -m venv .venv
 .venv/bin/pip install -r services/pdf2epub/requirements.txt
 ```
 
-## Self-test
+## Verifying — there is no self-test, by design
 
-```bash
-.venv/bin/python services/pdf2epub/scripts/selftest.py
-```
+Whether this pipeline "works" is whether an agent can drive the tools to a
+faithful EPUB that a human, reading it, finds sound. A frozen replay of one
+fixture's bytes would only prove the scripts didn't change — so there isn't
+one. The proof is the **worked conversions**: the committed samples under
+`workspace/` (their `source.pdf` + `policy.json` + `draft.json` and the built
+`build/<slug>.epub`), annotated in [`CONVERSIONS.md`](CONVERSIONS.md) — which
+also lists the tool gaps those conversions surfaced.
 
-No network, no LLM. Runs the full chain (triage → extract_text → restore →
-prepare → build → verify) on the test fixture into a temp directory, using
-its committed `policy.json`/`draft.json`, plus the OCR roundtrip from
-`extract_ocr.py`'s own check (skipped with a notice if `tesseract` isn't
-installed). Run this after changing any pdf2epub script. Changes under
-`epub-builder/` are shared infrastructure, so also require
-`.venv/bin/python services/graded-reader/scripts/selftest.py` to PASS
-and a clean content-diff of `workspace/yugong-mountain` (the annotated path's
-output bytes are frozen — never let a builder change alter them).
+To sanity-check the scripts after editing them, re-run a sample by hand
+(`triage → extract_text → restore → prepare → build_epub → verify`, all exit
+0 on success) and read the EPUB. Structural soundness alone is one command:
+`epub-builder/scripts/verify_epub.py workspace/<slug>/build/<slug>.epub`.
+
+Changes under `epub-builder/` are shared infrastructure, so also re-run the
+graded-reader check (`services/graded-reader/scripts/selftest.py`) and keep the
+annotated path's output byte-identical — `workspace/yugong-mountain` is the
+canary.
 
 ## Test fixture
 

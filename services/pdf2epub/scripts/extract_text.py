@@ -48,7 +48,30 @@ def should_dedupe(page, mode):
     return len(page.dedupe_chars().chars) / raw < DEDUPE_DROP_THRESHOLD
 
 
-def extract_page(page, page_num, dedupe_mode):
+def reconstruct_line_text(chars, ratio):
+    """Rebuild a line's text from its glyph positions, inserting a space
+    wherever the gap between two adjacent glyphs exceeds `ratio` times the
+    line's median glyph width. For born-digital PDFs that render justified
+    text with no space glyphs, pdfplumber's default line text comes out
+    word-runtogether ('TheTransformerfollows...'); this recovers the spaces
+    from geometry alone. Existing space glyphs are preserved (never doubled),
+    so it's safe to apply, but it's opt-in — the agent turns it on when triage
+    flags broken_spacing."""
+    cs = sorted(chars, key=lambda c: c["x0"])
+    widths = [c["x1"] - c["x0"] for c in cs if c["x1"] > c["x0"]]
+    tol = ratio * (statistics.median(widths) if widths else 2.0)
+    out = []
+    prev = None
+    for c in cs:
+        if prev is not None and (c["x0"] - prev["x1"]) > tol \
+                and not c["text"].isspace() and (not out or not out[-1].isspace()):
+            out.append(" ")
+        out.append(c["text"])
+        prev = c
+    return "".join(out)
+
+
+def extract_page(page, page_num, dedupe_mode, space_recover, space_ratio):
     applied = should_dedupe(page, dedupe_mode)
     work = page.dedupe_chars() if applied else page
 
@@ -57,8 +80,9 @@ def extract_page(page, page_num, dedupe_mode):
         chars = ln["chars"]
         sizes = [c["size"] for c in chars]
         fonts = collections.Counter(c["fontname"] for c in chars)
+        text = reconstruct_line_text(chars, space_ratio) if space_recover else ln["text"]
         lines.append({
-            "text": ln["text"],
+            "text": text,
             "x0": round(ln["x0"], 1),
             "top": round(ln["top"], 1),
             "x1": round(ln["x1"], 1),
@@ -90,7 +114,8 @@ def extract_page(page, page_num, dedupe_mode):
     return record, chars_count
 
 
-def run(pdf_path: Path, out_dir: Path, pages_spec, dedupe_mode) -> dict:
+def run(pdf_path: Path, out_dir: Path, pages_spec, dedupe_mode,
+        space_recover=False, space_ratio=0.4) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     pages_path = out_dir / "pages.jsonl"
     report_path = out_dir / "extract-report.json"
@@ -103,7 +128,8 @@ def run(pdf_path: Path, out_dir: Path, pages_spec, dedupe_mode) -> dict:
         page_nums = parse_pages(pages_spec, len(pdf.pages))
         for page_num in page_nums:
             page = pdf.pages[page_num - 1]
-            record, chars_count = extract_page(page, page_num, dedupe_mode)
+            record, chars_count = extract_page(page, page_num, dedupe_mode,
+                                               space_recover, space_ratio)
             if record["dedupe_applied"]:
                 dedupe_pages.append(page_num)
             per_page_chars[str(page_num)] = chars_count
@@ -139,9 +165,15 @@ def main():
     ap.add_argument("--pages", help="page range A-B, 1-indexed inclusive (default: all)")
     ap.add_argument("--dedupe", choices=("auto", "on", "off"), default="auto",
                      help="auto: dedupe pages where it drops >30%% of chars (default)")
+    ap.add_argument("--space-recover", action="store_true",
+                     help="rebuild each line's spaces from glyph gaps — for born-digital "
+                          "PDFs whose text layer runs words together (triage: broken_spacing)")
+    ap.add_argument("--space-ratio", type=float, default=0.4,
+                     help="space if a glyph gap exceeds this * median glyph width (default 0.4)")
     args = ap.parse_args()
 
-    report = run(args.pdf, args.out, args.pages, args.dedupe)
+    report = run(args.pdf, args.out, args.pages, args.dedupe,
+                 args.space_recover, args.space_ratio)
     print(summarize(report))
     return 0
 

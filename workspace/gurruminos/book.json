@@ -1,0 +1,10 @@
+{
+  "title": "Entremés nuevo de los gurruminos",
+  "author": "Antonio de Zamora",
+  "language": "es",
+  "chapters": [
+    {
+      "source": "chapters/ch01.md"
+    }
+  ]
+}

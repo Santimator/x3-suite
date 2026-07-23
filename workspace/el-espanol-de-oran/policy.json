@@ -1,0 +1,36 @@
+{
+  "furniture": [
+    "^\\d{1,2}$"
+  ],
+  "page_ranges": [
+    {
+      "start_anchor": "Pag.Vi",
+      "end_anchor": "i^uerecia, Criada» Acompañamiento Mujicdi",
+      "treat": "front_matter"
+    },
+    {
+      "start_anchor": "JORNADA PRIMERA.",
+      "end_anchor": "ne sé que hablaban los dos> figulendo tus paflbs voy»",
+      "treat": "body",
+      "reflow": "verse"
+    },
+    {
+      "start_anchor": "JORNADA segunda;",
+      "end_anchor": "me havia de matar la herida. pues no la puedo curar.",
+      "treat": "body",
+      "reflow": "verse"
+    },
+    {
+      "start_anchor": "JORNADA TERCERA^",
+      "end_anchor": "\"A-.",
+      "treat": "body",
+      "reflow": "verse"
+    }
+  ],
+  "reflow": "sentence",
+  "normalize": {
+    "*": ""
+  },
+  "dehyphenate": false,
+  "dehyphenate_exceptions": []
+}

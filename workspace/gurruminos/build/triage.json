@@ -1,0 +1,229 @@
+{
+  "source": "workspace/gurruminos/source.pdf",
+  "pages": 16,
+  "metadata": {
+    "CreationDate": "D:20120425094524Z",
+    "Author": "Zamora",
+    "Producer": "ABBYY FineReader 8.0 Professional Edition",
+    "ModDate": "D:20120426134258+02'00'",
+    "Title": "Entremes nuevo de los gurruminos"
+  },
+  "fonts": [
+    "Helvetica-Bold",
+    "Helvetica-BoldOblique",
+    "Times-Bold",
+    "Times-BoldItalic",
+    "Times-Italic",
+    "Times-Roman"
+  ],
+  "route": "TEXT",
+  "flags": [
+    "page_furniture"
+  ],
+  "language_guess": "es",
+  "text_pages": 16,
+  "image_only_pages": 0,
+  "median_chars_per_page": 656,
+  "doubled_line_ratio": 0.0,
+  "stray_single_ratio": 0.02,
+  "furniture_candidates": [
+    "#"
+  ],
+  "per_page": [
+    {
+      "chars": 414,
+      "lines": 19,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 70,
+      "stray_singles": 1,
+      "image_count": 1,
+      "image_coverage": 0.878,
+      "first_line": "JNum. 11,",
+      "last_line": "A Pfig."
+    },
+    {
+      "chars": 714,
+      "lines": 25,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 147,
+      "stray_singles": 2,
+      "image_count": 1,
+      "image_coverage": 0.848,
+      "first_line": "Zj",
+      "last_line": "al DLinto fe le orenda:"
+    },
+    {
+      "chars": 628,
+      "lines": 24,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 132,
+      "stray_singles": 2,
+      "image_count": 1,
+      "image_coverage": 0.827,
+      "first_line": "3",
+      "last_line": "A 2, el"
+    },
+    {
+      "chars": 655,
+      "lines": 26,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 133,
+      "stray_singles": 2,
+      "image_count": 1,
+      "image_coverage": 0.825,
+      "first_line": "4",
+      "last_line": "Efe."
+    },
+    {
+      "chars": 587,
+      "lines": 23,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 125,
+      "stray_singles": 4,
+      "image_count": 1,
+      "image_coverage": 0.953,
+      "first_line": "5",
+      "last_line": "A 3 CriJ"
+    },
+    {
+      "chars": 598,
+      "lines": 24,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 137,
+      "stray_singles": 1,
+      "image_count": 1,
+      "image_coverage": 0.848,
+      "first_line": "6",
+      "last_line": "Crif."
+    },
+    {
+      "chars": 666,
+      "lines": 27,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 146,
+      "stray_singles": 6,
+      "image_count": 1,
+      "image_coverage": 0.868,
+      "first_line": "7",
+      "last_line": "A 4 Cvif."
+    },
+    {
+      "chars": 605,
+      "lines": 24,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 128,
+      "stray_singles": 1,
+      "image_count": 1,
+      "image_coverage": 0.879,
+      "first_line": "8",
+      "last_line": "Si-"
+    },
+    {
+      "chars": 659,
+      "lines": 26,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 143,
+      "stray_singles": 2,
+      "image_count": 1,
+      "image_coverage": 0.916,
+      "first_line": "9",
+      "last_line": "es"
+    },
+    {
+      "chars": 694,
+      "lines": 26,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 148,
+      "stray_singles": 1,
+      "image_count": 1,
+      "image_coverage": 0.903,
+      "first_line": "IO",
+      "last_line": "le"
+    },
+    {
+      "chars": 657,
+      "lines": 26,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 136,
+      "stray_singles": 7,
+      "image_count": 1,
+      "image_coverage": 0.841,
+      "first_line": "II",
+      "last_line": "Pise."
+    },
+    {
+      "chars": 587,
+      "lines": 23,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 126,
+      "stray_singles": 3,
+      "image_count": 1,
+      "image_coverage": 0.86,
+      "first_line": "22,",
+      "last_line": "y mal la condición ava endiablada."
+    },
+    {
+      "chars": 662,
+      "lines": 24,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 137,
+      "stray_singles": 2,
+      "image_count": 1,
+      "image_coverage": 0.871,
+      "first_line": "*3",
+      "last_line": "Mujeres. Para que íl ellos falcn acá fuera?"
+    },
+    {
+      "chars": 671,
+      "lines": 27,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 130,
+      "stray_singles": 1,
+      "image_count": 1,
+      "image_coverage": 0.908,
+      "first_line": "14",
+      "last_line": "no,"
+    },
+    {
+      "chars": 773,
+      "lines": 28,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 156,
+      "stray_singles": 5,
+      "image_count": 1,
+      "image_coverage": 0.859,
+      "first_line": "1$",
+      "last_line": "F I N."
+    },
+    {
+      "chars": 510,
+      "lines": 25,
+      "char_doubled": false,
+      "doubled_lines": 0,
+      "words": 117,
+      "stray_singles": 2,
+      "image_count": 1,
+      "image_coverage": 0.836,
+      "first_line": "1$",
+      "last_line": "El de los ¡Linajudos*"
+    }
+  ],
+  "sample_pages": {
+    "1": "JNum. 11,\nENTREMÉS NUEV O\nDE LOS GURRUMINOS.\n<DE 0ON AHT0H10 ZAMORA.\nPERSONAS QUE HABLAN EN EL»\nAlcalde. ** * #*#. Don Placido.\nEfcrivano. -*** *** Don Crifpin*\nPregonero. ' %**• -*•** Doña Alela.\nLaAlcaldeja. *** *** Dona E/lufa.\nUttEfcudero. *•*# *.** Doí?¿ Simona;\nDonEjis. *#* *** Mujícos.\nSale el Pregonero con un tambor , el Alcalde^\ny el Efcrivano con un papel en la mano,\ny un Alguacil.\nAlcalde. TjRegoncro»\nPregón. | Señor.\nAlcalde. En eftaefquina\nha de gritarle la primer paulina.\nA Pfig."
+  }
+}
