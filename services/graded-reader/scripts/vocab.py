@@ -187,8 +187,15 @@ def level_ceiling(text: Optional[str]) -> Optional[int]:
 
 
 def load_vocab(lists_dir: Path = LISTS_DIR, configure_jieba: bool = True,
-               max_level: Optional[str] = None) -> Vocab:
+               max_level: Optional[str] = None, book_dir: Optional[Path] = None) -> Vocab:
     """Load and merge the lists. Optionally load them into jieba's dictionary.
+
+    `book_dir` loads that book's own `vocab.tsv` — the names, places and props
+    only this story needs (source `book`). It is deliberately *not* part of the
+    stable `lists/`: it lives and dies with the book, so retiring a book takes
+    its vocabulary with it and never pollutes another book's brief. Only
+    `lists/personal.tsv` is the reader's own standing overlay, and it belongs to
+    the user, not to any book.
 
     `max_level` (e.g. "HSK3" or "HSK1-3") caps the HSK base list to that band
     and below — so higher-band words fall out of the known set and are caught
@@ -216,6 +223,13 @@ def load_vocab(lists_dir: Path = LISTS_DIR, configure_jieba: bool = True,
             v.known.add(e.word)
             if source == "chengyu":
                 v.chengyu.add(e.word)
+
+    # The book's own names/places/props, if we were told which book. Loaded
+    # after the shared lists so a book may override a gloss for its own use.
+    if book_dir is not None:
+        for e in _read_tsv(Path(book_dir) / "vocab.tsv", "book"):
+            v.entries[e.word] = e
+            v.known.add(e.word)
 
     # Expressions: multi-word constructions, level-capped like the HSK bands.
     # Literal set phrases also join `known` (so they don't read as out-of-list);

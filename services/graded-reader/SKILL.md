@@ -39,8 +39,17 @@ Python that has `jieba` and `pypinyin` installed (see Setup).
     虽然…但是…, 太…了) that the scribe wraps its own words inside, and **set
     phrases** (不好意思, 想办法) matched literally. The scribe must use a minimum
     number of distinct ones per chapter — see the gates below.
-  - `personal.tsv` — personal known-words overlay **and** the sink for the
-    add-and-gloss escalation (see the loop). Overrides others on conflict.
+  - `personal.tsv` — **the reader's own** standing vocabulary: words they
+    already know, whatever the band. It belongs to the user; the pipeline never
+    writes to it, and it survives every book. Overrides others on conflict.
+
+  Story-specific words — character names, places, props — are **not** part of
+  `lists/`. They live in the book's own **`workspace/<slug>/vocab.tsv`**
+  (source `book`), which is temporary by design: it lives and dies with the
+  book, so retiring a book takes its vocabulary with it and no later book's
+  brief is ever polluted by a previous story's names. This is also where the
+  add-and-gloss escalation puts words, and what the scribe brief lists as
+  "story names / topic words".
 - **`scripts/vocab.py`** — loads + merges the lists, configures jieba so
   segmentation boundaries match the list (critical — otherwise the fail-rate
   lies), derives the known-character set, exposes pinyin lookup.
@@ -165,7 +174,7 @@ override. `validate.py BOOKDIR` checks every chapter in `book.json` at once.
 **research the source first** (don't plan from memory), write a **story bible**
 (cast, relationships, setting, motifs, and the full event chain), and only then
 divide that chain into chapters with a length budget. Seed obvious story names
-into `lists/personal.tsv`.
+into the book's own `workspace/<slug>/vocab.tsv`.
 Aim for a **substantial book**: follow the source story's events across enough
 chapters (roughly 8–12 for a short tale, more for a longer source) and make each
 a meaty episode (~450+ chars), not a summary — see planner.md's "Make the book
@@ -250,6 +259,7 @@ substantial".
 ```
 BOOK/
   book.json            {title, author, language, pinyin_mode, cover?, chapters:[{source, glossary}]}
+  vocab.tsv            this book's names/places/props (temporary; dies with the book)
   images/cover.png     optional cover (prepare_cover.py; see "Cover")
   plan.json            outline + introduced set + validation params
   chapters/chNN.md     chapter source (# title, ## section, paragraphs)

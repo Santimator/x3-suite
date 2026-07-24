@@ -90,9 +90,11 @@ events than you expect to need — merging is easy later, inventing is not.
   can write the chapter from it alone — name who does what and what changes.
 - Sequence so vocabulary accretes gently: introduce settings/characters before
   the plots that need them. Early chapters should lean on the simplest bands.
-- Pre-seed obvious story names into `lists/personal.tsv` (and mirror into
-  `introduced.add_and_gloss.words`) so the scribe may use them from chapter 1
-  — e.g. 孙悟空, 师父. Give each a pinyin + gloss.
+- Pre-seed obvious story names into the book's own `workspace/<slug>/vocab.tsv`
+  so the scribe may use them from chapter 1 — e.g. 孙悟空, 师父. Give each a
+  pinyin + gloss. Put them there, **never** in `lists/personal.tsv`: that file
+  is the reader's own vocabulary, while `vocab.tsv` is temporary and retires
+  with the book.
 - Mark chapters you expect to be vocab-heavy in the summary, so higher rework is
   expected, not alarming.
 
@@ -109,7 +111,7 @@ use both:
   **8–12 chapters**; a longer source (a 西游记 episode, a full fairy tale) more.
   When in doubt, split a beat into its before/during/after rather than merging.
 - **Meaty episodes.** Each chapter is a full scene, not a paragraph: aim for
-  **~450+ characters**. Reach that length the graded-reader way — more scenes,
+  **the plan's `min_chars` (typically ~800)**. Reach that length the graded-reader way — more scenes,
   dialogue, small concrete actions, and honest repetition — never by reaching for
   harder words. A beat that can only fill 150 characters is half a chapter; give
   it more to actually happen, or fold it into its neighbour.

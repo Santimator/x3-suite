@@ -65,8 +65,10 @@ def render_brief(book_dir: Path, n: int, vocab_detail: str, length: int, v: voca
     val = plan.get("validation", {})
     introduced = plan.get("introduced", {}).get("words", [])
 
-    # Story topic words = the personal/add-and-gloss layer (with glosses).
-    topic = [(w, e.pinyin, e.gloss) for w, e in v.entries.items() if e.source == "personal"]
+    # Story topic words = this book's own vocab.tsv (names, places, props).
+    # The user's personal.tsv is their standing vocabulary, not story material,
+    # so it is deliberately not listed here.
+    topic = [(w, e.pinyin, e.gloss) for w, e in v.entries.items() if e.source == "book"]
     topic.sort()
 
     out: List[str] = []
@@ -173,7 +175,7 @@ def main(argv=None) -> int:
 
     plan_max_level = json.loads(
         (args.book_dir / "plan.json").read_text(encoding="utf-8")).get("max_level")
-    v = vocab_mod.load_vocab(args.lists, max_level=plan_max_level)
+    v = vocab_mod.load_vocab(args.lists, max_level=plan_max_level, book_dir=args.book_dir)
     brief = render_brief(args.book_dir, args.chapter, args.vocab_detail, args.length, v)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)

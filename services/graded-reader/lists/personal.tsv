@@ -1,19 +1,15 @@
 word	level	pinyin	gloss
-# Personal known-words overlay + the add-and-gloss escalation sink (see SKILL.md).
-# Words here are KNOWN regardless of band, and join jieba's dictionary so
-# segmentation respects them. Story names live here while their book does;
-# when a book is retired its names go with it, so briefs stay free of noise.
-# --- being-earnest (The Importance of Being Earnest, HSK3) ---
-杰克	PERS	Jiékè	Jack (name)
-阿龙	PERS	Ā Lóng	Along — Algernon (name)
-高文	PERS	Gāo Wén	Gao Wen — Gwendolen (name)
-西西	PERS	Xīxī	Xixi — Cecily (name)
-高太太	PERS	Gāo tàitai	Mrs. Gao — Gwendolen's mother (name)
-白老师	PERS	Bái lǎoshī	Teacher Bai — the governess (name)
-陈先生	PERS	Chén xiānsheng	Mr. Chen (name)
-诚	PERS	Chéng	Cheng — a given name; the character also means honest/sincere
-诚实	PERS	chéngshí	honest; sincere; earnest
-太太	PERS	tàitai	Mrs.; wife; married lady
-乡下	PERS	xiāngxia	the countryside; rural home (introduced ch1)
-日记	PERS	rìjì	a diary (introduced ch7)
-班先生	PERS	Bān xiānsheng	Mr. Ban — Algernon's imaginary sick friend
+# YOUR standing vocabulary — words you already know, whatever their HSK band.
+# This file belongs to the reader, not to any book: nothing here is written by
+# the pipeline, and it should survive every book you generate.
+#
+# Words listed here count as KNOWN regardless of level, and join jieba's
+# dictionary so segmentation respects them. Use any level label you like
+# (e.g. PERS).
+#
+# Story-specific words — character names, places, props — do NOT belong here.
+# They go in the book's own workspace/<slug>/vocab.tsv, which is temporary and
+# disappears with the book.
+#
+# Example:
+# 孙悟空	PERS	Sūn Wùkōng	Sun Wukong, the Monkey King

@@ -1,0 +1,18 @@
+word	level	pinyin	gloss
+# This book's own vocabulary: names, places and props only this story needs.
+# Temporary by design — it lives and dies with the book, so retiring the book
+# takes its words with it and no other book's brief ever sees them.
+# The reader's own standing vocabulary is lists/personal.tsv, which is theirs.
+杰克	BOOK	Jiékè	Jack (name)
+阿龙	BOOK	Ā Lóng	Along — Algernon (name)
+高文	BOOK	Gāo Wén	Gao Wen — Gwendolen (name)
+西西	BOOK	Xīxī	Xixi — Cecily (name)
+高太太	BOOK	Gāo tàitai	Mrs. Gao — Gwendolen's mother (name)
+白老师	BOOK	Bái lǎoshī	Teacher Bai — Cecily's governess (name)
+陈先生	BOOK	Chén xiānsheng	Mr. Chen (name)
+班先生	BOOK	Bān xiānsheng	Mr. Ban — Along's imaginary sick friend
+诚	BOOK	Chéng	Cheng — a name; the character also means "honest, sincere"
+诚实	BOOK	chéngshí	honest; sincere; earnest
+太太	BOOK	tàitai	Mrs.; wife; married lady
+乡下	BOOK	xiāngxia	the countryside; one's rural home
+日记	BOOK	rìjì	a diary

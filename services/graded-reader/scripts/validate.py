@@ -298,7 +298,9 @@ def main(argv=None) -> int:
         print(f"error: chapter not found: {args.chapter}", file=sys.stderr)
         return 2
 
-    v = vocab_mod.load_vocab(args.lists, max_level=resolve_max_level(args, resolve_book_dir(args.chapter)))
+    book_dir = resolve_book_dir(args.chapter)
+    v = vocab_mod.load_vocab(args.lists, max_level=resolve_max_level(args, book_dir),
+                             book_dir=book_dir)
 
     if args.chapter.is_dir():
         return validate_book(args.chapter, args, v)
