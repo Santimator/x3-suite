@@ -62,13 +62,14 @@ Python that has `jieba` and `pypinyin` installed (see Setup).
 - **`scripts/update_state.py`** — deterministic bookkeeping after a chapter is
   accepted: writes the gloss-once chapter glossary, appends newly-glossed words
   to `introduced`, files the recap, marks the outline entry, wires `book.json`.
-- **EPUB assembly** — done by the suite-shared builder skill
-  (`epub-builder/`): hand-built EPUB with selectable pinyin
-  display (five modes; `gloss-pinyin` is the X3 default — see the builder's
-  FORMAT.md) and per-chapter glossary;
-  glossed words in the text link to their glossary entry (and back).
-  Annotation engages when `book.json` has `pinyin_mode`; the input contract
-  is the builder's `FORMAT.md`.
+- **`scripts/annotate.py`** — the hand-off to the builder: marks each glossary
+  word's first occurrence as `{词|pīnyīn}` into `build/annotated/`. Pinyin is
+  decided here because it needs the segmenter and the glossary.
+- **EPUB assembly** — done by the suite-shared builder skill (`epub-builder/`),
+  which is deliberately generic: it renders the constructs its `FORMAT.md`
+  documents and knows nothing about Chinese. Presentation is declared in
+  `book.json` (`reading_style`, `line_spacing`); glossed words link to their
+  entry and back.
 - **`headless/`** — *optional* alternative driver, kept out of the core so the
   skill proper is just the briefing + deterministic tools. `run_book.py` drives
   the whole loop against any OpenAI-compatible endpoint (for running without
@@ -222,10 +223,18 @@ substantial".
    `run_book.py` driver does it automatically; Claude Code does it inline.
 7. **Next chapter.** Repeat. Later chapters re-segment against the updated lists,
    so add-and-gloss words no longer flag and introduced words aren't re-glossed.
-8. **Assemble EPUB** (after chapters are accepted):
+8. **Annotate, then assemble** (after chapters are accepted). The builder is
+   generic — it renders `{word|reading}` and knows nothing about pinyin — so
+   this service marks the readings first, then hands over a book the builder
+   can render without thinking:
    ```
+   python scripts/annotate.py BOOK --reading-style after
    python ../../epub-builder/scripts/build_epub.py BOOK --out BOOK/build/book.epub
    ```
+   `annotate.py` segments each chapter, marks the first occurrence of every
+   glossary word as `{词|pīnyīn}` into `build/annotated/`, and points
+   `book.json` there. `chapters/*.md` stays the human-readable source that the
+   scribe writes and `validate.py` grades.
 9. **Verify the EPUB** (deterministic, shared with pdf2epub): confirm the
    output is a structurally sound EPUB — mimetype first/stored, manifest ⇄
    zip parity, well-formed XHTML/OPF, and every glossary link/fragment
@@ -244,13 +253,10 @@ substantial".
   chapter 1 so a human can confirm it reads naturally and the grading is
   *pleasant*, not merely legal, before the rest of the book generates.
 - **Pinyin display depends on the target device.** On the X3, ruby and
-  interlinear are device-confirmed broken; ship `gloss-pinyin` (the books'
-  default), `gloss-underline`, or `plain`. Ruby is kept for capable readers
-  (phones). For a NEW device, settle it empirically with the diagnostic EPUB
-  (chapter 1 rendered in all five modes on labeled pages), then set
-  `pinyin_mode` in `book.json`:
-  ```
-  python ../../epub-builder/scripts/build_epub.py BOOK --out BOOK/build/render-test.epub --diagnostic
+  interlinear are device-confirmed broken; ship `reading_style: after` (the
+  default) or `none`. Ruby is kept for capable readers (phones). The style is
+  declared in `book.json`, so re-rendering a book differently is one field plus
+  a rebuild.
   ```
   Device notes: `reference/readers.md` at the repo root.
 
@@ -258,11 +264,12 @@ substantial".
 
 ```
 BOOK/
-  book.json            {title, author, language, pinyin_mode, cover?, chapters:[{source, glossary}]}
+  book.json            {title, author, language, reading_style, cover?, chapters:[...]}
   vocab.tsv            this book's names/places/props (temporary; dies with the book)
   images/cover.png     optional cover (prepare_cover.py; see "Cover")
   plan.json            outline + introduced set + validation params
   chapters/chNN.md     chapter source (# title, ## section, paragraphs)
+  build/annotated/     generated: chapters with {词|pīnyīn} marks — the builder's input
   build/               harvest TSVs, glossaries, .epub output
 ```
 
@@ -296,8 +303,8 @@ it (or its own JSON), or skip the title for a cover that already has one.
 
 1. Scaffold against a small list and ONE chapter (already done for HSK 1-3).
 2. Get validate + build_epub green on that one chapter end to end.
-3. Confirm the pinyin mode renders on the target reader (diagnostic EPUB;
-   on the X3 that's settled: gloss-pinyin / gloss-underline / plain).
+3. Confirm the reading style renders on the target reader (on the X3 that's
+   settled: `reading_style: after`; `ruby` is device-confirmed broken).
 4. Only then run the full loop for the remaining chapters.
 
 ## Setup

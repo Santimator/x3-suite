@@ -6,5 +6,6 @@
     {
       "source": "chapters/ch01.md"
     }
-  ]
+  ],
+  "line_spacing": "tight"
 }

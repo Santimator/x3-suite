@@ -23,13 +23,13 @@ way, reading the EPUB is the final judge. That *is* the test.
 | slug | source | class | committed? |
 |---|---|---|---|
 | `alcaldes-encontrados` | *Los alcaldes encontrados*, 1793 entremés | OCR'd verse, short, single piece | yes (public domain) |
-| `gurruminos` | *Los gurruminos*, Zamora (d.1727) | OCR'd verse, short, single piece | yes (public domain) |
-| `el-espanol-de-oran` | *El español de Orán*, comedia | OCR'd verse, **long, 3 acts** | yes (public domain) |
 | *attention-is-all-you-need* | *Attention Is All You Need* (2017) | **born-digital**, prose, dense | **no** — copyrighted; converted as a demo only |
 
-The classes differ on purpose: an OCR verse play, a *longer* OCR play with act
-structure, and a born-digital academic paper stress different paths. A tool
-that secretly only fit the entremés would break on the paper.
+Only conversions produced by the *current* pipeline are kept. The earlier
+OCR-route books (`gurruminos`, `el-espanol-de-oran`) were retired when the
+vision route replaced them: they were faithful to a garbage text layer, which
+is precisely the philosophy this service abandoned, so keeping them would
+document the wrong thing.
 
 ## Per-conversion notes
 
@@ -46,19 +46,7 @@ restored, 1793 orthography kept, furniture simply not transcribed. No
 `char_ratio ≈ 0.99` (complete); the read is the gate. This is the conversion
 that motivated the two-route redesign.
 
-### gurruminos (OCR verse entremés)
-Same shape as alcaldes but messier OCR (garbled page numbers `Zj`/`IO`/`1$`,
-printer's signatures `A 2`/`A 3` mixed with catchwords). Enumerating furniture
-by hand was tedious and error-prone (gap #5). Hit the range/furniture coverage
-snag (gap #7). One chapter, verse. Verifies.
 
-### el-espanol-de-oran (OCR verse comedia, 3 acts)
-The interesting one. Triage flagged `broken_spacing`, so I used
-`extract_text --space-recover` (gap #1, now a tool). Three `JORNADA` acts → I
-cut **three chapters** with anchor-based `page_ranges` (one verse block per
-act) + `draft.json` anchors. Finding the exact act-boundary lines by hand was
-the friction here (gap #6). Front matter (title + personae, 13 lines) dropped.
-Verifies; the multi-act structure exercises prepare's chapter cutting.
 
 ### attention-is-all-you-need (born-digital paper — demo, not committed)
 A genuinely different class, and the best stress test. Findings:

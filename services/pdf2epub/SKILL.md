@@ -64,7 +64,7 @@ Full design rationale + open questions: [`DESIGN.md`](DESIGN.md).
 0–2, 4–6); the vision route is the agent writing `chapters/*.md` directly
 (see "Vision transcription" below) and the same build/verify. Proven by the
 worked conversions under `workspace/` — `alcaldes-encontrados` is a full
-vision transcription of a 1793 entremés; `el-espanol-de-oran` a longer comedia.
+vision transcription of a 1793 entremés.
 There is no deterministic self-test — see the "Verifying" section and
 [`CONVERSIONS.md`](CONVERSIONS.md).**
 
@@ -156,7 +156,7 @@ and the agent's own reading is the whole engine.
 **Interlineado / screen.** Do *not* cap line length — the reader controls that
 with font size and landscape mode. Our job is the opposite: waste no vertical
 space. The un-annotated build path already minimizes `line-height`
-(`PDF2EPUB_CSS`); you just supply clean structure. See
+(set `"line_spacing": "tight"` in book.json); you just supply clean structure. See
 `reference/readers.md` § "Screen text capacity".
 
 ## Bring your own transcript (the sidecar)

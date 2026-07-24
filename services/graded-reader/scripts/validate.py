@@ -247,10 +247,12 @@ def validate_book(book_dir: Path, args, v: vocab_mod.Vocab) -> int:
     gates = resolve_gates(args, book_dir)
     reports, all_passed = [], True
     for ch in book.get("chapters", []):
-        path = book_dir / ch["source"]
+        # Grade the human-written source, never the annotated copy the
+        # builder consumes (`source` points there once annotate.py has run).
+        path = book_dir / (ch.get("source_md") or ch["source"])
         report = validate_text(path.read_text(encoding="utf-8"), v)
         gate_report(report, gates)
-        report["chapter"] = ch["source"]
+        report["chapter"] = ch.get("source_md") or ch["source"]
         reports.append(report)
         all_passed &= report["passed"]
     if args.json:

@@ -16,8 +16,8 @@ fed through a Calibre-Web-Automated ingest folder. Everything below is
    WenKai kaiti for hanzi + NV Zilla Slab for Latin/pinyin, so mixed
    hanzi+pinyin reads nicely. **`WenKaiFull/`** is the pure-kaiti baseline
    (device-confirmed). Glyphs stream from SD. Install details: `reference/fonts/README.md`.
-3. **Books:** build with `pinyin_mode: gloss-pinyin` (or `gloss-underline` /
-   `plain`) — see the mode verdicts below.
+3. **Books:** build with `reading_style: after` in book.json (pinyin after each
+   glossed word) — see the rendering verdicts below.
 
 ## Rendering verdicts (what the engine actually does)
 
@@ -26,13 +26,13 @@ fed through a Calibre-Web-Automated ingest folder. Everything below is
 | `<ruby>` pinyin | **Broken** — `<rt>` leaks inline: 石shí头tou |
 | Interlinear (CSS inline-block stacking) | **Broken** — collapses inline: shí石tou头 |
 | Plain hanzi body | **Perfect** |
-| `gloss-*` marked-plain modes | Work (plain text + `<u>` / trailing Latin) |
+| `reading_style: after` (trailing pinyin) | Works — the X3 default |
 | Embedded EPUB fonts (`@font-face`) | Ignored — the renderer only rasterizes pre-converted `.cpfont` bitmaps; never fatten the books with fonts |
 | Glossary/internal links | Harmless; not tappable (no touchscreen) — kept for phone reading |
 
 Keep chapter CSS trivial: the engine honors basic text properties only.
-`ruby`/`interlinear` modes remain in the builder for capable readers
-(Apple Books renders ruby beautifully) — never for the X3.
+`reading_style: ruby` remains for capable readers (Apple Books renders ruby
+beautifully) — never for the X3.
 
 ## Screen text capacity (measured on-device, 2026)
 
@@ -50,7 +50,7 @@ against, not targets to hit*:
 - **Don't cap verse line length.** Metrical lines stay whole; if one is too
   wide the reader handles it by bumping the font down or rotating to landscape.
   Our job is the opposite — **waste no vertical space**: `line-height` is
-  minimized on the un-annotated path (`PDF2EPUB_CSS`), so the reader, not our
+  minimized by `line_spacing: "tight"` in book.json, so the reader, not our
   CSS, decides how airy the page is.
 - **Prose is width-agnostic** — the engine reflows it; just reconstruct real
   paragraphs (don't preserve column-broken short lines).

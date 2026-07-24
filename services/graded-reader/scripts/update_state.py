@@ -43,7 +43,7 @@ def chapter_paths(book_dir: Path, n: int, book: Dict) -> Tuple[Path, str, str]:
     chapters = book.get("chapters", [])
     if 1 <= n <= len(chapters):  # positional convention: chapters[n-1] is chapter n
         entry = chapters[n - 1]
-        source_rel = entry.get("source", source_rel)
+        source_rel = entry.get("source_md") or entry.get("source", source_rel)
         glossary_rel = entry.get("glossary", glossary_rel)
     return book_dir / source_rel, source_rel, glossary_rel
 

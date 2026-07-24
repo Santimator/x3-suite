@@ -1,11 +1,19 @@
 # The common book format — the builder's input contract
 
-Every task in the suite converges on this format; the builder
-(`scripts/build_epub.py` in this skill) consumes it and nothing else.
-**This is the contract the orchestrating agent targets** when it prepares a
-book — if it's not described here, the builder doesn't support it. The core
-is implemented today; the "pdf2epub extensions" are the agreed target for
-the builder to grow into.
+The builder consumes **a prepared book directory and nothing else**. It knows
+nothing about who prepared it: not Chinese, not PDFs, not vocabulary levels.
+Every service in the suite does its own thinking, writes the result into this
+shape, and then calls the builder "dumbly".
+
+So the division is:
+
+| | decides | examples |
+|---|---|---|
+| **the service** | *what the book says* | which words carry a pronunciation guide and what it reads, what's in the glossary, where chapters break, which images survive |
+| **the builder** | *how it is presented* | markdown → XHTML, spine and TOC, CSS, packaging into a valid EPUB |
+
+If a construct isn't described below, the builder doesn't support it — and
+adding one is a change to *this file* first.
 
 ## Layout
 
@@ -13,75 +21,75 @@ the builder to grow into.
 workspace/<slug>/
   book.json           metadata + spine (below)
   chapters/chNN.md    one markdown file per spine item, in order
-  images/             (extension) prepared images, referenced from chapters
-  build/              outputs only — never an input
+  images/             prepared images (grayscale, ≤480px wide), referenced from chapters
+  build/              outputs — and any generated inputs the service prepares
 ```
 
-## book.json — core (implemented)
+## book.json
 
 ```json
 {
-  "title":    "愚公移山",
-  "author":   "分级读物 (HSK 1-3)",
+  "title":    "诚实的重要",
+  "author":   "改编自 Oscar Wilde",
   "language": "zh",
+  "cover":    "images/cover.png",
+  "reading_style": "after",
+  "line_spacing":  "normal",
   "chapters": [
-    { "source": "chapters/ch01.md", "glossary": "build/ch01-glossary.tsv" }
+    { "source": "build/annotated/ch01.md", "glossary": "build/ch01-glossary.tsv" }
   ]
 }
 ```
 
-- `chapters` is the spine: order here is reading order, and each entry
-  becomes a TOC entry titled by the chapter's `#` heading.
-- `glossary` is optional and graded-reader-specific (TSV: word, pinyin,
-  gloss; glossed words in the text link to their entry and back).
-- `pinyin_mode` is graded-reader-specific. Five values:
-  `ruby` / `interlinear` (device-confirmed broken on the X3: rt leaks
-  inline / stacking collapses — kept for capable readers like Apple Books),
-  `plain` (hanzi only), and the X3-recommended marked-plain pair:
-  `gloss-underline` (glossary words' first occurrences underlined) and
-  `gloss-pinyin` (first occurrences followed by word-level pinyin, 猴子hóuzi,
-  taken from the curated glossary row with spaces stripped).
+| key | meaning |
+|---|---|
+| `title`, `author`, `language` | metadata; `language` is the EPUB `dc:language` |
+| `chapters` | the spine — order here is reading order; each entry's `#` heading becomes its TOC label |
+| `chapters[].source` | the markdown the builder renders. Point it wherever the prepared file lives |
+| `chapters[].glossary` | optional TSV (`word`, `pinyin`, `gloss`) rendered as an end-of-chapter list; annotated words link to their entry and back |
+| `cover` | optional; path relative to the book directory. Prepare it to device spec first (`prepare_cover.py`) |
+| `reading_style` | how `{word\|reading}` is presented: `after` (default, 猴子hóuzi), `ruby` (`<ruby>`; device-confirmed broken on the X3, fine on phones), `none` (drop readings) |
+| `line_spacing` | `normal` (default) or `tight` — minimal leading, for small e-ink screens |
 
-## Chapter markdown — core (implemented)
+## Chapter markdown
 
-- First line: `# Chapter Title` — becomes the heading and the TOC label.
-- Blank-line-separated paragraphs. Plain prose; no inline formatting is
-  interpreted today.
+The complete construct set. Everything else is literal text.
 
-## pdf2epub extensions (implemented, un-annotated path only)
+| construct | renders as |
+|---|---|
+| `# Title` | `<h1>` — the first one is the chapter title and TOC label |
+| `## Section` | `<h2>` |
+| blank-line-separated block | `<p>` |
+| `*emphasis*` | `<em>` |
+| ` ```verse ` … ` ``` ` | `<div class="verse">` with one `<p>` per line, hanging indent — line breaks preserved (poetry, drama) |
+| `![caption](../images/f1.png)` | `<figure><img><figcaption>` — the file must already exist, prepared |
+| `text[^1]` + `[^1]: note` | numbered endnote link + an endnotes section at the chapter end |
+| `{word\|reading}` | the word with a pronunciation guide, presented per `reading_style` |
 
-The conversion draft needs to express things graded readers never had.
-Chapter markdown gains a small, closed set of constructs. These only exist
-on the un-annotated path (no `pinyin_mode`) — the annotated path's behavior
-and output bytes are frozen and never see this code.
+### `{word|reading}` — the annotation construct
 
-- **Verse blocks** — lines that must keep their breaks (poetry, drama):
-  fenced as ` ```verse … ``` `. Rendered `<div class="verse"><p>line</p>…
-  </div>`, hanging indent via CSS; the restorer's `reflow: verse` policy
-  emits these.
-- **Images** — `![caption](../images/fig-03.png)` on its own paragraph
-  (path relative to `chapters/`, i.e. `../images/<file>`). Files must
-  already be *prepared*: grayscale, device-width (480 px max), PNG/JPEG.
-  The prepare step does this; the builder only embeds (`<figure><img/>
-  <figcaption>`) and errors out if the file is missing.
-- **Endnotes** — `[^n]` marker in text, `[^n]: note text` on its own line
-  (defs are stripped wherever they appear, not just at chapter end).
-  Rendered as a per-chapter endnotes section with back-links (mirrors the
-  glossary link/back-link id scheme). An `[^n]` with no matching def is a
-  build error. CrossPoint can't do EPUB3 popups.
-- **Emphasis** — `*em*` only. No bold (fake-bold PDFs are *pathology*, not
-  semantics), no nested markup.
+```
+今天{阿龙|Ā Lóng}一个人在家。
+```
 
-book.json gains optional fields:
+This is how a service passes a reading (pinyin, furigana, any phonetic hint)
+without the builder knowing the language. **The service decides which
+occurrences get marked** — mark only the first if you want gloss-once
+behaviour — and if the word matches a glossary row, the builder additionally
+links it to that entry and back.
 
-- `"cover": "images/cover.png"` — path relative to the book directory
-  (not `chapters/`). Prepared like any image; becomes an EPUB3
-  `cover-image` manifest property. **Implemented.**
-- `"source": {"file": "source.pdf", "pages": 18}` — provenance record.
-  **Not yet implemented** — no conversion has needed it read back.
-- `"toc_depth": 1` — flat TOC only for now; the X3 UI is shallow.
-  **Not yet implemented** — the builder's TOC is already flat by default.
+The builder does no segmentation and generates no readings; it renders exactly
+what it is handed.
 
-Anything else a conversion wants must be proposed here first — the builder
-stays deliberately small, and the device (see `reference/readers.md` at the
-repo root) rewards it: simple CSS, no embedded fonts, lean files.
+## Preparing a book — the short version
+
+1. Write `chapters/*.md` using only the constructs above.
+2. Prepare anything that needs computing — readings, glossaries, images,
+   cover — and write it into the book directory.
+3. Fill in `book.json`, pointing each `source` at the file the builder should
+   read (keep your human-readable original separate if you generate an
+   annotated copy — graded-reader does exactly this, via `annotate.py`).
+4. `build_epub.py BOOKDIR --out book.epub`, then `verify_epub.py book.epub`.
+
+The builder takes no flags that change the book: everything it needs is
+declared in `book.json`, so the same directory always produces the same EPUB.
