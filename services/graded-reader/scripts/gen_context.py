@@ -85,14 +85,24 @@ def render_brief(book_dir: Path, n: int, vocab_detail: str, length: int, v: voca
             out.append(f"- Ch {c['n']} {c.get('title','')}: {recap}")
         out.append("")
 
+    min_chars = val.get("min_chars", length)
+    min_expr = val.get("min_expressions", 0)
+    min_out = val.get("min_out_of_list", 0.0)
+
     out.append("## Hard constraints")
     out.append(f"- Target level: **{plan.get('target_level','HSK1-3')}**. When in doubt, pick the simpler word.")
-    out.append(f"- Out-of-list budget: ≤ {val.get('threshold',0.05):.0%} of tokens. "
-               f"Compositional combinations of known characters are allowed sparingly "
-               f"(≤ {val.get('max_stretch',0.15):.0%}); they get glossed once.")
-    out.append(f"- Length: at least **{length} characters** of prose — write a full, meaty episode, "
-               f"not a summary. Keep sentences short and repetition frequent; reach the length "
-               f"through more scenes, dialogue, and concrete detail, never through fancier words.")
+    out.append(f"- Out-of-list budget: **between {min_out:.0%} and {val.get('threshold',0.05):.0%}** of tokens. "
+               f"The lower bound is deliberate — a chapter with *zero* new words is too easy to learn "
+               f"from. Reach a little beyond the list on purpose (a few words the story needs); each "
+               f"gets glossed once. Compositional combinations of known characters are allowed "
+               f"sparingly (≤ {val.get('max_stretch',0.15):.0%}).")
+    out.append(f"- Length: at least **{min_chars} characters** of prose — this is checked and will fail "
+               f"the chapter. Write a full, meaty episode, not a summary. Reach the length through "
+               f"more scenes, dialogue, and concrete detail, never through fancier words.")
+    if min_expr:
+        out.append(f"- Expressions: use **at least {min_expr} different constructions** from the list "
+                   f"below. This is checked. They are what make the prose sound like Chinese instead "
+                   f"of translated English — build sentences around them rather than sprinkling them on.")
     out.append("- Use only the words listed below (plus the story names). Do not invent plot beyond the summary.\n")
 
     if introduced:
@@ -104,6 +114,16 @@ def render_brief(book_dir: Path, n: int, vocab_detail: str, length: int, v: voca
         for w, p, g in topic:
             out.append(f"- **{w}** {p} — {g}")
         out.append("")
+
+    if v.expressions:
+        pats = [(w, e) for w, (rx, e) in v.expressions.items() if rx is not None]
+        phrases = [(w, e) for w, (rx, e) in v.expressions.items() if rx is None]
+        out.append("## Expressions to build sentences with")
+        out.append("Patterns — wrap your own words inside them:")
+        for w, e in pats:
+            out.append(f"- **{w}** {e.pinyin} — {e.gloss}")
+        out.append("\nSet phrases — use as-is:")
+        out.append("、".join(w for w, _ in phrases) + "\n")
 
     if vocab_detail != "none":
         out.append("## Permitted vocabulary")

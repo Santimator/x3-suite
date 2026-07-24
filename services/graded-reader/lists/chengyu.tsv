@@ -1,11 +1,416 @@
 word	level	pinyin	gloss
-马马虎虎	IDIOM	mǎ mǎ hū hū	so-so; careless; passable
-对不起	IDIOM	duì bu qǐ	sorry; excuse me; to let down
-没关系	IDIOM	méi guān xi	it doesn't matter; never mind
-没问题	IDIOM	méi wèn tí	no problem
-不好意思	IDIOM	bù hǎo yì si	to feel embarrassed; excuse me; sorry
-一边一边	IDIOM	yì biān yì biān	(doing one thing) while (doing another)
-越来越	IDIOM	yuè lái yuè	more and more
-差不多	IDIOM	chà bu duō	almost; nearly; more or less
-一点儿	IDIOM	yì diǎnr	a little; a bit
-有意思	IDIOM	yǒu yì si	interesting; meaningful
+# The 410 chengyu of the official HSK 3.1 syllabus, tagged with the band
+# each is actually assigned. Note 393 of them sit at HSK7-9: real chengyu
+# are advanced vocabulary, so a low-level book's cap correctly hides them.
+# Everyday multi-word constructions for lower levels live in expressions.tsv.
+# Generated from @leonsilicon/hsk3.1 + CC-CEDICT; see build_hsk_list.py.
+一丝不苟	HSK7-9	yī sī bù gǒu	not one thread loose (idiom); strictly according to the rules; meticulous
+一举一动	HSK7-9	yī jǔ yī dòng	(idiom) every movement; each and every move
+一举两得	HSK7-9	yī jǔ liǎng dé	lit. one action, two gains (idiom); fig. two birds with one stone
+一事无成	HSK7-9	yī shì wú chéng	(idiom) to have achieved nothing; to be a total failure; to get nowhere
+一塌糊涂	HSK7-9	yī tā hú tu	muddled and completely collapsing (idiom); in an awful condition; complete shambles
+一如既往	HSK7-9	yī rú jì wǎng	(idiom) just as in the past; as before; continuing as always
+一帆风顺	HSK6	yī fān fēng shùn	propitious wind throughout the journey (idiom); plain sailing
+一干二净	HSK7-9	yī gān èr jìng	thoroughly (idiom); completely
+一应俱全	HSK7-9	yī yīng jù quán	with everything needed available
+一心一意	HSK7-9	yī xīn yī yì	concentrating one's thoughts and efforts; single-minded
+一成不变	HSK7-9	yī chéng bù biàn	(idiom) immutable; impervious to change; set in stone
+一技之长	HSK7-9	yī jì zhī cháng	proficiency in a particular field (idiom); skill in a specialized area (idiom)
+一无所有	HSK7-9	yī wú suǒ yǒu	not having anything at all (idiom); utterly lacking; without two sticks to rub together
+一无所知	HSK7-9	yī wú suǒ zhī	(idiom) not knowing anything at all; completely ignorant
+一概而论	HSK7-9	yī gài ér lùn	to lump different matters together (idiom)
+一模一样	HSK6	yī mú yī yàng	(idiom) exactly alike; identical; also pr. [yi1mo2-yi1yang4]
+一毛不拔	HSK7-9	yī máo bù bá	lit. unwilling to spare a single hair (idiom); fig. extremely stingy
+一目了然	HSK7-9	yī mù liǎo rán	obvious at a glance (idiom)
+一筹莫展	HSK7-9	yī chóu mò zhǎn	to be unable to find a solution; to be at wits' end
+一言一行	HSK7-9	yī yán yī xíng	every word and action (idiom)
+一言不发	HSK7-9	yī yán bù fā	to not say a word (idiom)
+一路顺风	HSK5	yī lù shùn fēng	to have a pleasant journey (idiom)
+一针见血	HSK7-9	yī zhēn jiàn xiě	lit. to draw blood on the first prick (idiom); fig. to hit the nail on the head
+一鼓作气	HSK7-9	yī gǔ zuò qì	in a spurt of energy
+七嘴八舌	HSK7-9	qī zuǐ bā shé	lively discussion with everybody talking at once
+万无一失	HSK7-9	wàn wú yī shī	surefire; absolutely safe (idiom)
+三番五次	HSK7-9	sān fān wǔ cì	over and over again (idiom)
+不了了之	HSK7-9	bù liǎo liǎo zhī	to settle a matter by leaving it unsettled; to end up with nothing definite
+不亦乐乎	HSK7-9	bù yì lè hū	lit. isn't that a joy? (quote from Confucius); fig. (jocular) extremely; awfully
+不以为然	HSK7-9	bù yǐ wéi rán	not to accept as correct (idiom); to object; to disapprove
+不假思索	HSK7-9	bù jiǎ sī suǒ	(idiom) to act without taking time to think; to react instantly; to fire from the hip
+不厌其烦	HSK7-9	bù yàn qí fán	not to mind taking all the trouble (idiom); to take great pains
+不可思议	HSK7-9	bù kě sī yì	(idiom) inconceivable; unimaginable; unfathomable
+不好意思	HSK2	bù hǎo yì si	to feel embarrassed; to find it embarrassing
+不得而知	HSK7-9	bù dé ér zhī	unknown; unable to find out
+不折不扣	HSK7-9	bù zhé bù kòu	a hundred percent; to the letter
+不正之风	HSK7-9	bù zhèng zhī fēng	unhealthy tendency
+不由自主	HSK7-9	bù yóu zì zhǔ	(idiom) can't help but; involuntarily
+不相上下	HSK7-9	bù xiāng shàng xià	equally matched; about the same
+不知不觉	HSK7-9	bù zhī bù jué	(idiom) unconsciously; unwittingly
+不知所措	HSK7-9	bù zhī suǒ cuò	not knowing what to do (idiom); at one's wits' end; embarrassed and at a complete loss
+不约而同	HSK7-9	bù yuē ér tóng	(idiom) (of two or more people) to take the same action without prior consultation; (usu. used adverbially)...
+不翼而飞	HSK7-9	bù yì ér fēi	to disappear without trace; to vanish all of a sudden
+不耻下问	HSK7-9	bù chǐ xià wèn	not feel ashamed to ask and learn from one's subordinates
+不言而喻	HSK7-9	bù yán ér yù	it goes without saying; it is self-evident
+不辞而别	HSK7-9	bù cí ér bié	to leave without saying good-bye
+与众不同	HSK7-9	yǔ zhòng bù tóng	(idiom) to stand out from the crowd; distinctive; different from the rest
+与日俱增	HSK7-9	yǔ rì jù zēng	to increase steadily; to grow with each passing day
+东奔西走	HSK7-9	dōng bēn xī zǒu	to run this way and that (idiom); to rush about busily; to bustle about
+东张西望	HSK7-9	dōng zhāng xī wàng	to look in all directions (idiom); to glance around
+丢三落四	HSK7-9	diū sān là sì	forgetful; empty-headed
+丰富多彩	HSK5	fēng fù duō cǎi	richly colorful
+举一反三	HSK7-9	jǔ yī fǎn sān	to raise one and infer three; to deduce many things from one case (idiom)
+举世瞩目	HSK7-9	jǔ shì zhǔ mù	to receive worldwide attention
+举棋不定	HSK7-9	jǔ qí bù dìng	to hesitate over what move to make (idiom); to waver; to shilly-shally
+举足轻重	HSK7-9	jǔ zú qīng zhòng	to play a critical role (idiom); influential
+乐此不疲	HSK7-9	lè cǐ bù pí	(idiom) to enjoy sth and never tire of it
+乱七八糟	HSK7-9	luàn qī bā zāo	(idiom) chaotic; in disorder; muddled
+争先恐后	HSK7-9	zhēng xiān kǒng hòu	(idiom) to compete to be first; to scramble to get ahead; to rush forward for fear of falling behind
+争分夺秒	HSK7-9	zhēng fēn duó miǎo	lit. fight minutes, snatch seconds (idiom); a race against time; making every second count
+五湖四海	HSK7-9	wǔ hú sì hǎi	all parts of the country
+五花八门	HSK7-9	wǔ huā bā mén	myriad; all kinds of
+五颜六色	HSK5	wǔ yán liù sè	multicolored; every color under the sun
+井底之蛙	HSK7-9	jǐng dǐ zhī wā	lit. a frog at the bottom of a well (idiom); fig. a person of limited outlook and experience
+亡羊补牢	HSK7-9	wáng yáng bǔ láo	lit. to mend the pen after sheep are lost (idiom); fig. to act belatedly
+交头接耳	HSK7-9	jiāo tóu jiē ěr	to whisper to one another's ear
+人山人海	HSK6	rén shān rén hǎi	(idiom) multitude; vast crowd
+从容不迫	HSK7-9	cóng róng bù pò	calm; unruffled
+以身作则	HSK7-9	yǐ shēn zuò zé	to set an example (idiom); to serve as a model
+任重道远	HSK7-9	rèn zhòng dào yuǎn	a heavy load and a long road; fig. to bear heavy responsibilities through a long struggle (cf Confucian Ana...
+众志成城	HSK7-9	zhòng zhì chéng chéng	unity of will is an impregnable stronghold (idiom)
+众所周知	HSK6	zhòng suǒ zhōu zhī	(idiom) as everyone knows
+似是而非	HSK7-9	sì shì ér fēi	apparently right but actually wrong; specious (idiom)
+似曾相识	HSK7-9	sì céng xiāng shí	déjà vu (the experience of seeing exactly the same situation a second time); seemingly familiar
+侃侃而谈	HSK7-9	kǎn kǎn ér tán	to speak frankly with assurance
+供不应求	HSK7-9	gōng bù yìng qiú	supply does not meet demand
+依依不舍	HSK7-9	yī yī bù shě	reluctant to part (idiom); broken-hearted at having to leave
+倾家荡产	HSK7-9	qīng jiā dàng chǎn	to lose a family fortune (idiom)
+光明磊落	HSK7-9	guāng míng lěi luò	open and candid (idiom); straightforward and upright
+兢兢业业	HSK7-9	jīng jīng yè yè	(idiom) conscientious; assiduous
+全力以赴	HSK7-9	quán lì yǐ fù	to do at all costs; to make an all-out effort
+全心全意	HSK7-9	quán xīn quán yì	(idiom) heart and soul; wholeheartedly
+兴高采烈	HSK7-9	xìng gāo cǎi liè	happy and excited (idiom); in high spirits
+再接再厉	HSK7-9	zài jiē zài lì	to continue the struggle (idiom); to persist; unremitting efforts
+冰天雪地	HSK7-9	bīng tiān xuě dì	a world of ice and snow
+凤毛麟角	HSK7-9	fèng máo lín jiǎo	lit. as rare as phoenix feathers and unicorn horns (idiom); fig. few and far between
+出人意料	HSK7-9	chū rén yì liào	unexpected (idiom); surprising
+出口成章	HSK7-9	chū kǒu chéng zhāng	(idiom) (of one's speech) eloquent; articulate
+别具匠心	HSK7-9	bié jù jiàng xīn	to show ingenuity; (of a design) clever
+刮目相看	HSK7-9	guā mù xiāng kàn	to have a whole new level of respect for sb or sth; to sit up and take notice (of sb's improved performance...
+刻不容缓	HSK7-9	kè bù róng huǎn	to brook no delay; to demand immediate action
+刻舟求剑	HSK7-9	kè zhōu qiú jiàn	lit. a notch on the side of a boat to locate a sword dropped overboard (idiom); fig. an action made pointle...
+前所未有	HSK7-9	qián suǒ wèi yǒu	(idiom) unprecedented
+前无古人	HSK7-9	qián wú gǔ rén	(idiom) unprecedented; unheard of
+前赴后继	HSK7-9	qián fù hòu jì	to advance dauntlessly in wave upon wave (idiom)
+力不从心	HSK7-9	lì bù cóng xīn	(idiom) to lack the ability to do what one would wish
+力所能及	HSK7-9	lì suǒ néng jí	as far as one's capabilities extend (idiom); to the best of one's ability; within one's powers
+势不可当	HSK7-9	shì bù kě dāng	impossible to resist (idiom); an irresistible force
+勇往直前	HSK7-9	yǒng wǎng zhí qián	to advance bravely
+包罗万象	HSK7-9	bāo luó wàn xiàng	all-embracing; all-inclusive
+化险为夷	HSK7-9	huà xiǎn wéi yí	to turn peril into safety (idiom); to avert disaster
+十字路口	HSK4	shí zì lù kǒu	crossroads; intersection
+千军万马	HSK7-9	qiān jūn wàn mǎ	magnificent army with thousands of men and horses (idiom); impressive display of manpower; all the King's h...
+千变万化	HSK7-9	qiān biàn wàn huà	countless changes; constant permutation
+千姿百态	HSK7-9	qiān zī bǎi tài	(idiom) to come in many different shapes; to display a great variety of forms
+千家万户	HSK6	qiān jiā wàn hù	every family (idiom)
+千方百计	HSK7-9	qiān fāng bǎi jì	lit. thousand ways, a hundred plans (idiom); by every possible means
+千钧一发	HSK7-9	qiān jūn yī fà	lit. a thousand pounds hangs by a thread (idiom); fig. (at the) critical; perilous (moment)
+半信半疑	HSK7-9	bàn xìn bàn yí	(idiom) half believing, half doubting; not quite convinced; skeptical
+半途而废	HSK7-9	bàn tú ér fèi	to give up halfway (idiom); leave sth unfinished
+南辕北辙	HSK7-9	nán yuán běi zhé	to act in a way that defeats one's purpose (idiom)
+博大精深	HSK7-9	bó dà jīng shēn	(idiom) wide-ranging and profound
+发扬光大	HSK7-9	fā yáng guāng dà	to develop and promote; to carry forward
+取而代之	HSK7-9	qǔ ér dài zhī	(idiom) to replace; to supersede; to take its (or her etc) place
+受宠若惊	HSK7-9	shòu chǒng ruò jīng	overwhelmed by favor from superior (humble expr.)
+变幻莫测	HSK7-9	biàn huàn mò cè	to change unpredictably; unpredictable
+古今中外	HSK7-9	gǔ jīn zhōng wài	at all times and in all places (idiom)
+可乘之机	HSK7-9	kě chéng zhī jī	(idiom) an opportunity that someone (usually a villain or adversary) can exploit
+可想而知	HSK7-9	kě xiǎng ér zhī	(idiom) (it) goes without saying; can well be imagined
+史无前例	HSK7-9	shǐ wú qián lì	(idiom) unprecedented in history
+司空见惯	HSK7-9	sī kōng jiàn guàn	a common occurrence (idiom)
+吃喝玩乐	HSK7-9	chī hē wán lè	lit. to eat, drink, play and be merry (idiom); fig. to abandon oneself to a life of pleasure
+各抒己见	HSK7-9	gè shū jǐ jiàn	everyone gives their own view
+同舟共济	HSK7-9	tóng zhōu gòng jì	cross a river in the same boat (idiom); fig. having common interests; obliged to collaborate towards common...
+名副其实	HSK7-9	míng fù qí shí	not just in name only, but also in reality (idiom); aptly named
+后顾之忧	HSK7-9	hòu gù zhī yōu	fears of trouble in the rear (idiom); family worries (obstructing freedom of action); worries about the fut...
+吞吞吐吐	HSK7-9	tūn tūn tǔ tǔ	to hum and haw (idiom); to mumble as if hiding sth; to speak and break off, then start again
+哄堂大笑	HSK7-9	hōng táng dà xiào	the whole room roaring with laughter (idiom)
+哭笑不得	HSK7-9	kū xiào bù dé	lit. not to know whether to laugh or cry (idiom); both funny and extremely embarrassing
+喜出望外	HSK7-9	xǐ chū wàng wài	to be pleased beyond one's expectations (idiom); overjoyed at the turn of events
+喜怒哀乐	HSK7-9	xǐ nù āi lè	lit. happiness, anger, sorrow, and joy (idiom); fig. emotions
+喜闻乐见	HSK7-9	xǐ wén lè jiàn	to love to hear and see (idiom); well received
+四通八达	HSK7-9	sì tōng bā dá	roads open in all directions (idiom); accessible from all sides
+四面八方	HSK7-9	sì miàn bā fāng	(idiom) all directions; all around
+因人而异	HSK7-9	yīn rén ér yì	varying from person to person (idiom); different for each individual
+因地制宜	HSK7-9	yīn dì zhì yí	(idiom) to use methods in line with local circumstances
+土生土长	HSK7-9	tǔ shēng tǔ zhǎng	(idiom) (of people) born and raised in the locality; (of art forms, political parties, enterprises, product...
+在所难免	HSK7-9	zài suǒ nán miǎn	to be unavoidable (idiom)
+垂头丧气	HSK7-9	chuí tóu sàng qì	hanging one's head dispiritedly (idiom); dejected; crestfallen
+埋头苦干	HSK7-9	mái tóu kǔ gàn	to bury oneself in work (idiom); to be engrossed in work; to make an all-out effort
+多才多艺	HSK6	duō cái duō yì	multitalented
+夜以继日	HSK7-9	yè yǐ jì rì	night and day (idiom); continuous strenuous effort
+大公无私	HSK7-9	dà gōng wú sī	selfless; impartial
+大吃一惊	HSK6	dà chī yī jīng	(idiom) astounded; flabbergasted; taken aback
+大同小异	HSK7-9	dà tóng xiǎo yì	virtually the same; differing only on small points
+大名鼎鼎	HSK7-9	dà míng dǐng dǐng	grand reputation; renowned
+大大咧咧	HSK7-9	dà dà liē liē	(idiom) carefree; offhand; casual
+大惊小怪	HSK7-9	dà jīng xiǎo guài	to make a fuss about nothing (idiom)
+大有可为	HSK7-9	dà yǒu kě wéi	with great prospects for the future (idiom); well worth doing
+大街小巷	HSK7-9	dà jiē xiǎo xiàng	great streets and small alleys (idiom); everywhere in the city
+天伦之乐	HSK7-9	tiān lún zhī lè	family love and joy; domestic bliss
+天经地义	HSK7-9	tiān jīng dì yì	lit. heaven's law and earth's principle (idiom); fig. right and proper; right and unalterable
+天长地久	HSK7-9	tiān cháng dì jiǔ	enduring while the world lasts (idiom); eternal
+头头是道	HSK7-9	tóu tóu shì dào	clear and logical
+夸夸其谈	HSK7-9	kuā kuā qí tán	variant of 誇誇其談|夸夸其谈[kua1 kua1 qi2 tan2]
+如愿以偿	HSK7-9	rú yuàn yǐ cháng	to have one's wish fulfilled
+如痴如醉	HSK7-9	rú chī rú zuì	(idiom) enthralled; mesmerized; enraptured
+孤陋寡闻	HSK7-9	gū lòu guǎ wén	ignorant and inexperienced; ill-informed and narrow-minded
+守株待兔	HSK7-9	shǒu zhū dài tù	lit. to guard a tree-stump, waiting for rabbits (idiom); to wait idly for opportunities
+实事求是	HSK7-9	shí shì qiú shì	lit. to seek truth from facts (idiom); fig. to be practical and realistic
+家喻户晓	HSK7-9	jiā yù hù xiǎo	understood by everyone (idiom); well known; a household name
+家家户户	HSK6	jiā jiā hù hù	each and every family (idiom); every household
+容光焕发	HSK7-9	róng guāng huàn fā	face glowing (idiom); looking radiant; all smiles
+寥寥无几	HSK7-9	liáo liáo wú jǐ	(idiom) very few
+对牛弹琴	HSK7-9	duì niú tán qín	lit. to play the lute to a cow (idiom); fig. offering a treat to an unappreciative audience
+对症下药	HSK7-9	duì zhèng xià yào	lit. to prescribe the right medicine for an illness (idiom); fig. to study a problem to find the right way...
+小心翼翼	HSK7-9	xiǎo xīn yì yì	(idiom) cautious; careful; prudent
+层出不穷	HSK7-9	céng chū bù qióng	more and more emerge; innumerable succession
+居安思危	HSK7-9	jū ān sī wēi	to think of danger in times of safety; to be vigilant in peacetime (idiom)
+岂有此理	HSK7-9	qǐ yǒu cǐ lǐ	how can this be so? (idiom); preposterous; ridiculous
+峰回路转	HSK7-9	fēng huí lù zhuǎn	the mountain road twists around each new peak (idiom); (of a mountain road) twisting and turning
+川流不息	HSK7-9	chuān liú bù xī	the stream flows without stopping (idiom); unending flow
+左顾右盼	HSK7-9	zuǒ gù yòu pàn	glancing to left and right (idiom); to look all around
+应有尽有	HSK7-9	yīng yǒu jìn yǒu	everything that should be here is here (idiom); all one can think of is on hand; to have all one needs
+废寝忘食	HSK7-9	fèi qǐn wàng shí	(idiom) to skip one's sleep and meals; to be completely wrapped up in one's work
+开天辟地	HSK7-9	kāi tiān pì dì	to split heaven and earth apart (idiom); refers to the Pangu 盤古|盘古[Pan2 gu3] creation myth
+异口同声	HSK7-9	yì kǒu tóng shēng	different mouths, same voice; to speak in unison (idiom)
+异想天开	HSK7-9	yì xiǎng tiān kāi	(idiom) to imagine the wildest thing; to indulge in fantasy
+弄虚作假	HSK7-9	nòng xū zuò jiǎ	to practice fraud (idiom); by trickery
+引人入胜	HSK7-9	yǐn rén rù shèng	to enchant; fascinating
+引人注目	HSK7-9	yǐn rén zhù mù	to attract attention; eye-catching
+引经据典	HSK7-9	yǐn jīng jù diǎn	lit. to quote the classics; to quote chapter and verse (idiom)
+张灯结彩	HSK7-9	zhāng dēng jié cǎi	to be decorated with lanterns and colored banners (idiom)
+归根到底	HSK7-9	guī gēn dào dǐ	after all; in the final analysis
+当之无愧	HSK7-9	dāng zhī wú kuì	fully deserving, without any reservations (idiom); entirely worthy (of a title, honor etc)
+当务之急	HSK7-9	dāng wù zhī jí	(idiom) top priority job; a matter of the greatest urgency
+当机立断	HSK7-9	dāng jī lì duàn	to make prompt decisions (idiom)
+形形色色	HSK7-9	xíng xíng sè sè	all kinds of; all sorts of
+形影不离	HSK7-9	xíng yǐng bù lí	inseparable (as form and shadow)
+彬彬有礼	HSK7-9	bīn bīn yǒu lǐ	refined and courteous; urbane
+得不偿失	HSK7-9	dé bù cháng shī	the gains do not make up for the losses (idiom)
+得天独厚	HSK7-9	dé tiān dú hòu	blessed by heaven (idiom); enjoying exceptional advantages
+得心应手	HSK7-9	dé xīn yìng shǒu	lit. what the heart wishes, the hand accomplishes (idiom) skilled at the job; entirely in one's element
+得意扬扬	HSK7-9	dé yì yáng yáng	variant of 得意洋洋[de2 yi4 yang2 yang2]
+循序渐进	HSK7-9	xún xù jiàn jìn	in sequence, step by step (idiom); to make steady progress incrementally
+微不足道	HSK7-9	wēi bù zú dào	negligible; insignificant
+德才兼备	HSK7-9	dé cái jiān bèi	(idiom) possessing both integrity and talent
+心安理得	HSK7-9	xīn ān lǐ dé	to have a clear conscience; to have no qualms about sth
+心急如焚	HSK7-9	xīn jí rú fén	see 心急火燎[xin1 ji2 huo3 liao3]
+心灵手巧	HSK7-9	xīn líng shǒu qiǎo	capable; clever
+心甘情愿	HSK7-9	xīn gān qíng yuàn	delighted to (do sth, idiom); perfectly happy to do
+念念不忘	HSK7-9	niàn niàn bù wàng	to keep in mind constantly (idiom)
+忽冷忽热	HSK7-9	hū lěng hū rè	now hot, now cold; (of one's mood, affection etc) to alternate
+思前想后	HSK7-9	sī qián xiǎng hòu	to consider past cause and future effect (idiom); to think over the past and future; to ponder over reasons...
+怡然自得	HSK7-9	yí rán zì dé	happy and content (idiom)
+急中生智	HSK7-9	jí zhōng shēng zhì	quick witted in an emergency; able to react resourcefully
+急于求成	HSK7-9	jí yú qiú chéng	anxious for quick results (idiom); to demand instant success; impatient for result
+急功近利	HSK7-9	jí gōng jìn lì	seeking instant benefit (idiom); shortsighted vision, looking only for fast return
+总而言之	HSK7-9	zǒng ér yán zhī	in short; in a word
+恋恋不舍	HSK7-9	liàn liàn bù shě	reluctant to part
+恍然大悟	HSK7-9	huǎng rán dà wù	(idiom) to suddenly realize; to suddenly see the light
+息息相关	HSK7-9	xī xī xiāng guān	closely bound up (idiom); intimately related
+恰到好处	HSK7-9	qià dào hǎo chù	it's just perfect; it's just right
+恰如其分	HSK7-9	qià rú qí fèn	(idiom) appropriate; apt
+恼羞成怒	HSK7-9	nǎo xiū chéng nù	(idiom) to become enraged over a perceived humiliation
+悲欢离合	HSK7-9	bēi huān lí hé	joys and sorrows; partings and reunions
+情不自禁	HSK7-9	qíng bù zì jīn	(idiom) cannot refrain from; cannot help; cannot but
+惊天动地	HSK7-9	jīng tiān dòng dì	(idiom) world-shaking
+惊心动魄	HSK7-9	jīng xīn dòng pò	(idiom) heart-stopping; hair-raising; breathtaking
+惊慌失措	HSK7-9	jīng huāng shī cuò	to lose one's head out of fear (idiom)
+想方设法	HSK7-9	xiǎng fāng shè fǎ	to think up every possible method (idiom); to devise ways and means; to try this, that and the other
+愁眉苦脸	HSK7-9	chóu méi kǔ liǎn	to look anxious (idiom); to look miserable
+意想不到	HSK7-9	yì xiǎng bù dào	unexpected; previously unimagined
+愚公移山	HSK7-9	yú gōng yí shān	the old man moves mountains (idiom); fig. where there's a will, there's a way
+成千上万	HSK6	chéng qiān shàng wàn	lit. by the thousands and tens of thousands (idiom); fig. untold numbers; innumerable; countless
+成家立业	HSK7-9	chéng jiā lì yè	to get married and start a career (idiom); to settle down
+成群结队	HSK7-9	chéng qún jié duì	(idiom) making up a group; forming a troupe; in large numbers; as a large crowd
+截然不同	HSK7-9	jié rán bù tóng	entirely different; different as black and white
+所作所为	HSK7-9	suǒ zuò suǒ wéi	one's conduct and deeds
+扣人心弦	HSK7-9	kòu rén xīn xián	to excite; to thrill
+抑扬顿挫	HSK7-9	yì yáng dùn cuò	see 頓挫抑揚|顿挫抑扬[dun4 cuo4 yi4 yang2]
+持之以恒	HSK7-9	chí zhī yǐ héng	to pursue unremittingly (idiom); to persevere
+指手画脚	HSK7-9	zhǐ shǒu huà jiǎo	to gesticulate while talking (idiom); to explain by waving one's hands
+挨家挨户	HSK7-9	āi jiā āi hù	to go from house to house
+损人利己	HSK7-9	sǔn rén lì jǐ	harming others for one's personal benefit (idiom); personal gain to the detriment of others
+接二连三	HSK7-9	jiē èr lián sān	(idiom) one after another; in quick succession
+掩耳盗铃	HSK7-9	yǎn ěr dào líng	lit. to cover one's ears whilst stealing a bell; to deceive oneself
+措手不及	HSK7-9	cuò shǒu bù jí	no time to deal with it (idiom); caught unprepared
+提心吊胆	HSK7-9	tí xīn diào dǎn	(idiom) nervous; fearful; on edge
+揠苗助长	HSK7-9	yà miáo zhù zhǎng	see 拔苗助長|拔苗助长[ba2 miao2 zhu4 zhang3]
+摇摇欲坠	HSK7-9	yáo yáo yù zhuì	tottering; on the verge of collapse
+改邪归正	HSK7-9	gǎi xié guī zhèng	to mend one's ways (idiom); to turn over a new leaf
+救死扶伤	HSK7-9	jiù sǐ fú shāng	to help the dying and heal the injured
+敬而远之	HSK7-9	jìng ér yuǎn zhī	to show respect from a distance (idiom); to remain at a respectful distance
+数一数二	HSK7-9	shǔ yī shǔ èr	(idiom) reckoned to be best or second best; one of the very best; (idiom) to list one by one
+斩钉截铁	HSK7-9	zhǎn dīng jié tiě	lit. to chop the nail and slice the iron (idiom); fig. resolute and decisive; unhesitating; categorical
+断章取义	HSK7-9	duàn zhāng qǔ yì	(idiom) to quote out of context
+新陈代谢	HSK7-9	xīn chén dài xiè	metabolism (biology); the new replaces the old (idiom)
+无价之宝	HSK7-9	wú jià zhī bǎo	(idiom) priceless treasure
+无关紧要	HSK7-9	wú guān jǐn yào	indifferent; insignificant
+无动于衷	HSK7-9	wú dòng yú zhōng	aloof; indifferent
+无可厚非	HSK7-9	wú kě hòu fēi	see 未可厚非[wei4 ke3 hou4 fei1]
+无可奈何	HSK7-9	wú kě nài hé	have no way out; have no alternative
+无家可归	HSK7-9	wú jiā kě guī	(idiom) homeless
+无微不至	HSK7-9	wú wēi bù zhì	in every possible way (idiom); meticulous
+无忧无虑	HSK7-9	wú yōu wú lǜ	(idiom) carefree; without worries
+无所事事	HSK7-9	wú suǒ shì shì	to have nothing to do; to idle one's time away (idiom)
+无所作为	HSK7-9	wú suǒ zuò wéi	attempting nothing and accomplishing nothing (idiom); without any initiative or drive; feckless
+无济于事	HSK7-9	wú jì yú shì	(idiom) to no avail; of no use
+无精打采	HSK7-9	wú jīng dǎ cǎi	dispirited and downcast (idiom); listless; in low spirits
+无能为力	HSK7-9	wú néng wéi lì	(idiom) powerless to do anything about it
+无论如何	HSK7-9	wú lùn rú hé	(idiom) whatever the case; in any event; no matter what; by all possible means
+无边无际	HSK7-9	wú biān wú jì	(idiom) boundless; limitless
+日复一日	HSK7-9	rì fù yī rì	day after day
+日新月异	HSK7-9	rì xīn yuè yì	daily renewal, monthly change (idiom); every day sees new developments
+显而易见	HSK7-9	xiǎn ér yì jiàn	clearly and easy to see (idiom); obviously; clearly
+晕头转向	HSK7-9	yūn tóu zhuàn xiàng	confused and disoriented
+暴风骤雨	HSK7-9	bào fēng zhòu yǔ	violent wind and rainstorm; hurricane
+有声有色	HSK7-9	yǒu shēng yǒu sè	having sound and color (idiom); vivid; dazzling
+有朝一日	HSK7-9	yǒu zhāo yī rì	one day; sometime in the future
+有条不紊	HSK7-9	yǒu tiáo bù wěn	regular and thorough (idiom); methodically arranged
+有的放矢	HSK7-9	yǒu dì fàng shǐ	lit. to have a target in mind when shooting one's arrows (idiom); fig. to have a clear objective
+朝三暮四	HSK7-9	zhāo sān mù sì	lit. say three in the morning but four in the evening (idiom); to change sth that is already settled upon...
+朝夕相处	HSK7-9	zhāo xī xiāng chǔ	to spend all one's time together (idiom)
+朝气蓬勃	HSK7-9	zhāo qì péng bó	full of youthful energy (idiom); vigorous; energetic
+杂乱无章	HSK7-9	zá luàn wú zhāng	disordered and in a mess (idiom); all mixed up and chaotic
+束手无策	HSK7-9	shù shǒu wú cè	lit. to have one's hands bound and be unable to do anything about it (idiom); fig. helpless in the face of...
+来之不易	HSK7-9	lái zhī bù yì	(idiom) hard to come by; not easily obtained
+来龙去脉	HSK7-9	lái lóng qù mài	lit. the rise and fall of the terrain (idiom); fig. the whole sequence of events; causes and effects
+根深蒂固	HSK7-9	gēn shēn dì gù	deep-rooted (problem etc)
+格格不入	HSK7-9	gé gé bù rù	(idiom) inharmonious; incompatible
+梦寐以求	HSK7-9	mèng mèi yǐ qiú	lit. to yearn for sth even in one's dreams (idiom); fig. to deeply long for; to covet
+欣欣向荣	HSK7-9	xīn xīn xiàng róng	(idiom) flourishing; thriving
+此起彼伏	HSK7-9	cǐ qǐ bǐ fú	up here, down there (idiom); to rise and fall in succession; no sooner one subsides, the next arises
+比比皆是	HSK7-9	bǐ bǐ jiē shì	can be found everywhere
+水涨船高	HSK7-9	shuǐ zhǎng chuán gāo	the tide rises, the boat floats (idiom); fig. to change with the overall trend; to develop according to the...
+水滴石穿	HSK7-9	shuǐ dī shí chuān	dripping water penetrates the stone (idiom); constant perseverance yields success; You can achieve your aim...
+水落石出	HSK7-9	shuǐ luò shí chū	lit. as the water recedes, the rocks appear (idiom); fig. the truth comes to light
+求同存异	HSK7-9	qiú tóng cún yì	(idiom) to put aside differences and work together; to seek common ground and cooperate
+汗马功劳	HSK7-9	hàn mǎ gōng láo	war exploits; (fig.) heroic contribution
+没完没了	HSK7-9	méi wán méi liǎo	without end; incessantly
+沸沸扬扬	HSK7-9	fèi fèi yáng yáng	bubbling and gurgling; hubbubing
+津津有味	HSK7-9	jīn jīn yǒu wèi	with keen interest (idiom); with great pleasure
+深入人心	HSK7-9	shēn rù rén xīn	to enter deeply into people's hearts; to have a real impact on the people (idiom)
+深情厚谊	HSK7-9	shēn qíng hòu yì	deep friendship
+源源不断	HSK7-9	yuán yuán bù duàn	(idiom) in an unending stream; continuous
+源远流长	HSK7-9	yuán yuǎn liú cháng	(idiom) of long standing; with a long history; stretching back to ancient times
+滔滔不绝	HSK7-9	tāo tāo bù jué	(idiom) to produce a torrent of words; to talk on and on
+潜移默化	HSK7-9	qián yí mò huà	imperceptible influence; to influence secretly
+灵机一动	HSK7-9	líng jī yī dòng	a bright idea suddenly occurs (idiom); to hit upon an inspiration; to be struck by a brainwave
+热泪盈眶	HSK7-9	rè lèi yíng kuàng	eyes brimming with tears of excitement (idiom); extremely moved
+焕然一新	HSK7-9	huàn rán yī xīn	to look completely new (idiom); brand new; changed beyond recognition
+熙熙攘攘	HSK7-9	xī xī rǎng rǎng	(idiom) bustling with activity
+爱不释手	HSK7-9	ài bù shì shǒu	(idiom) to like sth so much that one is reluctant to put it down; to find sth utterly irresistible
+物美价廉	HSK7-9	wù měi jià lián	good quality and cheap; a bargain
+犹豫不决	HSK7-9	yóu yù bù jué	hesitancy; indecision
+独一无二	HSK7-9	dú yī wú èr	(idiom) unique; unmatched; unrivalled
+狼吞虎咽	HSK7-9	láng tūn hǔ yàn	to wolf down one's food (idiom); to devour ravenously; to gorge oneself
+理所当然	HSK7-9	lǐ suǒ dāng rán	as it should be by rights (idiom); proper and to be expected as a matter of course; inevitable and right
+理直气壮	HSK7-9	lǐ zhí qì zhuàng	in the right and self-confident (idiom); bold and confident with justice on one's side; to have the courage...
+琴棋书画	HSK7-9	qín qí shū huà	(idiom) the four arts of the Chinese scholar (guqin, Go, calligraphy and painting); (by extension) the acco...
+画蛇添足	HSK7-9	huà shé tiān zú	lit. draw legs on a snake (idiom); fig. to ruin the effect by adding sth superfluous; to overdo it
+画龙点睛	HSK7-9	huà lóng diǎn jīng	to paint a dragon and dot in the eyes (idiom); fig. to add the vital finishing touch; the crucial point tha...
+皆大欢喜	HSK7-9	Jiē dà huān xǐ	As You Like It, comedy by Shakespeare
+盛气凌人	HSK7-9	shèng qì líng rén	overbearing; arrogant bully
+目不转睛	HSK7-9	mù bù zhuǎn jīng	unable to take one's eyes off (idiom); to gaze steadily; to stare
+目中无人	HSK7-9	mù zhōng wú rén	to consider everyone else beneath one (idiom); so arrogant that no-one else matters; condescending
+目瞪口呆	HSK7-9	mù dèng kǒu dāi	(idiom) dumbstruck; stupefied; stunned
+相提并论	HSK7-9	xiāng tí bìng lùn	to discuss two disparate things together (idiom); to mention on equal terms; to place on a par with
+相辅相成	HSK7-9	xiāng fǔ xiāng chéng	(idiom) to complement one another
+眉开眼笑	HSK7-9	méi kāi yǎn xiào	brows raised in delight, eyes laughing (idiom); beaming with joy; all smiles
+知足常乐	HSK7-9	zhī zú cháng lè	satisfied with what one has (idiom)
+礼尚往来	HSK7-9	lǐ shàng wǎng lái	lit. proper behavior is based on reciprocity (idiom); fig. to return politeness for politeness
+称心如意	HSK7-9	chèn xīn rú yì	(idiom) after one's own heart; gratifying; satisfactory; everything one could wish
+突如其来	HSK7-9	tū rú qí lái	to arise abruptly; to arrive suddenly
+竭尽全力	HSK7-9	jié jìn quán lì	(idiom) to spare no effort; to do one's utmost
+粗心大意	HSK7-9	cū xīn dà yì	negligent; careless
+精打细算	HSK7-9	jīng dǎ xì suàn	meticulous planning and careful accounting (idiom)
+精疲力竭	HSK7-9	jīng pí lì jié	spirit weary, strength exhausted (idiom); spent; drained
+精益求精	HSK7-9	jīng yì qiú jīng	(idiom) to constantly seek to improve; to keep perfecting
+素不相识	HSK7-9	sù bù xiāng shí	to be total strangers (idiom)
+约定俗成	HSK7-9	yuē dìng sú chéng	established by popular usage (idiom); common usage agreement; customary convention
+纸上谈兵	HSK7-9	zhǐ shàng tán bīng	lit. military tactics on paper (idiom); fig. theoretical discussion that is worse than useless in practice
+经久不息	HSK7-9	jīng jiǔ bù xī	(idiom) prolonged (applause, cheering etc)
+绘声绘色	HSK7-9	huì shēng huì sè	vivid and colorful (idiom); true to life; lively and realistic
+络绎不绝	HSK7-9	luò yì bù jué	(idiom) continuously; in an endless stream
+罪魁祸首	HSK7-9	zuì kuí huò shǒu	(idiom) criminal ringleader; main offender; main culprit; main cause of a disaster
+美中不足	HSK7-9	měi zhōng bù zú	everything is fine except for one small defect (idiom); the fly in the ointment
+翻天覆地	HSK7-9	fān tiān fù dì	sky and the earth turning upside down (idiom); fig. complete confusion; everything turned on its head
+翻来覆去	HSK7-9	fān lái fù qù	to toss and turn (sleeplessly); again and again
+耐人寻味	HSK7-9	nài rén xún wèi	(idiom) thought-provoking; to provide food for thought
+耳熟能详	HSK7-9	ěr shú néng xiáng	what's frequently heard can be repeated in detail (idiom)
+耳目一新	HSK7-9	ěr mù yī xīn	a pleasant change; a breath of fresh air
+聚精会神	HSK7-9	jù jīng huì shén	to concentrate one's attention (idiom)
+肆无忌惮	HSK7-9	sì wú jì dàn	absolutely unrestrained; unbridled
+胡思乱想	HSK7-9	hú sī luàn xiǎng	(idiom) to indulge in flights of fancy; to let one's imagination run wild
+胸有成竹	HSK7-9	xiōng yǒu chéng zhú	(idiom) to have a well-thought-out plan in mind
+脚踏实地	HSK7-9	jiǎo tà shí dì	to have one's feet firmly planted on the ground (idiom); realistic without flights of fancy; steady and ser...
+脱口而出	HSK7-9	tuō kǒu ér chū	(idiom) to blurt out; to let slip (an indiscreet remark)
+脱颖而出	HSK7-9	tuō yǐng ér chū	to reveal one's talent (idiom); to rise above others; to distinguish oneself
+自以为是	HSK7-9	zì yǐ wéi shì	to believe oneself infallible (idiom); to be opinionated
+自力更生	HSK7-9	zì lì gēng shēng	regeneration through one's own effort (idiom); self-reliance
+自始至终	HSK7-9	zì shǐ zhì zhōng	from start to finish (idiom)
+自强不息	HSK7-9	zì qiáng bù xī	to strive unremittingly; self-improvement
+自然而然	HSK7-9	zì rán ér rán	(idiom) natural; unforced; (idiom) naturally; as a matter of course; in the natural course of things
+自相矛盾	HSK7-9	zì xiāng máo dùn	to contradict oneself; self-contradictory
+自言自语	HSK6	zì yán zì yǔ	(idiom) to talk to oneself; to think aloud; to soliloquize
+节衣缩食	HSK7-9	jié yī suō shí	to save on food and clothing (idiom); to live frugally
+苦尽甘来	HSK7-9	kǔ jìn gān lái	bitterness finishes, sweetness begins (idiom); the hard times are over, the good times just beginning
+莫名其妙	HSK7-9	mò míng qí miào	(idiom) baffling; bizarre; without rhyme or reason; inexplicable
+萍水相逢	HSK7-9	píng shuǐ xiāng féng	strangers coming together by chance (idiom)
+衣食住行	HSK6	yī shí zhù xíng	lit. clothing, food, housing and transportation (idiom); fig. people's basic needs
+袖手旁观	HSK7-9	xiù shǒu páng guān	to watch with folded arms (idiom); to look on without lifting a finger
+见义勇为	HSK7-9	jiàn yì yǒng wéi	(idiom, from the Analects) (usu. of a passer-by who comes across a critical situation) to step in and help...
+见仁见智	HSK7-9	jiàn rén jiàn zhì	opinions differ (idiom)
+见利忘义	HSK7-9	jiàn lì wàng yì	(idiom) to abandon moral principles in the pursuit of profit
+见多识广	HSK7-9	jiàn duō shí guǎng	(idiom) experienced and knowledgeable
+触目惊心	HSK7-9	chù mù jīng xīn	lit. shocks the eye, astonishes the heart (idiom); shocking; horrible to see
+讨价还价	HSK7-9	tǎo jià huán jià	to haggle over price; to bargain
+记忆犹新	HSK7-9	jì yì yóu xīn	to remain fresh in one's memory (idiom)
+诸如此类	HSK7-9	zhū rú cǐ lèi	things like this (idiom); and so on; and the rest
+赞不绝口	HSK7-9	zàn bù jué kǒu	to praise without cease (idiom); praise sb to high heaven
+走投无路	HSK7-9	zǒu tóu wú lù	to be at an impasse (idiom); in a tight spot
+足不出户	HSK7-9	zú bù chū hù	(idiom) to not leave one's home; to stay indoors
+足智多谋	HSK7-9	zú zhì duō móu	resourceful; full of stratagems
+身不由己	HSK7-9	shēn bù yóu jǐ	(idiom) (of one's circumstances) beyond one's control; unable to do anything about it; (of one's actions) n...
+轻而易举	HSK7-9	qīng ér yì jǔ	easy; with no difficulty
+运筹帷幄	HSK7-9	yùn chóu wéi wò	lit. to devise battle plan in a tent (idiom); fig. planning strategies
+迫不及待	HSK7-9	pò bù jí dài	(idiom) unable to hold oneself back; eager to do sth without delay
+酸甜苦辣	HSK5	suān tián kǔ là	lit. sour, sweet, bitter and spicy (idiom); fig. all kinds of flavors; the joys and sorrows of life
+针锋相对	HSK7-9	zhēn fēng xiāng duì	to oppose each other with equal harshness (idiom); tit for tat; measure for measure
+错综复杂	HSK7-9	cuò zōng fù zá	tangled and complicated (idiom)
+锦上添花	HSK7-9	jǐn shàng tiān huā	lit. add flowers to brocade (idiom); fig. to give sth additional splendor
+锲而不舍	HSK7-9	qiè ér bù shě	to chip away at a task and not abandon it (idiom); to chisel away at sth; to persevere
+随心所欲	HSK7-9	suí xīn suǒ yù	(idiom) to follow one's heart's desires; to do as one pleases
+随时随地	HSK7-9	suí shí suí dì	anytime and anywhere
+难以置信	HSK7-9	nán yǐ zhì xìn	(idiom) hard to believe; incredible
+难能可贵	HSK7-9	nán néng kě guì	rare and precious; valuable
+集思广益	HSK7-9	jí sī guǎng yì	collecting opinions is of wide benefit (idiom); to pool wisdom for mutual benefit; to profit from widesprea...
+雪上加霜	HSK7-9	xuě shàng jiā shuāng	(idiom) to make matters even worse; to add insult to injury
+面目全非	HSK7-9	miàn mù quán fēi	nothing remains the same (idiom); change beyond recognition
+面红耳赤	HSK7-9	miàn hóng ěr chì	flushed with anger (or excitement)
+面面俱到	HSK7-9	miàn miàn jù dào	(idiom) take care of everything; handle everything
+顺理成章	HSK7-9	shùn lǐ chéng zhāng	logical; only to be expected
+顾全大局	HSK7-9	gù quán dà jú	to take the big picture into consideration (idiom); to work for the benefits of all
+顾名思义	HSK7-9	gù míng sī yì	as the name implies
+颠倒黑白	HSK7-9	diān dǎo hēi bái	lit. to invert black and white (idiom); to distort the truth deliberately; to misrepresent the facts
+风吹雨打	HSK7-9	fēng chuī yǔ dǎ	lit. windswept and battered by rain; to undergo hardship (idiom)
+风和日丽	HSK7-9	fēng hé rì lì	moderate wind, beautiful sun (idiom); fine sunny weather, esp. in springtime
+风土人情	HSK7-9	fēng tǔ rén qíng	local conditions and customs (idiom)
+风雨无阻	HSK7-9	fēng yǔ wú zǔ	regardless of weather conditions; rain, hail or shine
+风餐露宿	HSK7-9	fēng cān lù sù	lit. to eat in the open air and sleep outdoors (idiom); fig. to rough it
+飞禽走兽	HSK7-9	fēi qín zǒu shòu	(idiom) birds and animals
+饱经沧桑	HSK7-9	bǎo jīng cāng sāng	having lived through many changes
+骇人听闻	HSK7-9	hài rén tīng wén	shocking; horrifying
+鸦雀无声	HSK7-9	yā què wú shēng	lit. crow and peacock make no sound; absolute silence (idiom); not a single voice can be heard
+鹏程万里	HSK7-9	péng chéng wàn lǐ	the fabled roc flies ten thousand miles (idiom); one's future prospects are brilliant
+鹤立鸡群	HSK7-9	hè lì jī qún	a crane in a flock of chicken (idiom); way above the common; manifestly superior
+默默无闻	HSK7-9	mò mò wú wén	(idiom) unknown; unrenowned
+齐心协力	HSK7-9	qí xīn xié lì	to work with a common purpose (idiom); to make concerted efforts; to pull together

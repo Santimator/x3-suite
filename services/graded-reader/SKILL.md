@@ -23,11 +23,22 @@ All scripts live in `scripts/` and import the shared `vocab.py`. Run them with a
 Python that has `jieba` and `pypinyin` installed (see Setup).
 
 - **`lists/`** — the source of truth, four TSVs sharing columns `word, level, pinyin, gloss`:
-  - `hsk.tsv` — base leveled list (faithful copy of the HSK source; don't edit by hand).
+  - `hsk.tsv` — base leveled list, **generated** from the official **HSK 3.1**
+    syllabus (the 2025 revision of HSK 3.0, in force 2026) + CC-CEDICT glosses.
+    Never edit by hand — re-run `scripts/build_hsk_list.py` (see its docstring
+    for sources and the band sizes: 300 / 500 / 1,000 / 2,000 / 3,600 / 5,400
+    cumulative).
   - `supplement.tsv` — high-frequency function/grammar words the word-based HSK
     list omits but any reader at level knows (pronoun plurals, demonstratives,
     measure combos, directional complements, conjunctions). Auditable layer.
-  - `chengyu.tsv` — idioms / fixed expressions kept as whole tokens (tier b).
+  - `chengyu.tsv` — the 410 chengyu of the HSK 3.1 syllabus, tagged with their
+    real bands. **393 sit at HSK 7-9**: true 成语 are advanced vocabulary, so a
+    low-level book's cap correctly hides them.
+  - `expressions.tsv` — the everyday constructions that actually make graded
+    prose sound Chinese, level-tagged: **patterns** with a regex (一…就…,
+    虽然…但是…, 太…了) that the scribe wraps its own words inside, and **set
+    phrases** (不好意思, 想办法) matched literally. The scribe must use a minimum
+    number of distinct ones per chapter — see the gates below.
   - `personal.tsv` — personal known-words overlay **and** the sink for the
     add-and-gloss escalation (see the loop). Overrides others on conflict.
 - **`scripts/vocab.py`** — loads + merges the lists, configures jieba so
@@ -130,16 +141,31 @@ Without it, ordinals and known-word compounds eat the stretch budget and the
 rate stops measuring genuine reach — a learner who knows 很 and 快 *recognizes*
 很快; only combinations like 山上 or 睡着 are real (gloss-worthy) stretches.
 
-Two gates, both per segmented token (not per character):
-`out_of_list_rate = flagged / counted` (default cap **5%**) and
-`stretch_rate = stretch / counted` (default cap **15%**). Either over its cap
-fails. Gates default to the book's `plan.json` validation params; CLI flags
+**Five gates.** The rate gates are per segmented token (not per character);
+`out_of_list_rate = flagged / counted`, `stretch_rate = stretch / counted`:
+
+| gate | default | why |
+|---|---|---|
+| `threshold` — max out-of-list | 5% | above it the text stops being readable at level |
+| `min_out_of_list` — **min** out-of-list | 0 (books opt in, ~1.5%) | **a floor, not a typo.** Text that is 100% in-list is too easy to learn from; a little new vocabulary in context is where acquisition happens (i+1). A chapter at 0% fails as *too easy*. |
+| `max_stretch` | 15% | compositional guesses shouldn't carry the text |
+| `min_chars` | 0 (books opt in, ~800) | a chapter must be a real episode |
+| `min_expressions` | 0 (books opt in, ~5) | distinct `expressions.tsv` constructions used |
+
+The floors default to 0 so older books keep passing; new books set them in
+`plan.json` → `validation`. They exist because **only what a script measures
+actually happens**: length and expression targets lived in the prompts for a
+long time and were quietly missed every single chapter, while the script-checked
+vocabulary gates were met 100% of the time. Gates default to the book's `plan.json` validation params; CLI flags
 override. `validate.py BOOKDIR` checks every chapter in `book.json` at once.
 
 ## The orchestration loop
 
-**Once per book — Planner.** Produce `plan.json` per `prompts/planner.md`
-(outline + per-chapter beats; seed obvious story names into `lists/personal.tsv`).
+**Once per book — Planner.** Produce `plan.json` per `prompts/planner.md`:
+**research the source first** (don't plan from memory), write a **story bible**
+(cast, relationships, setting, motifs, and the full event chain), and only then
+divide that chain into chapters with a length budget. Seed obvious story names
+into `lists/personal.tsv`.
 Aim for a **substantial book**: follow the source story's events across enough
 chapters (roughly 8–12 for a short tale, more for a longer source) and make each
 a meaty episode (~450+ chars), not a summary — see planner.md's "Make the book

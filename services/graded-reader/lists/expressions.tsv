@@ -1,0 +1,65 @@
+expression	level	pinyin	gloss	regex
+# Multi-word constructions: the things that make graded prose sound like Chinese
+# rather than translated English. Two kinds, distinguished by the `regex` column:
+#
+#   - PATTERNS (regex filled) — split constructions the scribe wraps around its
+#     own words: 一…就…, 虽然…但是…. These cannot be matched as tokens, so they
+#     are detected by regex over the raw text.
+#   - SET PHRASES (regex empty) — fixed multi-word chunks matched literally, and
+#     loaded into jieba so they segment as one unit.
+#
+# `level` obeys the book's level cap exactly like hsk.tsv, so an HSK3 book only
+# ever sees HSK1-3 constructions. Real 成语 live in chengyu.tsv (the official
+# syllabus puts almost all of them at levels 7-9 — see that file's header).
+#
+# The scribe is required to use a minimum number of these per chapter
+# (`min_expressions` in plan.json); validate.py counts distinct hits.
+太…了	HSK1	tài … le	too…; really… (emphatic)	太[^。！？，]{1,6}了
+又…又…	HSK1	yòu … yòu …	both … and … (two qualities at once)	又[^。！？，]{1,4}又[^。！？，]{1,4}
+一边…一边…	HSK2	yìbiān … yìbiān …	doing one thing while doing another	一边[^。！？]{1,8}一边
+因为…所以…	HSK2	yīnwèi … suǒyǐ …	because …, therefore …	因为[^。！？]{1,20}所以
+虽然…但是…	HSK2	suīrán … dànshì …	although …, (but) …	虽然[^。！？]{1,20}(但是|可是|还是)
+一…就…	HSK2	yī … jiù …	as soon as …, (then) …	一[^。！？，]{1,6}就[^。！？]{1,10}
+越来越…	HSK2	yuè lái yuè …	more and more …	越来越
+先…然后…	HSK2	xiān … ránhòu …	first …, then …	先[^。！？]{1,15}然后
+一点儿也不…	HSK2	yìdiǎnr yě bù …	not … in the least	一点[儿]?[也都][不没]
+不但…而且…	HSK3	bùdàn … érqiě …	not only …, but also …	不但[^。！？]{1,20}(而且|也|还)
+越…越…	HSK3	yuè … yuè …	the more …, the more …	越[^。！？，]{1,4}越[^。！？，]{1,4}
+除了…以外	HSK3	chúle … yǐwài	apart from …; except for …	除了[^。！？]{1,15}(以外|之外|外)
+要是…就…	HSK3	yàoshi … jiù …	if …, then …	要是[^。！？]{1,20}就
+只要…就…	HSK3	zhǐyào … jiù …	as long as …, then …	只要[^。！？]{1,20}就
+只有…才…	HSK3	zhǐyǒu … cái …	only if …, (only then) …	只有[^。！？]{1,20}才
+对…来说	HSK3	duì … lái shuō	as far as … is concerned; for …	对[^。！？]{1,12}来说
+好像…一样	HSK3	hǎoxiàng … yīyàng	just as if …; like …	好像[^。！？]{1,15}(一样|似的)
+不是…而是…	HSK3	bù shì … ér shì …	not …, but rather …	不是[^。！？]{1,15}而是
+连…都…	HSK3	lián … dōu …	even … (does/doesn't)	连[^。！？，]{1,8}[都也]
+一…也没…	HSK3	yī … yě méi …	not a single …	一[^。！？，]{1,4}[也都][没不]
+不管…都…	HSK4	bùguǎn … dōu …	no matter …, still …	不管[^。！？]{1,20}[都也]
+既…又…	HSK4	jì … yòu …	both … and … (formal)	既[^。！？，]{1,6}又
+无论…都…	HSK4	wúlùn … dōu …	regardless of …, always …	无论[^。！？]{1,20}[都也]
+不好意思	HSK2	bù hǎo yìsi	to feel embarrassed; excuse me
+没关系	HSK1	méi guānxi	it doesn't matter; never mind
+没问题	HSK2	méi wèntí	no problem
+有意思	HSK2	yǒu yìsi	interesting; fun
+没意思	HSK2	méi yìsi	boring; pointless
+差不多	HSK3	chàbuduō	almost; more or less
+想办法	HSK3	xiǎng bànfǎ	to think of a way; to figure something out
+开玩笑	HSK3	kāi wánxiào	to joke; to be kidding
+没什么	HSK2	méi shénme	it's nothing; never mind
+怎么办	HSK2	zěnme bàn	what's to be done?
+太好了	HSK1	tài hǎo le	great!; wonderful!
+真的吗	HSK1	zhēn de ma	really?
+看起来	HSK3	kàn qǐlai	it looks like; apparently
+听起来	HSK3	tīng qǐlai	it sounds like
+说不定	HSK3	shuō bu dìng	maybe; perhaps; you never know
+说实话	HSK4	shuō shíhuà	to tell the truth; honestly
+等一下	HSK2	děng yīxià	wait a moment
+一会儿	HSK2	yīhuìr	in a moment; a little while
+从来没	HSK3	cónglái méi	have never (once)
+再说吧	HSK3	zàishuō ba	let's talk about it later
+算了	HSK3	suàn le	forget it; let it go
+不一定	HSK3	bù yīdìng	not necessarily
+马马虎虎	HSK3	mǎmǎ hūhū	so-so; careless
+自言自语	HSK4	zì yán zì yǔ	to talk to oneself; to mutter
+一句话也没说	HSK3	yī jù huà yě méi shuō	didn't say a single word
+心里想	HSK2	xīnli xiǎng	to think to oneself

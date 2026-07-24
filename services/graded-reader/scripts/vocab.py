@@ -55,12 +55,28 @@ class Vocab:
     known: Set[str] = field(default_factory=set)
     chengyu: Set[str] = field(default_factory=set)
     known_chars: Set[str] = field(default_factory=set)
+    # Multi-word constructions the scribe is asked to actually use, from
+    # expressions.tsv: name -> (compiled regex or None, Entry). A None regex
+    # means the expression is a literal set phrase and matches as plain text.
+    expressions: Dict[str, tuple] = field(default_factory=dict)
 
     def is_known(self, word: str) -> bool:
         return word in self.known
 
     def is_chengyu(self, word: str) -> bool:
         return word in self.chengyu
+
+    def find_expressions(self, text: str) -> List[str]:
+        """Distinct expressions from expressions.tsv occurring in `text`.
+
+        Counted per distinct expression, not per hit, so a chapter that repeats
+        太…了 five times still shows one construction — the gate is about
+        variety, not frequency."""
+        found = []
+        for name, (rx, _entry) in self.expressions.items():
+            if rx.search(text) if rx else (name in text):
+                found.append(name)
+        return found
 
     def all_chars_known(self, word: str) -> bool:
         """True if every Han character in the word is individually known."""
@@ -137,6 +153,30 @@ def _read_tsv(path: Path, source: str) -> Iterable[Entry]:
             yield Entry(word=word, level=level, pinyin=pinyin, gloss=gloss, source=source)
 
 
+def _read_expressions(path: Path):
+    """Yield (Entry, compiled_regex_or_None) from expressions.tsv.
+
+    Columns: expression, level, pinyin, gloss, regex. A blank regex marks a
+    literal set phrase."""
+    if not path.exists():
+        return
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.rstrip("\n")
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        parts = line.split("\t")
+        word = parts[0].strip()
+        if not word or word == "expression":
+            continue
+        level = parts[1].strip() if len(parts) > 1 else ""
+        pinyin = parts[2].strip() if len(parts) > 2 else ""
+        gloss = parts[3].strip() if len(parts) > 3 else ""
+        pattern = parts[4].strip() if len(parts) > 4 else ""
+        rx = re.compile(pattern) if pattern else None
+        yield Entry(word=word, level=level, pinyin=pinyin, gloss=gloss,
+                    source="expression"), rx
+
+
 def level_ceiling(text: Optional[str]) -> Optional[int]:
     """Highest HSK band implied by a level string, or None if unbounded.
     "HSK3" -> 3, "HSK1-3" -> 3, "HSK 1-4" -> 4, "" / None -> None."""
@@ -176,6 +216,20 @@ def load_vocab(lists_dir: Path = LISTS_DIR, configure_jieba: bool = True,
             v.known.add(e.word)
             if source == "chengyu":
                 v.chengyu.add(e.word)
+
+    # Expressions: multi-word constructions, level-capped like the HSK bands.
+    # Literal set phrases also join `known` (so they don't read as out-of-list);
+    # split patterns like 一…就… never do — they are matched by regex, not as
+    # tokens, and their parts are ordinary words anyway.
+    for e, rx in _read_expressions(lists_dir / "expressions.tsv"):
+        if cap is not None:
+            lvl = level_ceiling(e.level)
+            if lvl is not None and lvl > cap:
+                continue
+        v.expressions[e.word] = (rx, e)
+        if rx is None:
+            v.entries.setdefault(e.word, e)
+            v.known.add(e.word)
 
     # Known-character set drives the compositional stretch tier. Every Han
     # character appearing in any known word counts (see Vocab.known_chars note).

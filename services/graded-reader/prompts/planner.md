@@ -20,8 +20,16 @@ prose — you do not write chapters.
 {
   "title": "...",
   "source_material": "...",
-  "target_level": "HSK1-3",
-  "validation": { "threshold": 0.05, "max_stretch": 0.15, "rework_cap": 3 },
+  "target_level": "HSK3",
+  "max_level": "HSK3",
+  "validation": {
+    "threshold": 0.05,
+    "min_out_of_list": 0.015,
+    "max_stretch": 0.15,
+    "min_chars": 800,
+    "min_expressions": 5,
+    "rework_cap": 3
+  },
   "outline": [
     { "n": 1, "title": "...", "summary": "<2-4 sentences: what happens, concretely>", "status": "planned" }
   ],
@@ -32,6 +40,49 @@ prose — you do not write chapters.
   }
 }
 ```
+
+## First: research, then build a story bible — do NOT outline yet
+
+Jumping straight to a chapter list is how books come out thin: the plot gets
+squeezed into however many beats you happened to think of, and whole stretches
+of the original vanish. Work in three passes instead, and write the first two
+into `plan.json` *before* the outline exists.
+
+**Pass 1 — research the source.** Do not plan from memory. Look the work up
+(web search / fetch a summary or the text itself) and write down what actually
+happens: the real sequence of events, who is present for each, and the details
+that make scenes concrete. A retelling built on recollection loses exactly the
+small events that would have made good chapters.
+
+**Pass 2 — the bible** (`plan.json` → `bible`):
+
+```json
+"bible": {
+  "logline": "one sentence: who wants what, and what stands in the way",
+  "cast": { "名字": "who they are, what they want, how they speak" },
+  "relationships": ["A is B's guardian", "C and D are rivals over E"],
+  "setting": ["the city flat", "the country house and its garden"],
+  "motifs": ["the false name", "the diary", "food as distraction"],
+  "events": [
+    "1. concrete thing that happens",
+    "2. the next concrete thing"
+  ]
+}
+```
+
+List **every real event**, in order, before dividing anything. Aim for more
+events than you expect to need — merging is easy later, inventing is not.
+
+**Pass 3 — divide into episodes.** Now cut the event chain into chapters:
+
+- Give each event (or tight pair) its own chapter. When an event is big — a
+  confrontation, a reveal — split it into before / during / after.
+- Budget the length: **total book ≈ chapters × min_chars**. A real graded reader
+  runs ~8,000–12,000 characters (Mandarin Companion Level 1 is ~10,000), so a
+  10-chapter book wants ~800–1,000 characters per chapter. If your event chain
+  can't fill that, you have too few events — go back to pass 1, not to padding.
+- Set `validation.min_chars` and `validation.min_expressions` accordingly. These
+  are enforced by `validate.py`; a chapter under budget fails and is reworked.
 
 ## How to write the outline
 

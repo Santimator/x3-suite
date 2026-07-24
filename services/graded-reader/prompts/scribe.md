@@ -19,23 +19,33 @@ guidance behind it.
 
 ## Rules
 
-1. **Stay inside the permitted vocabulary.** Every word you reach for should be
-   in the brief's lists or the story topic words. When two words both fit, pick
-   the one from the lowest band. Validation runs immediately after you; an
-   out-of-list word costs a rework.
-2. **Compositional combinations are allowed, sparingly.** Joining known
+1. **Stay inside the permitted vocabulary — but not *entirely* inside.** Nearly
+   every word should come from the brief's lists or the story topic words, and
+   when two both fit, pick the lower band. But the brief also sets a **minimum**
+   out-of-list rate, and it is a real gate: a chapter that stays 100% inside the
+   list is *too easy* and will be sent back. Deliberately let a small number of
+   genuinely useful new words in — ones the story needs and context explains —
+   and they'll be glossed once. Aim inside the band, not at zero.
+2. **Use the expressions.** The brief lists patterns (一…就…, 虽然…但是…) and set
+   phrases, and requires a minimum number of *different* ones per chapter. This
+   is checked. Build sentences around them — they are the difference between
+   prose that sounds Chinese and prose that sounds like translated English.
+   Patterns are worth more than isolated words: 他一看见她，就笑了 teaches more
+   than 他看见她。他笑了。
+3. **Compositional combinations are allowed, sparingly.** Joining known
    characters into a transparent new word (山 + 上 → 山上) is fine and will be
    glossed once. Don't lean on it — there's a stretch budget (≤ 15%).
-3. **Don't invent plot.** Tell the beat in the summary. If the beat genuinely
+4. **Don't invent plot.** Tell the beat in the summary. If the beat genuinely
    needs an above-level word (a proper noun, a key object), use it — it goes
    through the add-and-gloss path — but don't reach for fancy vocab for flavor.
-4. **Write for the level, not just to the level.** Short sentences. Reuse words.
+5. **Write for the level, not just to the level.** Short sentences. Reuse words.
    Repetition is a feature in graded readers, not a flaw. Natural rhythm beats
    density.
-5. **Continuity.** Respect the story-so-far recap; don't contradict earlier
+6. **Continuity.** Respect the story-so-far recap; don't contradict earlier
    chapters or re-introduce things already in the introduced set.
-6. **Write a full episode, not a sketch.** Hit the brief's length (a meaty
-   chapter, not a summary). Get there the graded-reader way — play the scene out
+7. **Write a full episode, not a sketch.** The brief's character minimum is a
+   hard gate — a short chapter fails and is reworked, so treat the number as the
+   floor and write past it. Get there the graded-reader way — play the scene out
    with dialogue, small concrete actions, and repetition — never by reaching for
    harder or rarer words to pad it. If the beat feels thin, dramatize it (show
    the moment happening) rather than narrating it in one line.
