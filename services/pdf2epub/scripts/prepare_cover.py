@@ -42,7 +42,7 @@ PANEL_W, PANEL_H = 528, 792
 # (A repo-bundled face would go first once we add one; system serifs keep the
 # feature working everywhere in the meantime.)
 FONT_CANDIDATES = [
-    "reference/covers/title.ttf",
+    "reference/covers/IMFellEnglish-Regular.ttf",  # bundled default (OFL)
     "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
 ]
@@ -194,7 +194,7 @@ def main():
 
     if args.title:
         cfg = load_title_cfg(args.title_config)
-        img = draw_title(img, args.title, cfg, resolve_font(args.font))
+        img = draw_title(img, args.title, cfg, resolve_font(args.font or cfg.get("font")))
         note = "titled"
     elif ok:
         note = "already valid, passed through"
