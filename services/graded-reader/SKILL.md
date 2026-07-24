@@ -223,7 +223,8 @@ substantial".
 
 ```
 BOOK/
-  book.json            {title, author, language, pinyin_mode, chapters:[{source, glossary}]}
+  book.json            {title, author, language, pinyin_mode, cover?, chapters:[{source, glossary}]}
+  images/cover.png     optional cover (prepare_cover.py; see "Cover")
   plan.json            outline + introduced set + validation params
   chapters/chNN.md     chapter source (# title, ## section, paragraphs)
   build/               harvest TSVs, glossaries, .epub output
@@ -233,6 +234,27 @@ Worked examples under `workspace/`: `journey-west` (first scaffold, HSK 1-3),
 `yugong-mountain` (愚公移山, HSK 1-3, 5 ch), `twelve-zodiac` (十二生肖,
 HSK 1-4, 10 ch), `letter-writer` (写信的老人, original story, HSK 1-4, 7 ch)
 — each with plan, glossaries, and built EPUBs.
+
+## Cover
+
+Give each reader a cover with the shared tool
+`epub-builder/scripts/prepare_cover.py` (same one pdf2epub uses). The default
+template is Chinese-themed — a parchment panel over a study scene — and the
+book's title is drawn into the panel in **LXGW WenKai** (the kaiti hanzi that is
+WenZilla's Chinese half, so the cover matches the reader's body face). The font
+is rasterised into the PNG at build time; wrapping is CJK-aware (breaks between
+hanzi).
+
+```bash
+.venv/bin/python epub-builder/scripts/prepare_cover.py \
+    reference/covers/graded-default.png --title "愚公移山" \
+    --title-config reference/covers/graded-default.json \
+    --out BOOK/images/cover.png
+```
+
+Then set `"cover": "images/cover.png"` in `book.json`; the builder embeds it.
+A user can override by dropping their own image and pointing `--title-config` at
+it (or its own JSON), or skip the title for a cover that already has one.
 
 ## Build order (when starting a new reader)
 

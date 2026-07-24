@@ -220,11 +220,11 @@ PNG, fit to panel). `--check` reports validity without writing.
 
 ```bash
 # validate/fix a bring-your-own cover
-.venv/bin/python services/pdf2epub/scripts/prepare_cover.py \
+.venv/bin/python epub-builder/scripts/prepare_cover.py \
     workspace/<slug>/source-cover.png --out workspace/<slug>/images/cover.png
 
 # default template + auto-title (box/ink come from the .json beside the image)
-.venv/bin/python services/pdf2epub/scripts/prepare_cover.py \
+.venv/bin/python epub-builder/scripts/prepare_cover.py \
     reference/covers/default.png --title "Los alcaldes encontrados" \
     --title-config reference/covers/default.json \
     --out workspace/<slug>/images/cover.png

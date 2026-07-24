@@ -38,11 +38,17 @@ from PIL import Image, ImageDraw, ImageFont
 # CrossPoint e-ink panel; a cover need never exceed it.
 PANEL_W, PANEL_H = 528, 792
 
-# Serif candidates for the title overlay, best first. `--font` overrides.
-# (A repo-bundled face would go first once we add one; system serifs keep the
-# feature working everywhere in the meantime.)
+# Repo root, so bundled fonts/assets resolve regardless of the caller's cwd.
+# This file lives at epub-builder/scripts/prepare_cover.py.
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Title-font candidates, best first; `--font` or a config `font` overrides.
+# Both bundled faces are OFL (licenses beside them in reference/covers/):
+# IM Fell English for Latin, LXGW WenKai (WenZilla's kaiti) for CJK. System
+# serifs are a last resort so the feature never hard-fails.
 FONT_CANDIDATES = [
-    "reference/covers/IMFellEnglish-Regular.ttf",  # bundled default (OFL)
+    "reference/covers/IMFellEnglish-Regular.ttf",
+    "reference/covers/LXGWWenKai-Regular.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
 ]
@@ -54,6 +60,18 @@ DEFAULT_TITLE = {
     "color": [43, 33, 25],
     "uppercase": False,
 }
+
+
+def _resolve_path(p: str) -> Path | None:
+    """A repo-relative or absolute path → an existing Path, or None. Relative
+    paths are tried against cwd first, then the repo root."""
+    cand = Path(p)
+    if cand.is_absolute():
+        return cand if cand.is_file() else None
+    for base in (Path.cwd(), REPO_ROOT):
+        if (base / cand).is_file():
+            return base / cand
+    return None
 
 
 def is_grayscale(img: Image.Image) -> bool:
@@ -99,24 +117,58 @@ def to_valid(img: Image.Image) -> Image.Image:
 
 def resolve_font(explicit: str | None) -> str:
     for cand in ([explicit] if explicit else []) + FONT_CANDIDATES:
-        if cand and Path(cand).is_file():
-            return cand
+        if cand and (found := _resolve_path(cand)):
+            return str(found)
     raise SystemExit(
         "prepare_cover: no title font found. Pass --font PATH to a .ttf/.otf "
         f"(looked for: {', '.join(FONT_CANDIDATES)})."
     )
 
 
+def _is_cjk(ch: str) -> bool:
+    """CJK ideographs and CJK punctuation — characters we may break between."""
+    o = ord(ch)
+    return (0x4E00 <= o <= 0x9FFF or 0x3400 <= o <= 0x4DBF     # unified + ext-A
+            or 0xF900 <= o <= 0xFAFF                            # compat ideographs
+            or 0x3000 <= o <= 0x303F or 0xFF00 <= o <= 0xFFEF)  # CJK/full-width punct
+
+
+def _atoms(text):
+    """Break `text` into wrap units, each (chunk, space_before). A CJK char is
+    its own unit (Chinese has no spaces, so any han boundary is a legal break);
+    a run of non-space, non-CJK characters (a Latin word) stays whole."""
+    out, buf, buf_space, pending_space = [], "", False, False
+    for ch in text:
+        if ch.isspace():
+            if buf:
+                out.append([buf, buf_space]); buf = ""
+            pending_space = True
+        elif _is_cjk(ch):
+            if buf:
+                out.append([buf, buf_space]); buf = ""
+            out.append([ch, pending_space]); pending_space = False
+        else:                       # Latin / punctuation / digits
+            if not buf:
+                buf_space = pending_space
+            buf += ch
+            pending_space = False
+    if buf:
+        out.append([buf, buf_space])
+    return out
+
+
 def wrap_to_width(text, font, max_w, draw):
-    """Greedy word-wrap so each line's rendered width <= max_w."""
-    words, lines, cur = text.split(), [], ""
-    for w in words:
-        trial = f"{cur} {w}".strip()
+    """Greedy wrap so each line's rendered width <= max_w. Breaks between words
+    (space-separated) and between CJK characters."""
+    lines, cur = [], ""
+    for chunk, space_before in _atoms(text):
+        sep = " " if (space_before and cur) else ""
+        trial = cur + sep + chunk
         if draw.textlength(trial, font=font) <= max_w or not cur:
             cur = trial
         else:
             lines.append(cur)
-            cur = w
+            cur = chunk
     if cur:
         lines.append(cur)
     return lines

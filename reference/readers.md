@@ -71,7 +71,7 @@ like wallpaperconverter.jakegreen.dev; not our concern). For the cover:
   home-screen thumbnail and sleep screen; a ~2000px-tall cover takes ~10 s each
   time. Panel-sized is instant.
 
-`services/pdf2epub/scripts/prepare_cover.py` enforces all three (and can draw
+`epub-builder/scripts/prepare_cover.py` enforces all three (and can draw
 the title onto a template cover). Content figures follow the same grayscale
 rule at 480px width (`prepare.py`).
 
