@@ -76,6 +76,7 @@ One folder per conversion job, mirroring graded-reader books:
 workspace/<slug>/
   source.pdf          the input (never modified)
   source-transcript.md  optional — bring-your-own text; its presence skips OCR
+  source-cover.png    optional — bring-your-own cover (any raster format)
   build/triage.json   stage 0 output
   extract/            stage 1 output (raw per-page extraction)
   policy.json         stage 2 input — the agent's restore decisions
@@ -191,6 +192,52 @@ and here you're doing the shaping by hand. Then **build and verify** as usual;
 on this route, as on the vision route, `verify.py` coverage is a completeness
 check against your own chapters and a human read is the real gate. If the
 sidecar is empty, triage says so — treat it as absent and re-triage the PDF.
+
+## Cover
+
+Every book gets a cover, resolved in this order (best source first):
+
+1. **`source-cover.{png,jpg,jpeg,webp,…}` sidecar** next to the PDF — the user's
+   own cover. Triage reports it as `cover_sidecar`.
+2. **A cover inside the PDF** — if there's no sidecar, look for a real
+   frontispiece/title-page image in the source (render the first page or pull an
+   embedded image) and, if it reads as a cover, use it. Agent judgment.
+3. **The default template** — `reference/covers/default.png`, with the book
+   title drawn into its blank panel. The fallback when nothing better exists.
+
+Whatever the source, run it through **`prepare_cover.py`**, which enforces the
+constraints CrossPoint's *EPUB cover* path actually has (these are NOT the
+`.pxc`/`.bmp` sleep-screen wallpaper rules — that's a separate device feature):
+
+- **PNG or baseline JPEG** — progressive JPEG and GIF fall back to an `[Image]`
+  placeholder on-device;
+- **grayscale** — the panel is e-ink; colour is wasted bytes;
+- **≤ 528×792** — a ~2000px-tall cover costs ~10 s of on-device conversion for
+  the sleep-screen/thumbnail.
+
+It **uses a valid cover as-is and only transforms an invalid one** (→ grayscale
+PNG, fit to panel). `--check` reports validity without writing.
+
+```bash
+# validate/fix a bring-your-own cover
+.venv/bin/python services/pdf2epub/scripts/prepare_cover.py \
+    workspace/<slug>/source-cover.png --out workspace/<slug>/images/cover.png
+
+# default template + auto-title (box/ink come from the .json beside the image)
+.venv/bin/python services/pdf2epub/scripts/prepare_cover.py \
+    reference/covers/default.png --title "Los alcaldes encontrados" \
+    --title-config reference/covers/default.json \
+    --out workspace/<slug>/images/cover.png
+```
+
+Then point `book.json` at it: `"cover": "images/cover.png"` — the builder
+embeds it as the EPUB3 `cover-image` (see epub-builder `FORMAT.md`).
+
+**Auto-title.** For a template that leaves a blank area, `--title` renders the
+title into a box (fractions of the image, in `reference/covers/<name>.json`:
+`title_box`, `color`, `uppercase`), auto-sized to fit and wrap, drawn at source
+resolution then downscaled so it stays crisp. `--font PATH` overrides the serif;
+the default resolves a repo font if present, else a system serif.
 
 ## Stages (the "bueno, barato" route)
 

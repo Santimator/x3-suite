@@ -58,6 +58,23 @@ against, not targets to hit*:
 - **Small screen ⇒ structure matters.** ~12–20 lines per screen means clear
   chapters/acts/scenes and headings beat one long undifferentiated chapter.
 
+## Cover images (EPUB, not wallpaper)
+
+The **embedded EPUB cover** is a normal image the reader renders — distinct
+from the device *sleep-screen wallpaper* (`.pxc`/`.bmp`, 2-bit, built by tools
+like wallpaperconverter.jakegreen.dev; not our concern). For the cover:
+
+- **PNG or baseline JPEG only.** Progressive JPEG and GIF fall back to an
+  `[Image]` placeholder on-device.
+- **Grayscale.** The panel is e-ink; colour is dropped and wastes bytes.
+- **Keep it ≤ 528×792 (panel size).** CrossPoint re-converts the cover for the
+  home-screen thumbnail and sleep screen; a ~2000px-tall cover takes ~10 s each
+  time. Panel-sized is instant.
+
+`services/pdf2epub/scripts/prepare_cover.py` enforces all three (and can draw
+the title onto a template cover). Content figures follow the same grayscale
+rule at 480px width (`prepare.py`).
+
 ## Building `.cpfont` fonts — the rules that matter
 
 CrossPoint's converter is `lib/EpdFont/scripts/fontconvert_sdcard.py`

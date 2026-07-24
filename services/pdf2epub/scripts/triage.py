@@ -63,6 +63,21 @@ def find_transcripts(pdf_path: Path):
     ]
 
 
+# A user may also drop a cover image next to the PDF: <stem>-cover.<ext>.
+# prepare_cover.py validates/fixes it; detection here only surfaces it.
+COVER_EXTS = ("png", "jpg", "jpeg", "webp", "tiff", "tif", "bmp", "gif")
+
+
+def find_cover(pdf_path: Path):
+    """Sibling cover image `<stem>-cover.<ext>`, if any (first match wins)."""
+    stem = pdf_path.stem
+    for ext in COVER_EXTS:
+        cand = pdf_path.with_name(f"{stem}-cover.{ext}")
+        if cand.exists():
+            return cand
+    return None
+
+
 def transcript_report(paths):
     """Describe the chosen transcript for the agent — content is *not*
     interpreted here; the agent reads it and decides how to structure it.
@@ -196,6 +211,7 @@ def triage(pdf_path: Path, samples: int):
         flags.append("page_furniture")
 
     transcripts = find_transcripts(pdf_path)
+    cover_sidecar = find_cover(pdf_path)
     if transcripts:
         # A user-supplied transcript overrides our own OCR. We still analyse
         # the PDF (page count, language, images remain useful context and the
@@ -229,6 +245,7 @@ def triage(pdf_path: Path, samples: int):
         "stray_single_ratio": round(stray_ratio, 3),
         "furniture_candidates": furniture,
         "transcript": transcript_report(transcripts) if transcripts else None,
+        "cover_sidecar": str(cover_sidecar) if cover_sidecar else None,
         "per_page": [
             {k: v for k, v in p.items() if k != "clean_text"} for p in pages
         ],
@@ -263,6 +280,9 @@ def summarize(r):
             if t["extras"]:
                 note += f"  [ignoring extra transcripts: {', '.join(t['extras'])}]"
         lines.insert(0, note)
+    if r.get("cover_sidecar"):
+        lines.append(f"cover sidecar: {r['cover_sidecar']} "
+                     "(run prepare_cover.py to validate/fix)")
     return "\n".join(lines)
 
 
