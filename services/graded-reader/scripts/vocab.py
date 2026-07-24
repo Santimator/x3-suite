@@ -16,6 +16,7 @@ blank lines are ignored, so the files can carry comments.
 """
 from __future__ import annotations
 
+import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -136,9 +137,27 @@ def _read_tsv(path: Path, source: str) -> Iterable[Entry]:
             yield Entry(word=word, level=level, pinyin=pinyin, gloss=gloss, source=source)
 
 
-def load_vocab(lists_dir: Path = LISTS_DIR, configure_jieba: bool = True) -> Vocab:
-    """Load and merge the lists. Optionally load them into jieba's dictionary."""
+def level_ceiling(text: Optional[str]) -> Optional[int]:
+    """Highest HSK band implied by a level string, or None if unbounded.
+    "HSK3" -> 3, "HSK1-3" -> 3, "HSK 1-4" -> 4, "" / None -> None."""
+    if not text:
+        return None
+    nums = [int(n) for n in re.findall(r"\d+", text)]
+    return max(nums) if nums else None
+
+
+def load_vocab(lists_dir: Path = LISTS_DIR, configure_jieba: bool = True,
+               max_level: Optional[str] = None) -> Vocab:
+    """Load and merge the lists. Optionally load them into jieba's dictionary.
+
+    `max_level` (e.g. "HSK3" or "HSK1-3") caps the HSK base list to that band
+    and below — so higher-band words fall out of the known set and are caught
+    as stretch/flagged, which is what makes a level target real. Off by default
+    (None = load every band), so books without the cap are unaffected. The
+    supplement (function words everyone at level knows), chengyu, and personal
+    overlays are never capped."""
     v = Vocab()
+    cap = level_ceiling(max_level)
 
     # Order matters: hsk first, then supplement/chengyu, then personal last so
     # personal overrides glosses/levels on conflict.
@@ -149,6 +168,10 @@ def load_vocab(lists_dir: Path = LISTS_DIR, configure_jieba: bool = True) -> Voc
         ("personal.tsv", "personal"),
     ):
         for e in _read_tsv(lists_dir / fname, source):
+            if source == "hsk" and cap is not None:
+                lvl = level_ceiling(e.level)
+                if lvl is not None and lvl > cap:
+                    continue
             v.entries[e.word] = e
             v.known.add(e.word)
             if source == "chengyu":

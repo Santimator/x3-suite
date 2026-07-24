@@ -1,0 +1,109 @@
+{
+  "title": "诚实的重要 · 分级读物 (HSK 3)",
+  "source_material": "The Importance of Being Earnest by Oscar Wilde (1895) — a comedy of manners, retold as simple narrative. The English pun (the name 'Ernest' vs. being 'earnest') is localized: the coveted name is 诚 (Chéng), which also means honest/sincere, so the joke survives.",
+  "target_level": "HSK3",
+  "max_level": "HSK3",
+  "segmenter": "jieba (custom dict = vocab lists)",
+  "validation": {
+    "threshold": 0.05,
+    "max_stretch": 0.15,
+    "rework_cap": 3
+  },
+  "introduced": {
+    "words": [
+      "杰克",
+      "诚",
+      "阿龙",
+      "回事",
+      "乡下",
+      "西西",
+      "面前",
+      "城里",
+      "晚饭",
+      "日子",
+      "点头"
+    ],
+    "add_and_gloss": []
+  },
+  "cast": {
+    "杰克": "Jack Worthing — a country gentleman; in the city he calls himself 诚",
+    "阿龙": "Algernon — Jack's clever friend; later pretends to be 诚 in the country",
+    "高文": "Gwendolen — Algernon's cousin, loves Jack; can only love a man named 诚",
+    "高太太": "Lady Bracknell — Gwendolen's formidable mother",
+    "西西": "Cecily — Jack's young ward in the country; adores the name 诚",
+    "白老师": "Miss Prism — Cecily's governess",
+    "陈先生": "Dr. Chasuble — a kindly village gentleman"
+  },
+  "outline": [
+    {
+      "n": 1,
+      "title": "两个名字",
+      "summary": "In the city, a young gentleman lives under the name 诚. His friend 阿龙 discovers, from a note, that his real name is 杰克, not 诚. Cornered, 杰克 confesses his double life: in the country he is 杰克, the serious guardian of a young girl, 西西; to escape to the city and have fun he invented a wild younger 'brother' named 诚, and in the city he simply becomes 诚. 阿龙 laughs and admits he plays a similar trick — he invented a sick friend far away whom he must 'visit' whenever he wants to avoid a boring dinner. The two friends agree that everyone needs a way to escape.",
+      "status": "accepted",
+      "recap": "In the city, young Jack lives under the name \"Cheng\"; his friend Along finds a letter showing his real name is Jack. Jack confesses that at his country home he is the serious guardian of a girl named Xixi, and he invented a wicked younger brother \"Cheng\" in the city as an excuse to escape and enjoy himself as \"Cheng\"; Along admits he uses the same trick, a often-sick faraway friend he must \"visit\" to avoid dull dinners."
+    },
+    {
+      "n": 2,
+      "title": "高文小姐",
+      "summary": "阿龙's cousin 高文 and her mother 高太太 come to visit. 杰克 (known here as 诚) is in love with 高文 and, finding a moment alone, tells her so and asks her to marry him. 高文 happily says yes — and then explains that she could only ever love a man named 诚: the name sounds so honest and sincere that it makes her heart trust him at once. 杰克 is overjoyed but secretly frightened, because 诚 is not really his name.",
+      "status": "planned",
+      "recap": ""
+    },
+    {
+      "n": 3,
+      "title": "高太太的问题",
+      "summary": "高太太 sits 杰克 down and questions him closely: his money, his house, and above all his family. 杰克 has to admit the truth about himself — he has no parents that he knows of; as a baby he was found inside a bag at the train station, and a kind old man took him home and raised him. 高太太 is shocked and says her daughter can never marry a man who was found in a bag. She takes 高文 away. Before leaving, 高文 secretly promises to stay true to him and asks for his address in the country.",
+      "status": "planned",
+      "recap": ""
+    },
+    {
+      "n": 4,
+      "title": "乡下的西西",
+      "summary": "The story moves to 杰克's house in the country. His young ward 西西 is supposed to study every day with her teacher, 白老师, but she finds the lessons dull and dreams instead. What she dreams about most is 杰克's 'bad younger brother', 诚, whom she has never met. She has heard he is wild and full of trouble, and she has quietly decided that she likes him and would love to meet him one day.",
+      "status": "planned",
+      "recap": ""
+    },
+    {
+      "n": 5,
+      "title": "诚来了",
+      "summary": "阿龙, curious about the ward his friend keeps hidden, travels to the country house while 杰克 is away, and introduces himself as 诚, the wild younger brother. 西西 is thrilled to meet the very person she has been dreaming about. 阿龙 (as 诚) finds her charming, and the two get along at once, talking and laughing in the garden as if they had known each other for years.",
+      "status": "planned",
+      "recap": ""
+    },
+    {
+      "n": 6,
+      "title": "杰克回家",
+      "summary": "杰克 comes home dressed all in black, planning to announce sadly that his troublesome brother 诚 has died in the city — a neat way to be rid of the lie forever. But he walks in to find 阿龙 sitting there, alive and cheerful, being introduced to everyone as 诚. 杰克 is furious and quietly begs 阿龙 to leave at once. 阿龙 refuses: he has fallen for 西西 and will not go.",
+      "status": "planned",
+      "recap": ""
+    },
+    {
+      "n": 7,
+      "title": "西西和诚",
+      "summary": "Alone with 西西, 阿龙 (still pretending to be 诚) asks her to marry him. To his surprise she says she has already loved him for months — ever since she first heard of the wild brother named 诚. She even shows him a little diary in which she wrote about their pretend romance long before they met. She adds that a great part of her love is the name itself: she could only marry a man named 诚. 阿龙 secretly resolves to make the name truly his.",
+      "status": "planned",
+      "recap": ""
+    },
+    {
+      "n": 8,
+      "title": "两位小姐",
+      "summary": "高文 arrives at the country house looking for her 诚. She and 西西 meet and, over tea, are at first very polite — until each discovers that the other is also engaged to a man named 诚. The polite talk turns cold and sharp. Then both men appear at the same time, and in front of the two women it becomes clear that neither is really named 诚. The women stop quarrelling, join together, and turn as one against the two men.",
+      "status": "planned",
+      "recap": ""
+    },
+    {
+      "n": 9,
+      "title": "真名字",
+      "summary": "The two men have no choice but to confess the whole scheme of false names and invented brothers. The women are hurt, but they still love the men, and they forgive them on one strict condition: each must truly be named 诚. Privately both men rush to arrange to change their names. Just then 高太太 arrives, having followed her daughter to the country to take her home — and she stops short when she sees 西西's teacher, 白老师.",
+      "status": "planned",
+      "recap": ""
+    },
+    {
+      "n": 10,
+      "title": "意外的真相",
+      "summary": "高太太 recognizes 白老师 as a young teacher who, many years ago, worked for her family and one day lost a baby: she had absent-mindedly put her book in the baby's carriage and the baby into a bag, and left the bag at the train station. That lost baby was 杰克. So 杰克 is really the son of 高太太's own late sister — which makes him 阿龙's elder brother. And his true name, given after his late father, was 诚 all along. 杰克 really is 诚. Overjoyed, 高文 and 杰克, 西西 and 阿龙 are free to marry, and even 白老师 and kind 陈先生 come together. The story ends on its lesson: what matters most is truly being 诚实 — honest.",
+      "status": "planned",
+      "recap": ""
+    }
+  ]
+}

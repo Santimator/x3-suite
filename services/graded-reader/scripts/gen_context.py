@@ -151,7 +151,9 @@ def main(argv=None) -> int:
     ap.add_argument("--lists", type=Path, default=vocab_mod.LISTS_DIR)
     args = ap.parse_args(argv)
 
-    v = vocab_mod.load_vocab(args.lists)
+    plan_max_level = json.loads(
+        (args.book_dir / "plan.json").read_text(encoding="utf-8")).get("max_level")
+    v = vocab_mod.load_vocab(args.lists, max_level=plan_max_level)
     brief = render_brief(args.book_dir, args.chapter, args.vocab_detail, args.length, v)
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)

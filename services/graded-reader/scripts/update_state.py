@@ -92,10 +92,10 @@ def main(argv=None) -> int:
 
     book_dir: Path = args.book_dir
     n = args.chapter
-    v = vocab_mod.load_vocab(args.lists)
 
     plan_path = book_dir / "plan.json"
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    v = vocab_mod.load_vocab(args.lists, max_level=plan.get("max_level"))
     book_path = book_dir / "book.json"
     book = json.loads(book_path.read_text(encoding="utf-8")) if book_path.exists() else {"chapters": []}
 

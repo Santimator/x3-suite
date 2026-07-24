@@ -165,6 +165,26 @@ def resolve_gates(args, book_dir: Path = None) -> Tuple[float, float]:
             max_stretch if max_stretch is not None else 0.15)
 
 
+def resolve_book_dir(chapter: Path) -> Path:
+    """The book directory for a chapter path (BOOK/chapters/chNN.md -> BOOK),
+    or the path itself if it is a directory."""
+    if chapter.is_dir():
+        return chapter
+    if chapter.parent.name == "chapters":
+        return chapter.parent.parent
+    return chapter.parent
+
+
+def resolve_max_level(args, book_dir: Path):
+    """CLI --max-level wins; else the book's plan.json `max_level` (opt-in; a
+    book without it stays uncapped)."""
+    if getattr(args, "max_level", None):
+        return args.max_level
+    if book_dir and (book_dir / "plan.json").exists():
+        return json.loads((book_dir / "plan.json").read_text(encoding="utf-8")).get("max_level")
+    return None
+
+
 def validate_book(book_dir: Path, args, v: vocab_mod.Vocab) -> int:
     """Validate every chapter listed in BOOKDIR/book.json. Exit 0 iff all pass."""
     book = json.loads((book_dir / "book.json").read_text(encoding="utf-8"))
@@ -198,6 +218,9 @@ def main(argv=None) -> int:
                     help="max out-of-list (flagged) rate (default: plan.json or 0.05)")
     ap.add_argument("--max-stretch", type=float, default=None,
                     help="max stretch rate (default: plan.json or 0.15)")
+    ap.add_argument("--max-level", default=None,
+                    help="cap the known HSK list at this band, e.g. HSK3 "
+                         "(default: plan.json `max_level`, else uncapped)")
     ap.add_argument("--harvest-out", type=Path, default=None, help="write per-chapter new-word TSV here")
     ap.add_argument("--harvest-flagged", action="store_true", help="include flagged words in harvest (no gloss yet)")
     ap.add_argument("--lists", type=Path, default=vocab_mod.LISTS_DIR, help="lists directory")
@@ -208,7 +231,7 @@ def main(argv=None) -> int:
         print(f"error: chapter not found: {args.chapter}", file=sys.stderr)
         return 2
 
-    v = vocab_mod.load_vocab(args.lists)
+    v = vocab_mod.load_vocab(args.lists, max_level=resolve_max_level(args, resolve_book_dir(args.chapter)))
 
     if args.chapter.is_dir():
         return validate_book(args.chapter, args, v)

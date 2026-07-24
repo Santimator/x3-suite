@@ -1,0 +1,13 @@
+{
+  "title": "诚实的重要 · 分级读物 (HSK 3)",
+  "author": "改编自 Oscar Wilde",
+  "language": "zh",
+  "pinyin_mode": "gloss-pinyin",
+  "cover": "images/cover.png",
+  "chapters": [
+    {
+      "source": "chapters/ch01.md",
+      "glossary": "build/ch01-glossary.tsv"
+    }
+  ]
+}
