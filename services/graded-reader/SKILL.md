@@ -256,10 +256,10 @@ BOOK/
   build/               harvest TSVs, glossaries, .epub output
 ```
 
-Worked examples under `workspace/`: `journey-west` (first scaffold, HSK 1-3),
-`yugong-mountain` (愚公移山, HSK 1-3, 5 ch), `twelve-zodiac` (十二生肖,
-HSK 1-4, 10 ch), `letter-writer` (写信的老人, original story, HSK 1-4, 7 ch)
-— each with plan, glossaries, and built EPUBs.
+Worked example under `workspace/`: `being-earnest` (诚实的重要, HSK 3, 10 ch) —
+plan with story bible, per-chapter glossaries, and a built EPUB. Superseded
+books are deleted rather than kept: once the generator improves, older output
+is noise, and git history holds it if we ever want to look back.
 
 ## Cover
 

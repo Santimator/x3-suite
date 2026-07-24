@@ -37,17 +37,3 @@ conversion.
 Sources: https://github.com/mozilla/zilla-slab ·
 https://github.com/nicoverbruggen/ebook-fonts (fonts/extra, `NV_Zilla_Slab-*`)
 
-## EBGaramond/ (Latin)
-
-**EB Garamond** — the classical Latin book face.
-> Copyright 2017 The EB Garamond Project Authors
-> (https://github.com/octaviopardo/EBGaramond12), with Reserved Font Name
-> 'EB Garamond'.
-
-Source: https://github.com/octaviopardo/EBGaramond12 (also Ubuntu's
-`fonts-ebgaramond`).
-
----
-
-Reproducible build recipe (which source TTFs, which converter, which
-intervals) is in [`../readers.md`](../readers.md).

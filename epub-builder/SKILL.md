@@ -29,11 +29,11 @@ builder doesn't support it — extend the contract first, then the builder.
 
 # graded-reader book (pinyin_mode in book.json engages annotation)
 .venv/bin/python epub-builder/scripts/build_epub.py \
-    workspace/yugong-mountain --out workspace/yugong-mountain/build/book.epub
+    workspace/being-earnest --out workspace/being-earnest/build/book.epub
 
 # pinyin render test for a new device (one EPUB, chapter 1 in all 3 modes)
 .venv/bin/python epub-builder/scripts/build_epub.py \
-    workspace/yugong-mountain --out render-test.epub --diagnostic
+    workspace/being-earnest --out render-test.epub --diagnostic
 ```
 
 ## Behavior

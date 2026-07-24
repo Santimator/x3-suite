@@ -72,7 +72,12 @@ def gloss_worthy(text: str, v: vocab_mod.Vocab) -> List[str]:
             continue
         e = v.get(tok)
         cat = validate_mod.classify(tok, v)
-        worthy = (e is not None and e.source == "personal") or cat == "stretch"
+        # `flagged` belongs here: with an i+1 floor the scribe is *required* to
+        # reach past the list, so genuinely out-of-level words are expected, and
+        # they are exactly the ones a reader cannot decode unaided. Missing them
+        # would put unglossed unknown words in front of the learner.
+        worthy = ((e is not None and e.source == "personal")
+                  or cat in ("stretch", "flagged"))
         if worthy:
             seen.add(tok)
             ordered.append(tok)

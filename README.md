@@ -100,7 +100,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r services/graded-reader/requirements.txt
 S=services/graded-reader/scripts
 
-.venv/bin/python $S/validate.py workspace/twelve-zodiac       # grade a book
+.venv/bin/python $S/validate.py workspace/being-earnest       # grade a book
 .venv/bin/python $S/selftest.py                               # full pipeline check
 # EPUB assembly: the shared epub-builder (see Infrastructure above)
 ```
@@ -150,7 +150,7 @@ workspace/<slug>/       one folder per book/job (source, chapters/, book.json,
 reference/fonts/        SD-ready .cpfont families for the device: WenZilla
                         (recommended Chinese hybrid — WenKai kaiti + Zilla Slab
                         Latin/pinyin), WenKaiFull (pure kaiti, confirmed
-                        working) + EBGaramond (Latin)
+                        working)
 ```
 
 Device facts that shape every tool (details in `reference/readers.md`):
@@ -170,7 +170,7 @@ The code and documentation are **MIT** licensed — see [`LICENSE`](LICENSE).
 Two kinds of bundled third-party content keep their own terms:
 
 - **Fonts** (`reference/fonts/*.cpfont`) are conversions of open-source fonts
-  (LXGW WenKai, Zilla Slab, EB Garamond, Noto CJK) under the **SIL Open Font
+  (LXGW WenKai, Zilla Slab, Noto CJK) under the **SIL Open Font
   License 1.1** — notices, sources, and the license text in
   [`reference/fonts/ATTRIBUTION.md`](reference/fonts/ATTRIBUTION.md) and
   [`reference/fonts/OFL.txt`](reference/fonts/OFL.txt).

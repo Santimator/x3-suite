@@ -15,8 +15,7 @@ fed through a Calibre-Web-Automated ingest folder. Everything below is
    Reader → Font Family. **`WenZilla/`** is the recommended Chinese font — LXGW
    WenKai kaiti for hanzi + NV Zilla Slab for Latin/pinyin, so mixed
    hanzi+pinyin reads nicely. **`WenKaiFull/`** is the pure-kaiti baseline
-   (device-confirmed); `EBGaramond/` is the Latin book face. Glyphs stream from
-   SD. Install details: `reference/fonts/README.md`.
+   (device-confirmed). Glyphs stream from SD. Install details: `reference/fonts/README.md`.
 3. **Books:** build with `pinyin_mode: gloss-pinyin` (or `gloss-underline` /
    `plain`) — see the mode verdicts below.
 
@@ -118,15 +117,8 @@ python3 fontconvert_sdcard.py --intervals latin-ext,cjk \
     --regular NV_Zilla_Slab-Pinyin.ttf --fallback-regular LXGWWenKai-Regular.ttf \
     --name WenZilla --output-dir WenZilla/
 # Regular only: bold/italic would duplicate the 22k CJK bitmaps per style (~4x
-# size) for no CJK gain, since WenKai has no bold/italic. Use EBGaramond for
-# Latin books that need italic/bold.
+# size) for no CJK gain, since WenKai has no bold/italic.
 
-# EBGaramond: Latin only, three real styles (Ubuntu: fonts-ebgaramond).
-python3 fontconvert_sdcard.py --intervals latin-ext \
-    --sizes 12,14,16,18 \
-    --regular EBGaramond12-Regular.otf --bold EBGaramond12-Bold.otf \
-    --italic EBGaramond12-Italic.otf \
-    --name EBGaramond --output-dir EBGaramond/
 ```
 
 ## Font style guide
@@ -138,8 +130,6 @@ python3 fontconvert_sdcard.py --intervals latin-ext \
   nicoverbruggen) used for the Latin/pinyin half of WenZilla: even weight,
   sturdy at small e-ink sizes, and a friendlier companion to kaiti hanzi than
   WenKai's own Latin. SIL OFL.
-- **EB Garamond** — classical book serif for Latin text; warmer and less
-  tiring than the built-in Noto. SIL OFL.
 - Alternatives if taste differs: Noto Sans/Serif SC (print-style, sturdier
   at tiny sizes), TW-Kai (traditional-oriented), Ma Shan Zheng (true brush
   calligraphy — pretty, tiring as body text).

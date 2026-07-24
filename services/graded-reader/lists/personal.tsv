@@ -1,42 +1,9 @@
 word	level	pinyin	gloss
-# Personal known-words overlay. Same columns as hsk.tsv.
-# Words listed here are treated as KNOWN regardless of HSK band, and are
-# added to the jieba custom dictionary so segmentation respects them.
-# Use level "PERS" for your own vocabulary, or any custom band label.
-#
-# This is also where the rework loop's "add-and-gloss" escalation appends
-# words it was forced to introduce (see SKILL.md). Lines starting with # are
-# ignored. Delete these comment lines once you start adding real entries, or
-# leave them — the loader skips them.
-#
-# Example:
-# 孙悟空	PERS	Sūn Wùkōng	Sun Wukong (the Monkey King)
-# 师父	PERS	shī fu	master; teacher (form of address)
-孙悟空	PERS	Sūn Wùkōng	Sun Wukong, the Monkey King
-唐僧	PERS	Táng Sēng	Tang Monk (Xuanzang)
-师父	PERS	shī fu	master; teacher (respectful address)
-徒弟	PERS	tú dì	apprentice; disciple
-妖怪	PERS	yāo guài	monster; demon
-猴子	PERS	hóu zi	monkey
-石头	PERS	shí tou	stone; rock
-王	PERS	wáng	king
-本领	PERS	běn lǐng	skill; ability; capability
-愚公	PERS	Yú gōng	Yugong, "the Foolish Old Man" (name)
-神仙	PERS	shén xiān	immortal; god; celestial being
-生肖	PERS	shēng xiào	Chinese zodiac (the twelve animal signs)
-玉帝	PERS	Yù Dì	the Jade Emperor (ruler of heaven)
-老鼠	PERS	lǎo shǔ	rat; mouse
-老虎	PERS	lǎo hǔ	tiger
-兔子	PERS	tù zi	rabbit
-龙	PERS	lóng	dragon
-蛇	PERS	shé	snake
-追	PERS	zhuī	to chase; to run after
-封	PERS	fēng	(measure word for letters)
-魔术	PERS	mó shù	magic; a magic trick
-小丽	PERS	Xiǎo Lì	Xiao Li (a young woman's name)
-小明	PERS	Xiǎo Míng	Xiao Ming (a young man's name)
-表带	PERS	biǎo dài	watch strap; watchband
-# --- being-earnest (Importance of Being Earnest, HSK3) ---
+# Personal known-words overlay + the add-and-gloss escalation sink (see SKILL.md).
+# Words here are KNOWN regardless of band, and join jieba's dictionary so
+# segmentation respects them. Story names live here while their book does;
+# when a book is retired its names go with it, so briefs stay free of noise.
+# --- being-earnest (The Importance of Being Earnest, HSK3) ---
 杰克	PERS	Jiékè	Jack (name)
 阿龙	PERS	Ā Lóng	Along — Algernon (name)
 高文	PERS	Gāo Wén	Gao Wen — Gwendolen (name)
@@ -49,3 +16,4 @@ word	level	pinyin	gloss
 太太	PERS	tàitai	Mrs.; wife; married lady
 乡下	PERS	xiāngxia	the countryside; rural home (introduced ch1)
 日记	PERS	rìjì	a diary (introduced ch7)
+班先生	PERS	Bān xiānsheng	Mr. Ban — Algernon's imaginary sick friend

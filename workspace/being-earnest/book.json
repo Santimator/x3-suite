@@ -44,6 +44,14 @@
     {
       "source": "chapters/ch10.md",
       "glossary": "build/ch10-glossary.tsv"
+    },
+    {
+      "source": "chapters/ch11.md",
+      "glossary": "build/ch11-glossary.tsv"
+    },
+    {
+      "source": "chapters/ch12.md",
+      "glossary": "build/ch12-glossary.tsv"
     }
   ]
 }

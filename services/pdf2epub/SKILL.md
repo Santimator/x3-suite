@@ -483,7 +483,7 @@ result on-device or in a reader. Structural soundness alone is one command:
 
 Changes under `epub-builder/` are shared infrastructure, so also re-run the
 graded-reader check (`services/graded-reader/scripts/selftest.py`) and keep the
-annotated path's output byte-identical — `workspace/yugong-mountain` is the
+annotated path's output byte-identical — `workspace/being-earnest` is the
 canary.
 
 ## Worked fixture — the vision route end to end
