@@ -15,7 +15,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 # the EPUB builder is suite-shared infrastructure, not a graded-reader script
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "epub-builder" / "scripts"))
 import build_epub  # noqa: E402

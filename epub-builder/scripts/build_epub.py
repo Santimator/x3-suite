@@ -51,7 +51,7 @@ from typing import Dict, List, Optional, Tuple
 # Pinyin annotation lives in the graded-reader task; the builder only pulls it
 # in (jieba + pypinyin) when a book actually asks for a pinyin mode. Generic
 # books (e.g. pdf2epub output) build with no CJK dependencies at all.
-_GRADED_READER_SCRIPTS = Path(__file__).resolve().parents[2] / "graded-reader" / "scripts"
+_GRADED_READER_SCRIPTS = Path(__file__).resolve().parents[2] / "services" / "graded-reader" / "scripts"
 _vocab_mod = None
 
 
