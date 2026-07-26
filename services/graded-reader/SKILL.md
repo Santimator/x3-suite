@@ -46,7 +46,10 @@ Python that has `jieba` and `pypinyin` installed (see Setup).
   (`epub-builder/`): hand-built EPUB with selectable pinyin
   display (five modes; `gloss-pinyin` is the X3 default — see the builder's
   FORMAT.md) and per-chapter glossary;
-  glossed words in the text link to their glossary entry (and back).
+  glossed words in the text link to their glossary entry (and back). The
+  glossary renders *before* the chapter body by default (student previews
+  the new words, then reads) — set a chapter entry's `glossary_position` to
+  `"after"` in `book.json` to opt that chapter back into the old order.
   Annotation engages when `book.json` has `pinyin_mode`; the input contract
   is the builder's `FORMAT.md`.
 - **`headless/`** — *optional* alternative driver, kept out of the core so the
@@ -223,7 +226,7 @@ substantial".
 
 ```
 BOOK/
-  book.json            {title, author, language, pinyin_mode, chapters:[{source, glossary}]}
+  book.json            {title, author, language, pinyin_mode, chapters:[{source, glossary, glossary_position}]}
   plan.json            outline + introduced set + validation params
   chapters/chNN.md     chapter source (# title, ## section, paragraphs)
   build/               harvest TSVs, glossaries, .epub output

@@ -79,6 +79,21 @@ class BuildError(Exception):
     prepare.py, but the builder is the last line of defense."""
 
 
+# Where the per-chapter glossary sits relative to the chapter body. "before"
+# is the pedagogical default (words previewed ahead of the story); a book or
+# a single chapter entry can opt into "after" via book.json's
+# glossary_position (see FORMAT.md).
+GLOSSARY_POSITIONS = ("before", "after")
+
+
+def chapter_glossary_position(ch: Dict, prefix: str) -> str:
+    pos = ch.get("glossary_position", "before")
+    if pos not in GLOSSARY_POSITIONS:
+        raise BuildError(
+            f"{prefix}: glossary_position must be 'before' or 'after', got {pos!r}")
+    return pos
+
+
 # --------------------------------------------------------------------------- #
 # Annotation
 # --------------------------------------------------------------------------- #
@@ -391,7 +406,10 @@ ruby rt { font-size: 0.5em; }
 .c { display: inline-block; text-align: center; vertical-align: bottom; }
 .c .py { display: block; font-size: 0.55em; line-height: 1.1; color: #444; }
 .c .hz { display: block; }
-.glossary { margin-top: 2em; border-top: 1px solid #999; padding-top: 0.5em; }
+/* border/margin on both sides: the glossary can sit before or after the
+   chapter body (book.json glossary_position), so it needs a divider on
+   whichever edge touches the story text. */
+.glossary { margin: 2em 0; border-top: 1px solid #999; border-bottom: 1px solid #999; padding: 0.5em 0; }
 .glossary ul { list-style: none; padding-left: 0; }
 .glossary li { margin: 0.2em 0; }
 .gw { font-weight: bold; }
@@ -574,7 +592,11 @@ def assemble(book_dir: Path, mode: str) -> Tuple[List[Dict], Dict]:
         chapter_images: List[Tuple[str, str]] = []
         title, body = chapter_body(md, mode, link_ctx=(prefix, link_map, linked),
                                     prefix=prefix, images_out=chapter_images)
-        body += glossary_section(gloss_rows, mode, prefix=prefix, linked=linked)
+        glossary_html = glossary_section(gloss_rows, mode, prefix=prefix, linked=linked)
+        if chapter_glossary_position(ch, ch["source"]) == "before":
+            body = glossary_html + body
+        else:
+            body = body + glossary_html
         resolved_images = []
         for rel_path, epub_src in chapter_images:
             src_path = ((book_dir / ch["source"]).parent / rel_path).resolve()
@@ -609,8 +631,10 @@ def assemble_diagnostic(book_dir: Path) -> Tuple[List[Dict], Dict]:
             link_ctx = (f"diag{idx}", link_map, linked)
         title, body = chapter_body(md, mode, link_ctx=link_ctx)
         banner = f'<h1>{labels[mode]}</h1><p style="text-indent:0;color:#777">If this page looks wrong, this mode is unsupported on your device.</p>'
-        body = banner + body + glossary_section(gloss_rows, mode, prefix=f"diag{idx}",
-                                                 linked=linked if mode in GLOSS_MODES else None)
+        glossary_html = glossary_section(gloss_rows, mode, prefix=f"diag{idx}",
+                                          linked=linked if mode in GLOSS_MODES else None)
+        core = glossary_html + body if chapter_glossary_position(ch, ch["source"]) == "before" else body + glossary_html
+        body = banner + core
         chapters.append({"id": f"diag{idx}", "file": f"diag{idx}.xhtml", "title": labels[mode].split("—")[0].strip(), "body": body})
     return chapters, meta
 

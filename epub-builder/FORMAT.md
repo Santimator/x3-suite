@@ -25,7 +25,8 @@ workspace/<slug>/
   "author":   "分级读物 (HSK 1-3)",
   "language": "zh",
   "chapters": [
-    { "source": "chapters/ch01.md", "glossary": "build/ch01-glossary.tsv" }
+    { "source": "chapters/ch01.md", "glossary": "build/ch01-glossary.tsv",
+      "glossary_position": "before" }
   ]
 }
 ```
@@ -34,6 +35,12 @@ workspace/<slug>/
   becomes a TOC entry titled by the chapter's `#` heading.
 - `glossary` is optional and graded-reader-specific (TSV: word, pinyin,
   gloss; glossed words in the text link to their entry and back).
+- `glossary_position` is optional, per-chapter-entry, graded-reader-specific:
+  `"before"` (default) or `"after"`. Controls whether the glossary section
+  renders ahead of the chapter body (student previews new words before
+  reading — the pedagogical default) or after it (the original layout).
+  Omitting the field is the same as `"before"`; set it to `"after"` on a
+  chapter-by-chapter basis to opt back into the old order.
 - `pinyin_mode` is graded-reader-specific. Five values:
   `ruby` / `interlinear` (device-confirmed broken on the X3: rt leaks
   inline / stacking collapses — kept for capable readers like Apple Books),
