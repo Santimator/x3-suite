@@ -169,12 +169,14 @@ The code and documentation are **MIT** licensed — see [`LICENSE`](LICENSE).
 
 Two kinds of bundled third-party content keep their own terms:
 
-- **Fonts** (`reference/fonts/*.cpfont`) are conversions of open-source fonts
-  (LXGW WenKai, Zilla Slab, Noto CJK) under the **SIL Open Font
-  License 1.1** — notices, sources, and the license text in
-  [`reference/fonts/ATTRIBUTION.md`](reference/fonts/ATTRIBUTION.md) and
-  [`reference/fonts/OFL.txt`](reference/fonts/OFL.txt).
+- **Fonts** are under the **SIL Open Font License 1.1**: the `.cpfont`
+  families in `reference/fonts/` (conversions of LXGW WenKai, Zilla Slab, Noto
+  CJK), and `reference/covers/IMFellEnglish-Regular.ttf`, which sets Latin
+  cover titles. Notices, sources, and the license texts in
+  [`reference/fonts/ATTRIBUTION.md`](reference/fonts/ATTRIBUTION.md),
+  [`reference/fonts/OFL.txt`](reference/fonts/OFL.txt) and
+  [`reference/covers/IMFellEnglish-OFL.txt`](reference/covers/IMFellEnglish-OFL.txt).
 - **Sample book texts** under `workspace/` are either original to this project
-  or public-domain source material (e.g. 西游记, 愚公移山, O. Henry's *The Gift
-  of the Magi*, the 1793 entremés *Los alcaldes encontrados*), retold or
-  converted as pipeline demonstrations.
+  or public-domain source material — Oscar Wilde's *The Importance of Being
+  Earnest*, retold in Chinese as a graded reader, and the 1793 entremés
+  *Los alcaldes encontrados* — retold or converted as pipeline demonstrations.
