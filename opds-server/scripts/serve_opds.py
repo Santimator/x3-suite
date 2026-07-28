@@ -3,7 +3,7 @@
 
 The delivery half of the suite: `epub-builder` produces EPUBs into
 `workspace/<slug>/build/`, and this serves that folder as an OPDS 1.2 catalog
-the reader can browse and download from directly, with no Calibre in the path.
+the reader browses and downloads from directly, with nothing in between.
 
     python3 opds-server/scripts/serve_opds.py       # stdlib only — no venv needed
 

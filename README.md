@@ -1,8 +1,7 @@
 # X3 suite
 
 Tools that produce EPUBs for an e-ink reader — concretely an **Xteink X3**
-running CrossPoint firmware, fed over WiFi by the suite's own OPDS server (or
-through a Calibre-Web-Automated ingest folder, if you already have one). One
+running CrossPoint firmware, fed over WiFi by the suite's own OPDS server. One
 mindset across all of them:
 
 > **LLM roles for judgment, deterministic scripts for mechanics, and a
@@ -93,8 +92,9 @@ so "is this a sound EPUB?" has a single implementation.
 ### opds-server — the built books, over WiFi *(contract-verified against the firmware source; not yet device-confirmed)*
 
 Serves `workspace/*/build/*.epub` as an **OPDS 1.2** catalog the X3 browses and
-downloads from directly — no Calibre, no SD card shuffling. Build a book and it
-is on the reader by the next page turn. Stdlib only, no dependencies.
+downloads from directly — no SD card shuffling, and no library manager in
+between. Build a book and it is on the reader by the next page turn. Stdlib
+only, no dependencies.
 
 Docs: [`opds-server/SKILL.md`](opds-server/SKILL.md)
 

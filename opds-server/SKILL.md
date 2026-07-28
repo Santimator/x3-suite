@@ -3,18 +3,19 @@ name: opds-server
 description: >-
   Serve the suite's built EPUBs to the Xteink X3 over WiFi as an OPDS catalog,
   straight from the builder's output folder. Use when the reader should fetch
-  books over the network instead of an SD card or a Calibre ingest folder, when
-  changing what the catalog exposes (sections, metadata, search, auth), or when
-  a book is missing or unreadable on the device. Triggers include "serve the
-  books", "opds", "put the library on the network", "the X3 can't see my book".
+  books over the network instead of an SD card, when changing what the catalog
+  exposes (sections, metadata, search, auth), or when a book is missing or
+  unreadable on the device. Triggers include "serve the books", "opds", "put
+  the library on the network", "the X3 can't see my book".
 ---
 
 # opds-server — the suite's EPUB delivery
 
 Suite infrastructure, not a task. `epub-builder` produces EPUBs into
 `workspace/<slug>/build/`; this serves that folder as an **OPDS 1.2** catalog
-the X3 browses and downloads from directly. No Calibre, no Calibre-Web, no SD
-card shuffling — build a book, and it is on the reader by the next page turn.
+the X3 browses and downloads from directly. No SD card shuffling, and no
+library manager in between — build a book, and it is on the reader by the next
+page turn.
 
 Deterministic like the builder: stdlib only, no dependencies, no model in the
 loop. What stands in for this suite's "gate after every model step" is

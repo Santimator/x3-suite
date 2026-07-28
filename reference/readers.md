@@ -2,9 +2,9 @@
 
 The suite's EPUBs target an **Xteink X3** (ESP32-C3, ~400 KB RAM, 528×792
 e-ink) running **CrossPoint** (open-source firmware; 1.4.1 as of mid-2026),
-fed either through a Calibre-Web-Automated ingest folder or straight from the
-suite's own OPDS server (`opds-server/`). Everything below is
-**device-confirmed** (photos, 2026-07) unless marked otherwise.
+fed over WiFi from the suite's own OPDS server (`opds-server/`) or by SD card.
+Everything below is **device-confirmed** (photos, 2026-07) unless marked
+otherwise.
 
 ## The working recipe (confirmed end-to-end)
 
