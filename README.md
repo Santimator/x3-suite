@@ -187,7 +187,8 @@ reference/readers.md    Xteink X3 / CrossPoint device notes: confirmed
                         rendering verdicts, font build rules, SD layout —
                         read before touching anything device-facing
 workspace/<slug>/       one folder per book/job (source, chapters/, book.json,
-                        build/ outputs)
+                        build/ outputs). Gitignored apart from the committed
+                        samples below — your books are yours, not the repo's
 reference/fonts/        SD-ready .cpfont families for the device: WenZilla
                         (recommended Chinese hybrid — WenKai kaiti + Zilla Slab
                         Latin/pinyin), WenKaiFull (pure kaiti, confirmed

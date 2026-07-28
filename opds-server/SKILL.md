@@ -53,6 +53,11 @@ Auth is **off by default**: the server runs open on your LAN and says so at
 startup. Set `auth.username` plus a password file to turn on HTTP Basic, and
 `require_auth: true` to refuse to start without them.
 
+The default root, `workspace/`, is gitignored apart from the repo's samples, so
+what this serves is your own library — which is the point, but worth knowing
+before you open a port on it. Add absolute paths to `library_roots` to serve
+books kept elsewhere.
+
 ## The catalog
 
 ```

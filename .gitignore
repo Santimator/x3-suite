@@ -11,3 +11,18 @@ services/graded-reader/headless/secrets/*
 opds-server/config.json
 opds-server/secrets/*
 !opds-server/secrets/README.md
+
+# workspace/ is yours, not the repo's: whatever you write, convert, or drop in
+# here stays local. The exceptions below are the committed samples — pdf2epub's
+# worked conversions and graded-reader's books — which are the proof those tools
+# work and the fixtures their self-tests read. Adding a sample to the repo means
+# adding a line here, deliberately.
+workspace/*
+!workspace/alcaldes-encontrados/
+!workspace/el-espanol-de-oran/
+!workspace/gurruminos/
+!workspace/journey-west/
+!workspace/letter-writer/
+!workspace/newyear-gift/
+!workspace/twelve-zodiac/
+!workspace/yugong-mountain/

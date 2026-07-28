@@ -27,6 +27,13 @@ workspace/<slug>/        one folder per book/job (source, chapters/, book.json,
 reference/               device notes (readers.md) + SD-ready .cpfont fonts
 ```
 
+`workspace/` is **gitignored except for the committed samples** — books belong
+to whoever made them, not to the repo. The samples that *are* committed are
+there as proof and as self-test fixtures (pdf2epub's worked conversions,
+graded-reader's readers), so committing a new one means adding it to the
+allowlist in `.gitignore` on purpose. Never assume a book you find in
+`workspace/` is in version control.
+
 The split is by what's in the loop: a **service** carries a model and gates it;
 **infrastructure** is pure mechanics, no model anywhere. Each of the four
 top-level units has a **`SKILL.md`** that is its canonical, self-contained
