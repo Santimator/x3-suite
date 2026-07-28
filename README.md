@@ -17,6 +17,27 @@ Every service converges on the **common book format** —
 consumes and the server delivers. Each directory's `SKILL.md` is its canonical
 documentation.
 
+## Before you trust any of this
+
+This is vibe-coded software. Every line was written by an LLM at my direction,
+and the "testing" is my own sparse use — one person, one device, the handful of
+books I actually wanted to read. No CI, no test matrix, no second pair of eyes.
+
+That isn't quite the same as untested, and the difference is the useful part:
+
+- The **self-tests are real, and they gate real things** — vocabulary level,
+  EPUB structural integrity, whether the reader's own OPDS client can see every
+  book. Where something is machine-checked, it stays checked.
+- They cover **mechanics, not taste**. Nothing verifies that a book is pleasant
+  to read on the device. That part is me, squinting at an e-ink screen.
+- Each tool carries its **own status marker** below — *working*,
+  *contract-verified but not device-confirmed*. Those are meant literally, and
+  they are the honest ones.
+
+So: expect edges, and read any claim here as "worked for me on an X3" rather
+than "verified". Issues and pull requests are welcome — very much including the
+ones that just say this is wrong.
+
 ## Architecture
 
 Two pieces of infrastructure, two services emitting the builder's format:
