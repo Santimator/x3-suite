@@ -2,7 +2,8 @@
 
 The suite's EPUBs target an **Xteink X3** (ESP32-C3, ~400 KB RAM, 528×792
 e-ink) running **CrossPoint** (open-source firmware; 1.4.1 as of mid-2026),
-fed through a Calibre-Web-Automated ingest folder. Everything below is
+fed either through a Calibre-Web-Automated ingest folder or straight from the
+suite's own OPDS server (`opds-server/`). Everything below is
 **device-confirmed** (photos, 2026-07) unless marked otherwise.
 
 ## The working recipe (confirmed end-to-end)
@@ -34,6 +35,33 @@ fed through a Calibre-Web-Automated ingest folder. Everything below is
 Keep chapter CSS trivial: the engine honors basic text properties only.
 `ruby`/`interlinear` modes remain in the builder for capable readers
 (Apple Books renders ruby beautifully) — never for the X3.
+
+## OPDS client — what the firmware actually requires
+
+*Read from the firmware source (`lib/OpdsParser/`,
+`src/network/HttpDownloader.cpp`, `src/util/UrlUtils.cpp`,
+`src/activities/browser/OpdsBookBrowserActivity.cpp`, master @ 2026-07), not from
+the user guide. **Source-confirmed, not yet device-confirmed** — no photo of an
+X3 browsing a catalog served this way. `opds-server/` implements all of it, and
+its self-test grades against a port of this client.*
+
+| What | Requirement |
+|---|---|
+| Feed format | **Atom XML only** (expat) — no OPDS 2.0 / JSON path |
+| Entry survival | Needs a non-empty `<title>` **and** a resolved href, or it is **dropped silently** — no error anywhere |
+| Book link | `rel` *containing* `opds-spec.org/acquisition` **and** `type` **exactly** `application/epub+zip`; a `;profile=` suffix breaks it |
+| Preferred href | Contains `.epub` or `/epub/` when an entry offers several acquisition links |
+| Navigation link | `type` containing `application/atom+xml` |
+| Search | Feed-level `rel="search"` whose href **literally contains `{searchTerms}`**. An OpenSearch *descriptor* link is never fetched — the conventional setup silently yields no search |
+| Pagination | Feed-level `rel="next"` / `rel="previous"` — spelled `previous`, not `prev`; ignored inside an entry |
+| URL joining | **Not RFC 3986.** A relative href is *appended* to the current feed URL, so serve absolute URLs |
+| Element matching | Substring on the qualified name, so `dc:identifier` registers as `:id` and overwrites the entry id |
+| Covers | Not parsed at all — a cover link is bytes read and discarded |
+| Transport | **Plain HTTP.** esp-tls is built with insecure mode off against a bundled CA store: a self-signed certificate cannot handshake |
+| Auth | HTTP Basic, sent preemptively, and **only when username and password are both non-empty** |
+| Redirects | Followed by hand, max 5 hops; any final status but 200 is a failure |
+| Downloads | Saved to the SD root as `<author> - <title>.epub`, sanitized to 100 bytes — so two books with the same author and title overwrite each other |
+| Servers stored | Up to 8 (Settings → System → OPDS Servers) |
 
 ## Building `.cpfont` fonts — the rules that matter
 

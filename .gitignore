@@ -6,3 +6,8 @@ __pycache__/
 services/graded-reader/headless/config.json
 services/graded-reader/headless/secrets/*
 !services/graded-reader/headless/secrets/README.md
+
+# opds-server: local library paths + Basic-auth password (never commit)
+opds-server/config.json
+opds-server/secrets/*
+!opds-server/secrets/README.md

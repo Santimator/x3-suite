@@ -1,8 +1,9 @@
 # X3 suite
 
 Tools that produce EPUBs for an e-ink reader — concretely an **Xteink X3**
-running CrossPoint firmware, fed through a Calibre-Web-Automated ingest
-folder. One mindset across all of them:
+running CrossPoint firmware, fed over WiFi by the suite's own OPDS server (or
+through a Calibre-Web-Automated ingest folder, if you already have one). One
+mindset across all of them:
 
 > **LLM roles for judgment, deterministic scripts for mechanics, and a
 > deterministic gate after every LLM step.** Models handle what varies
@@ -10,19 +11,22 @@ folder. One mindset across all of them:
 > measure, validate, track state, and assemble — they never invent. Trust
 > comes from the gates, not the model.
 
-The suite is one **builder** plus two **services** (the AI tools), each a
-self-contained directory at the repo root. Every service converges on the
-**common book format** — `chapters/*.md + book.json` in a `workspace/<slug>/`
-folder — which the builder consumes. Each directory's `SKILL.md` is its
-canonical documentation.
+The suite is **infrastructure** — a builder and a server — plus two
+**services** (the AI tools), each a self-contained directory at the repo root.
+Every service converges on the **common book format** —
+`chapters/*.md + book.json` in a `workspace/<slug>/` folder — which the builder
+consumes and the server delivers. Each directory's `SKILL.md` is its canonical
+documentation.
 
 ## Architecture
 
-One builder, two services, both emitting the builder's format:
+Two pieces of infrastructure, two services emitting the builder's format:
 
 ```
 epub-builder/               infrastructure — the book format's contract
                             (FORMAT.md), build_epub.py, shared verify_epub.py
+opds-server/                infrastructure — serves build/ output to the X3
+                            over WiFi as an OPDS catalog
 services/
   ├─ graded-reader/         service — writes leveled Chinese books
   └─ pdf2epub/              service — converts PDFs into clean EPUBs
@@ -30,8 +34,12 @@ workspace/<slug>/           one folder per book/job (inputs → build/ outputs)
 reference/                  device notes + SD-ready fonts for the X3
 ```
 
+The split is by what's in the loop, not by what the thing does: services carry
+a model and gate it; infrastructure is pure mechanics — the builder produces,
+the server delivers, both deterministic.
+
 The layout is agent-agnostic: `AGENTS.md` at the root is the entry point for
-any coding agent, and `.claude/skills/` symlinks the three directories so
+any coding agent, and `.claude/skills/` symlinks the four directories so
 Claude Code still auto-loads them as skills.
 
 Each AI tool has the **same shape**, and it's the shape worth copying for a
@@ -81,6 +89,39 @@ so "is this a sound EPUB?" has a single implementation.
 .venv/bin/python epub-builder/scripts/verify_epub.py \
     workspace/<slug>/build/<slug>.epub
 ```
+
+### opds-server — the built books, over WiFi *(contract-verified against the firmware source; not yet device-confirmed)*
+
+Serves `workspace/*/build/*.epub` as an **OPDS 1.2** catalog the X3 browses and
+downloads from directly — no Calibre, no SD card shuffling. Build a book and it
+is on the reader by the next page turn. Stdlib only, no dependencies.
+
+Docs: [`opds-server/SKILL.md`](opds-server/SKILL.md)
+
+```bash
+python3 opds-server/scripts/serve_opds.py     # serve workspace/ on :8080
+python3 opds-server/scripts/library.py        # what would be served
+python3 opds-server/scripts/selftest.py       # the gate
+```
+
+Then on the device: Settings → System → OPDS Servers → Add Server, and enter the
+URL the server prints. Local config and the optional Basic-auth password live in
+gitignored `config.json` / `secrets/` (copy `config.example.json`); with no
+config at all it serves the builder's output folder, open on the LAN.
+
+Its design is dictated by what the firmware's client *actually* parses, read
+from source rather than docs: an entry with no title or unresolvable href is
+dropped **silently**, an acquisition link needs `type` exactly
+`application/epub+zip`, `rel="search"` must carry the `{searchTerms}` template
+inline (the conventional OpenSearch descriptor is never fetched), relative hrefs
+are appended rather than resolved, and self-signed HTTPS cannot connect at all.
+The table lives in [`reference/readers.md`](reference/readers.md).
+
+So the gate here isn't "is this valid OPDS?" — a valid feed can lose books on
+this device. `selftest.py` serves a real library and walks it through a port of
+**the firmware's own client**, checking that every book is reachable, that
+pagination loses nothing, and that a download arrives byte-identical and still
+passes the shared `verify_epub.py`.
 
 ## Tasks
 

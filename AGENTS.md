@@ -5,9 +5,10 @@ it's just how the repo is laid out and how to work in it.)
 
 ## What this is
 
-A suite that produces EPUBs for an **Xteink X3** e-ink reader: one shared
-**builder** and two **services** (AI-assisted tools) that target its format.
-Read [`README.md`](README.md) for the full picture; the guiding idea is *LLM
+A suite that produces EPUBs for an **Xteink X3** e-ink reader and delivers them
+to it: shared **infrastructure** (a builder and an OPDS server) plus two
+**services** (AI-assisted tools) that target the builder's format. Read
+[`README.md`](README.md) for the full picture; the guiding idea is *LLM
 judgement, deterministic scripts for mechanics, and a deterministic gate after
 every LLM step*.
 
@@ -16,6 +17,8 @@ every LLM step*.
 ```
 epub-builder/            shared infrastructure: the book-format contract
                          (FORMAT.md) + build_epub.py + verify_epub.py
+opds-server/             shared infrastructure: serves build/ output to the
+                         device over WiFi as an OPDS catalog
 services/
   graded-reader/         service: writes leveled Chinese readers
   pdf2epub/              service: converts PDFs into clean EPUBs
@@ -24,10 +27,12 @@ workspace/<slug>/        one folder per book/job (source, chapters/, book.json,
 reference/               device notes (readers.md) + SD-ready .cpfont fonts
 ```
 
-Each of the three top-level units has a **`SKILL.md`** that is its canonical,
-self-contained documentation — read it before changing that unit.
-`.claude/skills/` contains symlinks to these three so Claude Code auto-loads
-them; the real content lives in the directories above.
+The split is by what's in the loop: a **service** carries a model and gates it;
+**infrastructure** is pure mechanics, no model anywhere. Each of the four
+top-level units has a **`SKILL.md`** that is its canonical, self-contained
+documentation — read it before changing that unit. `.claude/skills/` contains
+symlinks to these four so Claude Code auto-loads them; the real content lives in
+the directories above.
 
 ## How a service is built (the pattern to follow)
 
@@ -61,10 +66,16 @@ How each service is verified differs, by design:
   a real PDF to a faithful EPUB a human finds sound. Its proof is the worked
   conversions under `workspace/` + [`services/pdf2epub/CONVERSIONS.md`](services/pdf2epub/CONVERSIONS.md);
   to sanity-check the scripts, re-run a sample by hand and read the EPUB.
+- **opds-server** has one too, and its oracle is unusual on purpose: a port of
+  the *device's own* OPDS client, because a standards-valid feed can still lose
+  books on this reader. `python3 opds-server/scripts/selftest.py` — no venv
+  needed, it is stdlib only. Anything touching feed markup must keep it green,
+  and the client contract it encodes is tabulated in `reference/readers.md`.
 
 Changes under `epub-builder/` are shared infrastructure: run the graded-reader
 self-test **and** keep its annotated EPUB output byte-identical
-(`workspace/yugong-mountain` is the canary).
+(`workspace/yugong-mountain` is the canary). They also change what the server
+hands the device, so run the opds-server self-test too.
 
 ## Conventions
 

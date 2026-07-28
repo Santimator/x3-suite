@@ -1,0 +1,33 @@
+{
+  "_comment": "Copy this file to config.json (gitignored) and adjust. Every key has a working default, so the server runs with no config at all: it serves the builder's output folder on port 8080, open on the LAN.",
+
+  "library_roots": ["workspace"],
+  "_library_roots_note": "Directories scanned recursively for .epub files. A relative path resolves against the repo root, so 'workspace' means the builder's output wherever you start the server from. Add absolute paths to serve other folders too, e.g. '/home/you/Books'.",
+
+  "exclude": ["*-DIAGNOSTIC.epub"],
+  "_exclude_note": "Filename or relative-path globs to skip. The default hides the builder's render-test EPUBs. Also the place to hide one of two variant builds of the same book — the device saves downloads as '<author> - <title>.epub', so same-titled variants overwrite each other on the SD card (the server names them at startup).",
+
+  "host": "0.0.0.0",
+  "port": 8080,
+  "_host_note": "0.0.0.0 listens on every interface, which is what the reader needs. Set 127.0.0.1 to keep it to this machine while testing.",
+
+  "page_size": 25,
+  "_page_size_note": "Entries per feed page. The device holds a whole page in ~400 KB of RAM and shows a handful of lines at a time, so a small number pages faster and costs nothing — the 'next page' link is one click.",
+
+  "catalog_title": "X3 suite library",
+  "_catalog_title_note": "Shown as the catalog's name, and as the Basic-auth realm.",
+
+  "public_url": "",
+  "_public_url_note": "Normally empty: feed URLs are built from the request's Host header, which is correct whatever address you reach the server on. Set it (e.g. 'http://books.lan:8080') only when a reverse proxy makes the Host header wrong.",
+
+  "require_auth": false,
+  "_require_auth_note": "Default false: the server starts open on your LAN. Set true to refuse to start unless a username and password both resolve, so a mistyped path can't silently leave the library open.",
+
+  "auth": {
+    "username": "",
+    "password_file": "secrets/opds.password",
+    "password_env": "X3_OPDS_PASSWORD"
+  },
+  "_auth_note": "HTTP Basic — the only scheme the reader speaks. Off unless a username AND a password both resolve; that is the device's rule, not ours (it sends credentials only when both are non-empty). The password is never in this file: put it in the gitignored secrets/ file the path points at, or export the environment variable instead.",
+  "_auth_transport_note": "Basic over plain HTTP is cleartext on your network, and there is no way around it: CrossPoint verifies TLS against a bundled CA store with insecure mode compiled out, so a self-signed certificate cannot connect at all. Treat this as a home-network tool — the credentials keep a housemate out, not an adversary."
+}
