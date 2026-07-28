@@ -8,7 +8,7 @@ the reader browses and downloads from directly, with nothing in between.
     python3 opds-server/scripts/serve_opds.py       # stdlib only — no venv needed
 
 Then on the device: Settings → System → OPDS Servers → Add Server, and enter the
-URL the server prints at startup (`http://<lan-ip>:8080/opds`).
+URL the server prints at startup (`http://<lan-ip>:6737/opds`).
 
 Design notes:
 
@@ -424,7 +424,8 @@ def main(argv=None) -> int:
     ap.add_argument("--root", action="append", default=[], metavar="DIR",
                     help="library root (repeatable); overrides the config")
     ap.add_argument("--host", default=None, help="bind address (default 0.0.0.0)")
-    ap.add_argument("--port", type=int, default=None, help="bind port (default 8080)")
+    ap.add_argument("--port", type=int, default=None,
+                    help="bind port (default 6737; 0 lets the OS pick a free one)")
     ap.add_argument("--page-size", type=int, default=None, help="entries per feed page")
     args = ap.parse_args(argv)
 
@@ -449,6 +450,11 @@ def main(argv=None) -> int:
         print(f"opds-server: cannot bind {cfg['host']}:{cfg['port']}: {e}", file=sys.stderr)
         return 1
 
+    # Ask the socket, don't echo the config: with `--port 0` the kernel picks
+    # the port, and the number you need to type into the device is only knowable
+    # after the bind.
+    bound_port = httpd.server_address[1]
+
     books = library.scan(cfg["library_roots"], cfg["exclude"])
     print(f"opds-server: {len(books)} book(s) from "
           f"{', '.join(str(r) for r in cfg['library_roots'])}")
@@ -462,7 +468,7 @@ def main(argv=None) -> int:
               f"(cleartext on the wire — plain HTTP is the only transport the X3 accepts)")
     else:
         print("opds-server: open — anyone on this network can read and download the library")
-    for url in lan_addresses(cfg["port"]):
+    for url in lan_addresses(bound_port):
         print(f"opds-server: add this on the device → {url}")
 
     try:

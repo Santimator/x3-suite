@@ -4,7 +4,7 @@
 `config.json` sits next to this script's parent directory (`opds-server/`) and
 is gitignored, as is `secrets/`; `config.example.json` is the committed copy to
 crib from. Everything has a working default, so the server runs with no config
-at all: it serves the builder's output folder on port 8080, open on the LAN.
+at all: it serves the builder's output folder on port 6737, open on the LAN.
 
 The credential seam mirrors `services/graded-reader/headless/` so there is one
 habit in this repo, not two: the secret is never in the config file, only a
@@ -31,7 +31,11 @@ DEFAULTS: Dict = {
     "library_roots": ["workspace"],
     "exclude": ["*-DIAGNOSTIC.epub"],
     "host": "0.0.0.0",
-    "port": 8080,
+    # 6737 is "OPDS" on a phone keypad. Chosen mostly for what it is *not*:
+    # 8080 is the most contested port on any machine — dev servers, proxies and
+    # other ebook servers all reach for it first. Above 1024 so no root, below
+    # 32768 so the kernel's ephemeral range never steals it.
+    "port": 6737,
     "page_size": 25,
     "catalog_title": "X3 suite library",
     "public_url": "",

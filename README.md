@@ -99,7 +99,7 @@ only, no dependencies.
 Docs: [`opds-server/SKILL.md`](opds-server/SKILL.md)
 
 ```bash
-python3 opds-server/scripts/serve_opds.py     # serve workspace/ on :8080
+python3 opds-server/scripts/serve_opds.py     # serve workspace/ on :6737
 python3 opds-server/scripts/library.py        # what would be served
 python3 opds-server/scripts/selftest.py       # the gate
 ```

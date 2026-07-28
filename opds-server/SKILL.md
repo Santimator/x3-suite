@@ -26,19 +26,24 @@ standard — see *The gate* below for why those are not the same test.
 ## Usage
 
 ```bash
-python3 opds-server/scripts/serve_opds.py          # serve workspace/ on :8080
+python3 opds-server/scripts/serve_opds.py          # serve workspace/ on :6737
 python3 opds-server/scripts/library.py             # what would be served
 python3 opds-server/scripts/library.py --json      # ... as typed JSON
 python3 opds-server/scripts/selftest.py            # the gate; exit 0 = sound
 ```
 
 Then on the device: **Settings → System → OPDS Servers → Add Server**, and
-enter the URL the server prints at startup (`http://<lan-ip>:8080/opds`). The
+enter the URL the server prints at startup (`http://<lan-ip>:6737/opds`). The
 reader stores up to 8 servers. Books land on the SD card as
 `<author> - <title>.epub`.
 
 Useful flags: `--root DIR` (repeatable) to serve somewhere else, `--port`,
 `--host`, `--page-size`.
+
+The default port is **6737** ("OPDS" on a phone keypad) rather than 8080 — the
+most contested port on any machine, and one other ebook servers reach for
+first. `--port 0` binds a free one and prints what it got, handy when you just
+want it up for a minute.
 
 ## Configuration
 

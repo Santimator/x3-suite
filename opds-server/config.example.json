@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy this file to config.json (gitignored) and adjust. Every key has a working default, so the server runs with no config at all: it serves the builder's output folder on port 8080, open on the LAN.",
+  "_comment": "Copy this file to config.json (gitignored) and adjust. Every key has a working default, so the server runs with no config at all: it serves the builder's output folder on port 6737, open on the LAN.",
 
   "library_roots": ["workspace"],
   "_library_roots_note": "Directories scanned recursively for .epub files. A relative path resolves against the repo root, so 'workspace' means the builder's output wherever you start the server from. Add absolute paths to serve other folders too, e.g. '/home/you/Books'.",
@@ -8,8 +8,9 @@
   "_exclude_note": "Filename or relative-path globs to skip. The default hides the builder's render-test EPUBs. Also the place to hide one of two variant builds of the same book — the device saves downloads as '<author> - <title>.epub', so same-titled variants overwrite each other on the SD card (the server names them at startup).",
 
   "host": "0.0.0.0",
-  "port": 8080,
+  "port": 6737,
   "_host_note": "0.0.0.0 listens on every interface, which is what the reader needs. Set 127.0.0.1 to keep it to this machine while testing.",
+  "_port_note": "6737 is 'OPDS' on a phone keypad, picked mainly for what it isn't: 8080 is the most contested port on any machine, and the one other ebook servers reach for first. Above 1024 (no root) and below 32768 (outside the kernel's ephemeral range). --port overrides this; --port 0 lets the OS pick a free one and the startup banner prints what it got.",
 
   "page_size": 25,
   "_page_size_note": "Entries per feed page. The device holds a whole page in ~400 KB of RAM and shows a handful of lines at a time, so a small number pages faster and costs nothing — the 'next page' link is one click.",
@@ -18,7 +19,7 @@
   "_catalog_title_note": "Shown as the catalog's name, and as the Basic-auth realm.",
 
   "public_url": "",
-  "_public_url_note": "Normally empty: feed URLs are built from the request's Host header, which is correct whatever address you reach the server on. Set it (e.g. 'http://books.lan:8080') only when a reverse proxy makes the Host header wrong.",
+  "_public_url_note": "Normally empty: feed URLs are built from the request's Host header, which is correct whatever address you reach the server on. Set it (e.g. 'http://books.lan:6737') only when a reverse proxy makes the Host header wrong.",
 
   "require_auth": false,
   "_require_auth_note": "Default false: the server starts open on your LAN. Set true to refuse to start unless a username and password both resolve, so a mistyped path can't silently leave the library open.",
