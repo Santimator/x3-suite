@@ -75,7 +75,7 @@ One builder for every task, hand-built XHTML/OPF, deterministic output
 (same source → byte-identical EPUB). Its input contract — what tasks are
 allowed to hand it — is
 [`epub-builder/FORMAT.md`](epub-builder/FORMAT.md).
-Pinyin annotation is an opt-in feature (`pinyin_mode` in book.json); generic
+Pinyin is marked by the graded-reader service before the build; generic
 books build with zero CJK dependencies.
 
 It also ships `verify_epub.py` — the one structural-integrity check (mimetype,
@@ -131,8 +131,8 @@ Write leveled Chinese books chapter-by-chapter: a *planner* outlines, a
 *scribe* drafts each chapter against a mechanically-built vocabulary brief,
 deterministic validation gates the HSK level (out-of-list ≤ 5%, stretch
 ≤ 15%), a *glossary editor* prunes the harvested glossary, and the builder
-emits a pinyin-annotated EPUB (`gloss-pinyin` on the X3: plain hanzi with
-word-level pinyin on each glossary word's first appearance).
+`annotate.py` marks each glossary word's first appearance with its pinyin, and
+the generic builder assembles the EPUB.
 
 Docs: [`services/graded-reader/SKILL.md`](services/graded-reader/SKILL.md)
 
@@ -141,7 +141,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r services/graded-reader/requirements.txt
 S=services/graded-reader/scripts
 
-.venv/bin/python $S/validate.py workspace/twelve-zodiac       # grade a book
+.venv/bin/python $S/validate.py workspace/being-earnest       # grade a book
 .venv/bin/python $S/selftest.py                               # full pipeline check
 # EPUB assembly: the shared epub-builder (see Infrastructure above)
 ```
@@ -171,9 +171,9 @@ design + open questions: [`DESIGN.md`](services/pdf2epub/DESIGN.md)
 
 Proof by worked conversion, not self-test: whether pdf2epub works is whether an
 agent can turn a real PDF into a faithful EPUB a human finds sound, so the proof
-is the committed samples under `workspace/` — public-domain Spanish plays
-(`alcaldes-encontrados`, `gurruminos`, the 3-act `el-espanol-de-oran`), each
-with its `policy.json`/`draft.json` and a built, verified EPUB — annotated,
+is the committed sample under `workspace/` — the public-domain Spanish
+entremés `alcaldes-encontrados`, a full vision transcription with a built,
+verified EPUB — annotated,
 with the tool gaps they surfaced, in
 [`services/pdf2epub/CONVERSIONS.md`](services/pdf2epub/CONVERSIONS.md). The
 pipeline strips furniture, normalizes OCR marks, recovers spacing, and reflows
@@ -192,13 +192,13 @@ workspace/<slug>/       one folder per book/job (source, chapters/, book.json,
 reference/fonts/        SD-ready .cpfont families for the device: WenZilla
                         (recommended Chinese hybrid — WenKai kaiti + Zilla Slab
                         Latin/pinyin), WenKaiFull (pure kaiti, confirmed
-                        working) + EBGaramond (Latin)
+                        working)
 ```
 
 Device facts that shape every tool (details in `reference/readers.md`):
 embedded EPUB fonts are useless (the reader rasterizes only pre-converted
 `.cpfont` bitmaps), ruby and interlinear pinyin are confirmed broken (use the
-`gloss-*` modes), RAM is ~400 KB — keep books lean and CSS simple.
+`reading_style: after`), RAM is ~400 KB — keep books lean and CSS simple.
 
 ## License
 
@@ -211,12 +211,14 @@ The code and documentation are **MIT** licensed — see [`LICENSE`](LICENSE).
 
 Two kinds of bundled third-party content keep their own terms:
 
-- **Fonts** (`reference/fonts/*.cpfont`) are conversions of open-source fonts
-  (LXGW WenKai, Zilla Slab, EB Garamond, Noto CJK) under the **SIL Open Font
-  License 1.1** — notices, sources, and the license text in
-  [`reference/fonts/ATTRIBUTION.md`](reference/fonts/ATTRIBUTION.md) and
-  [`reference/fonts/OFL.txt`](reference/fonts/OFL.txt).
+- **Fonts** are under the **SIL Open Font License 1.1**: the `.cpfont`
+  families in `reference/fonts/` (conversions of LXGW WenKai, Zilla Slab, Noto
+  CJK), and `reference/covers/IMFellEnglish-Regular.ttf`, which sets Latin
+  cover titles. Notices, sources, and the license texts in
+  [`reference/fonts/ATTRIBUTION.md`](reference/fonts/ATTRIBUTION.md),
+  [`reference/fonts/OFL.txt`](reference/fonts/OFL.txt) and
+  [`reference/covers/IMFellEnglish-OFL.txt`](reference/covers/IMFellEnglish-OFL.txt).
 - **Sample book texts** under `workspace/` are either original to this project
-  or public-domain source material (e.g. 西游记, 愚公移山, O. Henry's *The Gift
-  of the Magi*, the 1793 entremés *Los alcaldes encontrados*), retold or
-  converted as pipeline demonstrations.
+  or public-domain source material — Oscar Wilde's *The Importance of Being
+  Earnest*, retold in Chinese as a graded reader, and the 1793 entremés
+  *Los alcaldes encontrados* — retold or converted as pipeline demonstrations.

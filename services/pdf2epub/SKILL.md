@@ -10,24 +10,62 @@ description: >-
 
 # pdf2epub — PDF → EPUB conversion pipeline
 
-Recover a *document* from a *page description*. PDFs only say where ink goes;
-EPUB needs to know what the text is (paragraphs, chapters, a nav). The
-pipeline is **deterministic-first, agent-on-error**: the happy path is pure
-scripts (extract → restore → build); the agent orchestrates, verifies
-completeness, and diagnoses failures — and when it intervenes it emits
-*decisions* (a route, a policy switch, an anchor) that scripts apply, never
-bulk text. Every byte in the EPUB traces back to the extraction.
+Recover a *document* from a *page description*. A PDF only says where ink
+goes; an EPUB needs to know what the text *is* (paragraphs, chapters, a nav).
+How hard that recovery is depends entirely on the source, so the pipeline
+sorts every job by one principle:
+
+**"Lo bueno, barato; lo malo, posible."** A clean source is converted
+*cheaply* — deterministic extraction plus light, rule-based cleanup, no model
+in the loop for bulk text. A bad source — a raw scan, or a scan whose embedded
+OCR is garbage — is converted *at all*, by the agent **reading the rendered
+page images with its own vision and writing the clean text directly**. Direct
+scans are practically impassable to automatic extraction; vision transcription
+is the unlock that makes them possible.
+
+The dividing question is never "what does the text layer say?" but **"is the
+text layer trustworthy?"** — and the agent answers it by rendering a few pages
+and *looking*. The ground truth is always the printed page, never the OCR.
+
+## The two routes
+
+| | **cheap route** — "bueno, barato" | **vision route** — "malo, posible" |
+|---|---|---|
+| source | born-digital, or scan with clean OCR (class A/B) | scan, or scan with garbage OCR (class C/D/E) |
+| ground truth | the text layer | the **rendered page image** |
+| who writes the text | scripts (`extract` → `restore`) | the **agent**, reading pages, into `chapters/*.md` |
+| the agent's job | pick tools, verify completeness, diagnose | **transcribe**: fix OCR errors, re-join column-broken lines, rebuild real paragraphs, keep verse lines whole, drop furniture |
+| the gate | fidelity to the text layer (char/ngram) + read | **completeness** (nothing whole dropped) + **a human reading it** |
+
+The old contract — *"every byte traces back to the extraction"* — holds **only
+on the cheap route**, where the extraction is trustworthy. On the vision route
+it is explicitly *wrong*: faithfully carrying OCR garbage into the EPUB is what
+puts `qdueejaáqmuiepfouir` and column-shredded half-lines on the device. There
+the **agent's vision *is* the restoration engine**; the deterministic tools are
+mechanics *around* it — render the pages, build the EPUB, check nothing was
+dropped. Both routes converge on the same output (`chapters/*.md` +
+`book.json`) and the same builder.
+
+**Deciding the route.** Triage recommends one, but the agent confirms it the
+only reliable way: `render_pages.py` a handful of pages, read them, and compare
+to what `extract_text.py` pulled. Extraction clean and faithful → cheap route.
+Extraction is a jumble of split words, scrambled columns, or nonsense letters →
+**vision route, and do not fight it** — no policy of furniture regexes and
+normalize entries will rescue a garbage OCR layer; transcribe instead.
+
+**Third entry point — bring your own transcript.** If the user has a better OCR
+(or a hand transcription), they can drop it next to the PDF as
+`source-transcript.{md,txt}` and skip our OCR entirely. See "Bring your own
+transcript" below; triage detects the sidecar and reports route `TRANSCRIPT`.
+
 Full design rationale + open questions: [`DESIGN.md`](DESIGN.md).
 
-**Status: fully implemented (stages 0-2 and 4-6). Proven by the worked
-conversions under `workspace/` — OCR'd verse plays (`alcaldes-encontrados`,
-`gurruminos`) and a longer 3-act comedia (`el-espanol-de-oran`), each with its
-`policy.json`/`draft.json` and a built, verified EPUB. The pipeline strips
-page-number/catchword furniture, normalizes OCR junk marks, recovers spacing
-where the text layer dropped it, and reflows verse or prose — faithfully
-preserving residual OCR noise rather than inventing corrections ("every byte
-traces back to the extraction"). Stage 3 (draft) is always the agent, by
-design. There is no deterministic self-test — see the "Verifying" section and
+**Status: fully implemented. The cheap route is deterministic scripts (stages
+0–2, 4–6); the vision route is the agent writing `chapters/*.md` directly
+(see "Vision transcription" below) and the same build/verify. Proven by the
+worked conversions under `workspace/` — `alcaldes-encontrados` is a full
+vision transcription of a 1793 entremés.
+There is no deterministic self-test — see the "Verifying" section and
 [`CONVERSIONS.md`](CONVERSIONS.md).**
 
 ## Workspace convention
@@ -37,6 +75,8 @@ One folder per conversion job, mirroring graded-reader books:
 ```
 workspace/<slug>/
   source.pdf          the input (never modified)
+  source-transcript.md  optional — bring-your-own text; its presence skips OCR
+  source-cover.png    optional — bring-your-own cover (any raster format)
   build/triage.json   stage 0 output
   extract/            stage 1 output (raw per-page extraction)
   policy.json         stage 2 input — the agent's restore decisions
@@ -56,7 +96,156 @@ agent must know it when drafting** — so the EPUB builder, the device fonts
 in `reference/fonts/`, and device lore in `reference/readers.md` are shared
 with graded-reader.
 
-## Stages
+On the **vision route** the workspace is minimal: `source.pdf`, the rendered
+`pages/*.png` you read from, and the `chapters/*.md` + `book.json` you write by
+hand. No `extract/`, `policy.json`, `restore/`, `draft.json`, or `prepare` step
+— you *are* the extract-through-prepare pipeline.
+
+## Vision transcription (the "malo, posible" route)
+
+When triage or your own eyes say the OCR is untrustworthy, transcribe. This is
+not a last resort or a span-scoped patch — for a scan it is the *primary* path,
+and the agent's own reading is the whole engine.
+
+**Workflow:**
+
+1. **Render.** `render_pages.py source.pdf --out pages --dpi 200` (200 dpi is
+   plenty to read 18th-c. type; go 300 for tiny footnotes). Read the images in
+   batches with your vision — the page is the ground truth.
+2. **Transcribe into `chapters/*.md` directly.** Write clean Markdown as you
+   read. You are not copying the OCR; you are reading the *page* and writing
+   what it says. Actively:
+   - **Fix OCR errors** — `qdueeja…` back to real words, restore dropped
+     accents, un-scramble letters. You can see the glyphs; use that.
+   - **Re-join column/line-wrap breaks** into whole units — a metrical verse
+     line or a real prose sentence, never the printer's short column-width
+     fragments.
+   - **Rebuild real paragraphs** from reflowed prose; **keep verse lines whole**
+     inside ` ```verse ` fences.
+   - **Drop furniture** — running page numbers, catchwords, signature marks,
+     the publisher's colophon.
+   - **Keep the author's orthography.** Fix what the *scanner* got wrong, not
+     what the *author* wrote: period spelling (`felíz`, `judio`, `christiano`),
+     archaic forms and punctuation stay. You are restoring the page, not
+     modernizing the text.
+3. **Structure for the small screen.** ~12–20 lines per screen
+   (`reference/readers.md`) means structure carries the read: `#` headings per
+   chapter/act/scene, `*italic*` paragraphs for stage directions / section
+   breaks, speaker labels prefixing each turn. Give the reader landmarks.
+4. **Write `book.json` by hand** — title, author, language, and the chapter
+   list (see the epub-builder `FORMAT.md`). Skip `draft.json`/`prepare.py`
+   entirely; those exist to *cut* a machine-restored blob into chapters, and
+   you've already written the chapters.
+5. **Build and verify** exactly as the cheap route does (stages 5–6). On this
+   route `verify.py`'s coverage compares the EPUB against *your* `chapters/*.md`
+   — a completeness/self-consistency check (did the build drop anything?), not
+   a fidelity-to-OCR check. The n-gram number against the old OCR is meaningless
+   here and is not the gate. **The gate is you reading the EPUB** and, ideally,
+   the user reading it on-device.
+
+**Markdown conventions** (what the builder understands — see `FORMAT.md`):
+
+- `# Title` / `## Act` — chapter and section headings.
+- ` ```verse ` … ` ``` ` — a run of lines whose breaks must survive (poetry,
+  drama). Merge column-wraps *before* fencing; each metrical line is one line.
+- `*italic*` on its own paragraph — stage directions (`*Salen los dos
+  Alcaldes.*`), sung-section markers (`*Canta.*`), editorial breaks.
+- Speaker labels (`Vej.`, `Dom.`, `Esc.`) prefix the first line of each turn,
+  inside the verse fence — abbreviate consistently, matching the source.
+
+**Interlineado / screen.** Do *not* cap line length — the reader controls that
+with font size and landscape mode. Our job is the opposite: waste no vertical
+space. The un-annotated build path already minimizes `line-height`
+(set `"line_spacing": "tight"` in book.json); you just supply clean structure. See
+`reference/readers.md` § "Screen text capacity".
+
+## Bring your own transcript (the sidecar)
+
+Our OCR is deliberately simple, and for a hard scan a purpose-built OCR (or the
+user's own careful transcription) will beat it. So the user can supply one: a
+file named **`source-transcript.{md,txt}`** (any of `.md`/`.markdown`/`.txt`/
+`.text`) next to `source.pdf`. Its mere presence tells the pipeline to **skip
+triage's route heuristics, extract, and OCR** — triage detects the sidecar and
+reports route `TRANSCRIPT`, with the file's size, format, and a preview.
+
+**The agent decides what the transcript needs — there is no fixed rule.** You
+are handed the text; you judge, by reading it (and cross-checking the rendered
+pages when in doubt), how far it already is from a proper EPUB and do only
+what's missing:
+
+- **Already clean and structured** (headings, verse fences, speaker labels,
+  paragraphs) → adapt it into `chapters/*.md` + `book.json` and build. Near-zero
+  processing; don't re-flow what the user laid out on purpose.
+- **Raw-ish text** (a better OCR's dump: real words, but page furniture, mid-line
+  column wraps, no chapter structure) → do the restoration work yourself, the
+  same moves as the vision route (drop furniture, re-join wrapped lines, rebuild
+  paragraphs, keep verse whole, add headings/labels), writing `chapters/*.md`
+  directly. The PDF pages are still the visual ground truth to check against.
+- **Anywhere between** → do the in-between amount. The point of the sidecar is
+  that *the agent*, not a script and not a file extension, sizes up the text and
+  finishes the job.
+
+The `looks_structured` hint in `triage.json` (does it contain Markdown headings
+or fences?) is only a nudge; trust your own read. Don't run `restore.py`/
+`policy.json`/`draft.json` on a transcript — those cut a machine-extracted blob,
+and here you're doing the shaping by hand. Then **build and verify** as usual;
+on this route, as on the vision route, `verify.py` coverage is a completeness
+check against your own chapters and a human read is the real gate. If the
+sidecar is empty, triage says so — treat it as absent and re-triage the PDF.
+
+## Cover
+
+Every book gets a cover, resolved in this order (best source first):
+
+1. **`source-cover.{png,jpg,jpeg,webp,…}` sidecar** next to the PDF — the user's
+   own cover. Triage reports it as `cover_sidecar`.
+2. **A cover inside the PDF** — if there's no sidecar, look for a real
+   frontispiece/title-page image in the source (render the first page or pull an
+   embedded image) and, if it reads as a cover, use it. Agent judgment.
+3. **The default template** — `reference/covers/default.png`, with the book
+   title drawn into its blank panel. The fallback when nothing better exists.
+
+Whatever the source, run it through **`prepare_cover.py`**, which enforces the
+constraints CrossPoint's *EPUB cover* path actually has (these are NOT the
+`.pxc`/`.bmp` sleep-screen wallpaper rules — that's a separate device feature):
+
+- **PNG or baseline JPEG** — progressive JPEG and GIF fall back to an `[Image]`
+  placeholder on-device;
+- **grayscale** — the panel is e-ink; colour is wasted bytes;
+- **≤ 528×792** — a ~2000px-tall cover costs ~10 s of on-device conversion for
+  the sleep-screen/thumbnail.
+
+It **uses a valid cover as-is and only transforms an invalid one** (→ grayscale
+PNG, fit to panel). `--check` reports validity without writing.
+
+```bash
+# validate/fix a bring-your-own cover
+.venv/bin/python epub-builder/scripts/prepare_cover.py \
+    workspace/<slug>/source-cover.png --out workspace/<slug>/images/cover.png
+
+# default template + auto-title (box/ink come from the .json beside the image)
+.venv/bin/python epub-builder/scripts/prepare_cover.py \
+    reference/covers/default.png --title "Los alcaldes encontrados" \
+    --title-config reference/covers/default.json \
+    --out workspace/<slug>/images/cover.png
+```
+
+Then point `book.json` at it: `"cover": "images/cover.png"` — the builder
+embeds it as the EPUB3 `cover-image` (see epub-builder `FORMAT.md`).
+
+**Auto-title.** For a template that leaves a blank area, `--title` renders the
+title into a box (fractions of the image, in `reference/covers/<name>.json`:
+`title_box`, `color`, `uppercase`), auto-sized to fit and wrap, drawn at source
+resolution then downscaled so it stays crisp. `--font PATH` overrides the serif;
+the default resolves a repo font if present, else a system serif.
+
+## Stages (the "bueno, barato" route)
+
+These stages are the deterministic cheap route — a clean text layer flows
+through them with no model writing bulk text. On the vision route you skip
+stages 1–4 (you replace them) and use only 0 (triage, to decide), 5 (build),
+6 (verify).
+
 
 0. **Triage** (deterministic, implemented) — characterize the source, flag
    pathologies, recommend a route:
@@ -67,11 +256,15 @@ with graded-reader.
    ```
 
    Routes: `TEXT` (usable text layer), `OCR` (scanned), `HYBRID` (per-page
-   mix). Flags: `doubled_chars` / `doubled_lines` (fake-bold double draw —
+   mix), and `TRANSCRIPT` (a `source-transcript.{md,txt}` sidecar exists — its
+   presence overrides the heuristics and skips extract/OCR; the report carries
+   the transcript's path, size, format, an `looks_structured` hint, and a
+   preview). Flags: `doubled_chars` / `doubled_lines` (fake-bold double draw —
    fixed deterministically via char dedupe), `broken_spacing`,
    `page_furniture` (repeating headers/footers → drop candidates). The
    orchestrating model reads the summary + sample pages and confirms the
-   route.
+   route — on `TRANSCRIPT`, it reads the sidecar and follows "Bring your own
+   transcript" above.
 
 1. **Extract** (toolbox, implemented) — parameterized deterministic tools
    the agent picks between and re-runs: `extract_text.py` (pdfplumber;
@@ -243,10 +436,17 @@ with graded-reader.
 6. **Verify** (deterministic `verify.py`, implemented) — EPUB integrity
    (mimetype first/stored, manifest ⇄ zip parity, every href/fragment
    resolves, every XHTML/OPF entry well-formed) plus a coverage report:
-   strip tags from the spine, run it through the same fidelity gate
-   restore.py uses against `restore/restored.md`. Exits 1 on any failure —
-   the last check in the pipeline, catching what prepare.py or the builder
-   silently dropped.
+   strip tags from the spine and compare it against the book's own
+   `chapters/*.md`. **What that coverage means depends on the route.** On the
+   cheap route the chapters descend mechanically from the trusted extraction,
+   so coverage is a genuine fidelity gate (nothing lost extract→EPUB). On the
+   **vision route the chapters are the agent's transcription**, so coverage is
+   a *completeness / self-consistency* check — `char_ratio ≈ 1` confirms the
+   build dropped nothing; the n-gram number will dip wherever `*emphasis*`
+   markers render as `<em>` and is *not* a fidelity signal against the OCR.
+   Integrity always exits 1 on failure; on the vision route read the coverage
+   as "did anything whole disappear", and let a human reading the EPUB be the
+   real gate.
 
    ```bash
    .venv/bin/python services/pdf2epub/scripts/verify.py \
@@ -262,48 +462,53 @@ python3 -m venv .venv
 
 ## Verifying — there is no self-test, by design
 
-Whether this pipeline "works" is whether an agent can drive the tools to a
-faithful EPUB that a human, reading it, finds sound. A frozen replay of one
-fixture's bytes would only prove the scripts didn't change — so there isn't
+Whether this pipeline "works" is whether an agent can drive the tools to an
+EPUB that a human, reading it, finds sound — and on the vision route that
+reading *is* the test, not a byte-replay. A frozen replay of one fixture's
+bytes would only prove the scripts didn't change, and would actively mislead on
+the vision route (it would demand fidelity to the OCR garbage) — so there isn't
 one. The proof is the **worked conversions**: the committed samples under
-`workspace/` (their `source.pdf` + `policy.json` + `draft.json` and the built
-`build/<slug>.epub`), annotated in [`CONVERSIONS.md`](CONVERSIONS.md) — which
-also lists the tool gaps those conversions surfaced.
+`workspace/` (their `source.pdf`, whatever route artifacts they used — a
+`policy.json`/`draft.json` on the cheap route, hand-written `chapters/*.md` on
+the vision route — and the built `build/<slug>.epub`), annotated in
+[`CONVERSIONS.md`](CONVERSIONS.md) — which also lists the tool gaps those
+conversions surfaced.
 
-To sanity-check the scripts after editing them, re-run a sample by hand
-(`triage → extract_text → restore → prepare → build_epub → verify`, all exit
-0 on success) and read the EPUB. Structural soundness alone is one command:
+To sanity-check the cheap-route scripts after editing them, re-run a sample by
+hand (`triage → extract_text → restore → prepare → build_epub → verify`, all
+exit 0 on success) and read the EPUB. For the vision route the "test" is
+inherently a read: render, transcribe a chapter, build, and *look* at the
+result on-device or in a reader. Structural soundness alone is one command:
 `epub-builder/scripts/verify_epub.py workspace/<slug>/build/<slug>.epub`.
 
 Changes under `epub-builder/` are shared infrastructure, so also re-run the
 graded-reader check (`services/graded-reader/scripts/selftest.py`) and keep the
-annotated path's output byte-identical — `workspace/yugong-mountain` is the
+annotated path's output byte-identical — `workspace/being-earnest` is the
 canary.
 
-## Test fixture
+## Worked fixture — the vision route end to end
 
 `workspace/alcaldes-encontrados/source.pdf` — *Los alcaldes encontrados*, a
-16-page 1793 printing of a Spanish entremés (attributed to Tirso de Molina;
-public domain),
-converted (`build/alcaldes-encontrados.epub`). It is a scanned book with an
-ABBYY-FineReader OCR text layer — a different, and more common, kind of hard
-source than a born-digital PDF: the pathology isn't doubled glyphs but
-**OCR noise**. Triage routes it TEXT and flags `page_furniture` +
-`broken_spacing`.
+16-page 1793 printing of a Spanish entremés (public domain) — is the reference
+vision-route conversion. It is a scan with an OCR text layer so noisy the
+extraction reads `Ve]. ^ TO me ga` for `Vej. No me tenga` and shreds every
+verse line at the column width. This is exactly the source class where the
+cheap route *cannot* win: no furniture regex or normalize table reconstructs
+letters the OCR never got right.
 
-The committed `policy.json` handles it deterministically: **furniture**
-patterns drop the per-page numbers (many OCR-mangled — `ΙΟ`, `T2`, `τβ`, bare
-`s`/`f`/`l`) and the printer's catchwords at each page foot (`Ver`, `Ino-`,
-`Sa-`…); **normalize** maps the pervasive OCR middot `·`→`.` and strips the
-stray `*` marks (which would otherwise be eaten as Markdown emphasis by the
-builder); the body is a verse play, so it reflows `verse` (line structure
-kept) while the three decorative title lines are dropped as front matter via
-`draft.json`. Dehyphenation is deliberately left **off** — on a short verse
-text, merging the handful of wrapped words moves more of the fidelity gate's
-n-gram budget than it's worth, and keeping the physical lines is truer to the
-verse anyway.
+So `chapters/ch01.md` is a **full vision transcription** — read off the
+rendered pages (`render_pages.py … --dpi 200`), all 16, by eye. It fixes the
+OCR letter by letter, re-joins the column-broken verse into whole metrical
+lines, labels every turn (`Vej.`/`Dom.`/`Esc.`/`Pre.`/`Muj.`/`Gra.`), sets the
+stage directions as `*italic*` paragraphs and the closing tonadillas as
+`*Canta.*`/`*Estrivillo.*` blocks — while keeping the 1793 orthography
+(`felíz`, `judio`, `Christiano`) untouched. Furniture (page numbers,
+catchwords, the Quiroga colophon) is simply not transcribed. There is no
+`policy.json`, `restore/`, or `draft.json`: on this route the agent replaces
+those stages.
 
-Residual OCR errors in the letters themselves (`vues^rced`, `Escribana` for
-*Escribano*) are **preserved, not guessed away** — that is the pipeline's
-whole contract. The fixture proves the mechanics end to end; it is not
-claimed to be a clean scholarly read. Triage output lives next to the source.
+`verify.py` reports `char_ratio ≈ 0.99` (complete — nothing whole dropped) and
+a lower n-gram containment (the `*emphasis*`/`<em>` artifact described in stage
+6, not a defect). The real proof is that the EPUB *reads* — which is the whole
+point of the redesign: the earlier faithful-to-OCR build produced on-device
+garbage; this one is a clean read. Triage output lives next to the source.

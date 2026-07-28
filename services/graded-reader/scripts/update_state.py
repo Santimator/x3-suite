@@ -43,7 +43,7 @@ def chapter_paths(book_dir: Path, n: int, book: Dict) -> Tuple[Path, str, str]:
     chapters = book.get("chapters", [])
     if 1 <= n <= len(chapters):  # positional convention: chapters[n-1] is chapter n
         entry = chapters[n - 1]
-        source_rel = entry.get("source", source_rel)
+        source_rel = entry.get("source_md") or entry.get("source", source_rel)
         glossary_rel = entry.get("glossary", glossary_rel)
     return book_dir / source_rel, source_rel, glossary_rel
 
@@ -72,7 +72,14 @@ def gloss_worthy(text: str, v: vocab_mod.Vocab) -> List[str]:
             continue
         e = v.get(tok)
         cat = validate_mod.classify(tok, v)
-        worthy = (e is not None and e.source == "personal") or cat == "stretch"
+        # `flagged` belongs here: with an i+1 floor the scribe is *required* to
+        # reach past the list, so genuinely out-of-level words are expected, and
+        # they are exactly the ones a reader cannot decode unaided. Missing them
+        # would put unglossed unknown words in front of the learner.
+        # Book words (names/places) get glossed on first appearance; the user's
+        # own personal.tsv words are by definition already known to them.
+        worthy = ((e is not None and e.source == "book")
+                  or cat in ("stretch", "flagged"))
         if worthy:
             seen.add(tok)
             ordered.append(tok)
@@ -92,10 +99,10 @@ def main(argv=None) -> int:
 
     book_dir: Path = args.book_dir
     n = args.chapter
-    v = vocab_mod.load_vocab(args.lists)
 
     plan_path = book_dir / "plan.json"
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    v = vocab_mod.load_vocab(args.lists, max_level=plan.get("max_level"), book_dir=book_dir)
     book_path = book_dir / "book.json"
     book = json.loads(book_path.read_text(encoding="utf-8")) if book_path.exists() else {"chapters": []}
 

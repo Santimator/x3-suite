@@ -1,38 +1,15 @@
 word	level	pinyin	gloss
-# Personal known-words overlay. Same columns as hsk.tsv.
-# Words listed here are treated as KNOWN regardless of HSK band, and are
-# added to the jieba custom dictionary so segmentation respects them.
-# Use level "PERS" for your own vocabulary, or any custom band label.
+# YOUR standing vocabulary — words you already know, whatever their HSK band.
+# This file belongs to the reader, not to any book: nothing here is written by
+# the pipeline, and it should survive every book you generate.
 #
-# This is also where the rework loop's "add-and-gloss" escalation appends
-# words it was forced to introduce (see SKILL.md). Lines starting with # are
-# ignored. Delete these comment lines once you start adding real entries, or
-# leave them — the loader skips them.
+# Words listed here count as KNOWN regardless of level, and join jieba's
+# dictionary so segmentation respects them. Use any level label you like
+# (e.g. PERS).
+#
+# Story-specific words — character names, places, props — do NOT belong here.
+# They go in the book's own workspace/<slug>/vocab.tsv, which is temporary and
+# disappears with the book.
 #
 # Example:
-# 孙悟空	PERS	Sūn Wùkōng	Sun Wukong (the Monkey King)
-# 师父	PERS	shī fu	master; teacher (form of address)
-孙悟空	PERS	Sūn Wùkōng	Sun Wukong, the Monkey King
-唐僧	PERS	Táng Sēng	Tang Monk (Xuanzang)
-师父	PERS	shī fu	master; teacher (respectful address)
-徒弟	PERS	tú dì	apprentice; disciple
-妖怪	PERS	yāo guài	monster; demon
-猴子	PERS	hóu zi	monkey
-石头	PERS	shí tou	stone; rock
-王	PERS	wáng	king
-本领	PERS	běn lǐng	skill; ability; capability
-愚公	PERS	Yú gōng	Yugong, "the Foolish Old Man" (name)
-神仙	PERS	shén xiān	immortal; god; celestial being
-生肖	PERS	shēng xiào	Chinese zodiac (the twelve animal signs)
-玉帝	PERS	Yù Dì	the Jade Emperor (ruler of heaven)
-老鼠	PERS	lǎo shǔ	rat; mouse
-老虎	PERS	lǎo hǔ	tiger
-兔子	PERS	tù zi	rabbit
-龙	PERS	lóng	dragon
-蛇	PERS	shé	snake
-追	PERS	zhuī	to chase; to run after
-封	PERS	fēng	(measure word for letters)
-魔术	PERS	mó shù	magic; a magic trick
-小丽	PERS	Xiǎo Lì	Xiao Li (a young woman's name)
-小明	PERS	Xiǎo Míng	Xiao Ming (a young man's name)
-表带	PERS	biǎo dài	watch strap; watchband
+# 孙悟空	PERS	Sūn Wùkōng	Sun Wukong, the Monkey King

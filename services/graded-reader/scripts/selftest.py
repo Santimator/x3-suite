@@ -29,13 +29,13 @@ WORKSPACE = REPO / "workspace"
 # One canonical token per cascade tier (see validate.py docstring).
 CLASSIFY_CASES = [
     ("聪明", "known"),        # (a) list word
-    ("马马虎虎", "chengyu"),  # (b) idiom list
+    ("一举两得", "chengyu"),  # (b) idiom list (HSK 3.1 puts real chengyu at 7-9)
     ("山", "known"),          # (c) single char met in known words (爬山)
     ("第十一名", "composed"),  # (d) ordinal number grammar
     ("十二个", "composed"),    # (d) numeral + measure
     ("很快", "composed"),      # (d) concatenation of list words 很+快
-    ("山上", "stretch"),       # (e) chars known, not a taught combination
-    ("尾巴", "flagged"),       # (f) contains an untaught character
+    ("从没", "stretch"),       # (e) chars known, not a taught combination
+    ("蟋蟀", "flagged"),       # (f) contains an untaught character
 ]
 
 
@@ -78,10 +78,9 @@ def main() -> int:
     for book in books:
         with tempfile.NamedTemporaryFile(suffix=".epub", delete=True) as tmp:
             out = Path(tmp.name)
-            # build in the mode the book ships with (gloss-pinyin on the X3),
+            # the builder takes the book as prepared; presentation is declared
             # so the test covers the markup we actually deliver.
-            meta_mode = json.loads((book / "book.json").read_text(encoding="utf-8")).get("pinyin_mode", "plain")
-            chapters, meta = build_epub.assemble(book, meta_mode)
+            chapters, meta = build_epub.assemble(book)
             build_epub.write_epub(out, meta["title"], meta.get("author", ""),
                                   meta.get("language", "zh"), chapters)
             # mimetype-first/stored, manifest<->zip parity, well-formed XML,

@@ -10,7 +10,6 @@ Fonts" is the WiFi download store; not needed for these.)
 |---|---|---|
 | `WenZilla` | **Chinese books (recommended)** | Hybrid: **NV Zilla Slab** for Latin + **LXGW WenKai** for CJK. Chinese in kaiti (like HSK textbooks); Latin and pinyin in a warm slab serif instead of WenKai's plainer Latin — so mixed hanzi+pinyin (`gloss-pinyin`) and any Latin in the text read nicely. Full CJK, 22.4k glyphs, streamed from SD. Regular only. |
 | `WenKaiFull` | Chinese books (pure kaiti) | LXGW WenKai 霞鹜文楷 (kaiti / brush style) + Noto fallback, Latin included from WenKai itself. Full CJK — 22.5k glyphs. **Device-confirmed working**; the baseline WenZilla is built on. |
-| `EBGaramond` | Latin/English books | Classical Garamond book serif, regular + bold + italic. For dedicated Latin books (WenZilla is regular-only, so use this when you want italic/bold Latin). |
 
 All SIL OFL licensed. Built with CrossPoint's own `fontconvert_sdcard.py`; the
 reproducible recipe (and the full device debugging record, including why

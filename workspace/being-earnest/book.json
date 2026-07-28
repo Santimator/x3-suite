@@ -1,0 +1,69 @@
+{
+  "title": "诚实的重要 · 分级读物 (HSK 3)",
+  "author": "改编自 Oscar Wilde",
+  "language": "zh",
+  "cover": "images/cover.png",
+  "chapters": [
+    {
+      "source": "build/annotated/ch01.md",
+      "glossary": "build/ch01-glossary.tsv",
+      "source_md": "chapters/ch01.md"
+    },
+    {
+      "source": "build/annotated/ch02.md",
+      "glossary": "build/ch02-glossary.tsv",
+      "source_md": "chapters/ch02.md"
+    },
+    {
+      "source": "build/annotated/ch03.md",
+      "glossary": "build/ch03-glossary.tsv",
+      "source_md": "chapters/ch03.md"
+    },
+    {
+      "source": "build/annotated/ch04.md",
+      "glossary": "build/ch04-glossary.tsv",
+      "source_md": "chapters/ch04.md"
+    },
+    {
+      "source": "build/annotated/ch05.md",
+      "glossary": "build/ch05-glossary.tsv",
+      "source_md": "chapters/ch05.md"
+    },
+    {
+      "source": "build/annotated/ch06.md",
+      "glossary": "build/ch06-glossary.tsv",
+      "source_md": "chapters/ch06.md"
+    },
+    {
+      "source": "build/annotated/ch07.md",
+      "glossary": "build/ch07-glossary.tsv",
+      "source_md": "chapters/ch07.md"
+    },
+    {
+      "source": "build/annotated/ch08.md",
+      "glossary": "build/ch08-glossary.tsv",
+      "source_md": "chapters/ch08.md"
+    },
+    {
+      "source": "build/annotated/ch09.md",
+      "glossary": "build/ch09-glossary.tsv",
+      "source_md": "chapters/ch09.md"
+    },
+    {
+      "source": "build/annotated/ch10.md",
+      "glossary": "build/ch10-glossary.tsv",
+      "source_md": "chapters/ch10.md"
+    },
+    {
+      "source": "build/annotated/ch11.md",
+      "glossary": "build/ch11-glossary.tsv",
+      "source_md": "chapters/ch11.md"
+    },
+    {
+      "source": "build/annotated/ch12.md",
+      "glossary": "build/ch12-glossary.tsv",
+      "source_md": "chapters/ch12.md"
+    }
+  ],
+  "reading_style": "after"
+}

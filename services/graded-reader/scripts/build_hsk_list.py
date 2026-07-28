@@ -1,0 +1,146 @@
+#!/usr/bin/env python3
+"""Build `lists/hsk.tsv` from the official HSK 3.1 syllabus + CC-CEDICT.
+
+Why this exists: the pipeline grades against `lists/hsk.tsv`, and that file must
+be reproducible rather than hand-maintained. This script regenerates it from two
+published sources, so upgrading the syllabus is a re-run, not an edit.
+
+**HSK 3.1** is the 2025 revision of the HSK 3.0 (2021) syllabus — the one in
+force from 2026. Its band sizes differ sharply from both HSK 2.0 (which this
+project used until now) and the 2021 draft:
+
+    level   new words   cumulative
+    1         300          300
+    2         200          500
+    3         500        1,000
+    4       1,000        2,000
+    5       1,600        3,600
+    6       1,800        5,400
+    7-9     5,600       11,000
+
+Sources (both fetched from npm, which this sandbox can reach):
+  - `@leonsilicon/hsk3.1` — the syllabus as JSON. Republishes
+    github.com/becky82/mteh (sources/HSK3.1); bare word lists, no glosses.
+  - `@leonsilicon/cc-cedict` — CC-CEDICT as JSON, for pinyin + English glosses.
+    CC BY-SA 4.0, published by MDBG.
+
+Usage:
+  npm pack @leonsilicon/hsk3.1 @leonsilicon/cc-cedict   # then untar both
+  build_hsk_list.py --hsk DIR --cedict FILE.json --out lists/hsk.tsv
+"""
+
+import argparse
+import json
+import re
+import sys
+from pathlib import Path
+
+# Bands to emit, in order. "7-9" is one band in the syllabus.
+LEVELS = ["1", "2", "3", "4", "5", "6", "7-9"]
+
+TONES = {
+    "a": "āáǎàa", "e": "ēéěèe", "i": "īíǐìi",
+    "o": "ōóǒòo", "u": "ūúǔùu", "v": "ǖǘǚǜü",
+}
+
+
+def tone_mark(syllable: str) -> str:
+    """CC-CEDICT numbered pinyin syllable (`hao3`, `lu:4`) -> `hǎo`, `lǜ`."""
+    m = re.fullmatch(r"([a-zA-Z:]+)([1-5])?", syllable)
+    if not m:
+        return syllable
+    body, tone = m.group(1), int(m.group(2) or 5)
+    body = body.replace("u:", "v").replace("U:", "V")
+    low = body.lower()
+    # Standard placement: a/e win; "ou" takes the o; else the last vowel.
+    idx = -1
+    for pref in ("a", "e"):
+        if pref in low:
+            idx = low.index(pref)
+            break
+    else:
+        if "ou" in low:
+            idx = low.index("o")
+        else:
+            for i, ch in enumerate(low):
+                if ch in TONES:
+                    idx = i
+    if idx < 0:
+        return body.replace("v", "ü")
+    marked = TONES[low[idx]][tone - 1]
+    if body[idx].isupper():
+        marked = marked.upper()
+    return (body[:idx] + marked + body[idx + 1:]).replace("v", "ü").replace("V", "Ü")
+
+
+def to_tone_marks(numbered: str) -> str:
+    return " ".join(tone_mark(s) for s in numbered.split())
+
+
+def load_cedict(path: Path):
+    """simplified -> (pinyin, gloss), preferring the entry with most definitions."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    best: dict[str, dict] = {}
+    for e in data["entries"]:
+        w = e["simplified"]
+        prev = best.get(w)
+        if prev is None or len(e["definitions"]) > len(prev["definitions"]):
+            best[w] = e
+    out = {}
+    for w, e in best.items():
+        # Two senses is the sweet spot: enough to disambiguate, short enough for
+        # a glossary line on a small screen, and it keeps CC-CEDICT's long tail
+        # of rare/NSFW senses out of a learner's book.
+        defs = [d for d in e["definitions"] if not d.startswith("see ")] or e["definitions"]
+        gloss = "; ".join(defs[:2])
+        if len(gloss) > 110:
+            gloss = gloss[:107].rstrip(" ;,") + "..."
+        out[w] = (to_tone_marks(e["pinyin"]), gloss)
+    return out
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description=__doc__,
+                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--hsk", type=Path, required=True, help="dir with HSK3.1_words_level*.json")
+    ap.add_argument("--cedict", type=Path, required=True, help="cc-cedict JSON file")
+    ap.add_argument("--out", type=Path, required=True, help="output hsk.tsv")
+    ap.add_argument("--max-level", default="6",
+                    help="highest band to emit (default 6; use '7-9' for everything)")
+    args = ap.parse_args()
+
+    cedict = load_cedict(args.cedict)
+    try:
+        from pypinyin import lazy_pinyin, Style
+    except ImportError:
+        lazy_pinyin = None
+
+    levels = LEVELS[: LEVELS.index(args.max_level) + 1]
+    rows, missing = [], 0
+    for lv in levels:
+        words = json.loads((args.hsk / f"HSK3.1_words_level{lv}.json").read_text(encoding="utf-8"))
+        for w in words:
+            if w in cedict:
+                pinyin, gloss = cedict[w]
+            else:
+                missing += 1
+                pinyin = (" ".join(lazy_pinyin(w, style=Style.TONE)) if lazy_pinyin else "")
+                gloss = ""
+            rows.append((w, f"HSK{lv}", pinyin, gloss))
+
+    args.out.parent.mkdir(parents=True, exist_ok=True)
+    with args.out.open("w", encoding="utf-8") as f:
+        f.write("word\tlevel\tpinyin\tgloss\n")
+        f.write("# Generated by build_hsk_list.py from the HSK 3.1 syllabus (2025\n")
+        f.write("# revision, in force 2026) + CC-CEDICT. Do not edit by hand; re-run\n")
+        f.write("# the script instead. See the script docstring for sources/licences.\n")
+        for r in rows:
+            f.write("\t".join(r) + "\n")
+
+    print(f"wrote {args.out}: {len(rows)} words across {len(levels)} bands "
+          f"({missing} without a CC-CEDICT entry)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

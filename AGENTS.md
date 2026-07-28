@@ -81,7 +81,7 @@ How each service is verified differs, by design:
 
 Changes under `epub-builder/` are shared infrastructure: run the graded-reader
 self-test **and** keep its annotated EPUB output byte-identical
-(`workspace/yugong-mountain` is the canary). They also change what the server
+(`workspace/being-earnest` is the canary). They also change what the server
 hands the device, so run the opds-server self-test too.
 
 ## Conventions

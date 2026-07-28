@@ -84,13 +84,13 @@ def build_fixture_library(root: Path) -> None:
             "language": fixture["language"], "chapters": [{"source": "chapters/ch01.md"}],
         }, ensure_ascii=False), encoding="utf-8")
 
-        # mode=None is the un-annotated path: no pinyin, and so no CJK
-        # dependencies to install just to test a file server.
-        chapters, meta = build_epub.assemble(book_dir, None)
+        # No glossary and no annotation pass: these fixtures exist to be
+        # served, not to exercise the reader pipeline, so the builder runs with
+        # zero CJK dependencies even for the CJK-titled one.
+        chapters, meta = build_epub.assemble(book_dir)
         build_epub.write_epub(book_dir / "build" / f"{fixture['slug']}.epub",
                               meta["title"], meta.get("author", ""),
-                              meta.get("language", "en"), chapters,
-                              extended_css=True)
+                              meta.get("language", "en"), chapters)
 
 
 def start_server(root: Path, credentials: Optional[Tuple[str, str]] = None):
