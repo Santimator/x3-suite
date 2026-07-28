@@ -13,16 +13,20 @@ opds-server/secrets/*
 !opds-server/secrets/README.md
 
 # workspace/ is yours, not the repo's: whatever you write, convert, or drop in
-# here stays local. The exceptions below are the committed samples — pdf2epub's
-# worked conversions and graded-reader's books — which are the proof those tools
-# work and the fixtures their self-tests read. Adding a sample to the repo means
-# adding a line here, deliberately.
+# here stays local. The exceptions are the committed samples — one per tool,
+# each built by the current pipeline — which are the proof those tools work and
+# the fixtures their self-tests read. Adding a sample to the repo means adding a
+# line here, deliberately.
+#
+# One sample each, on purpose: a book built by a superseded version of a
+# pipeline is not evidence that the pipeline works today, it is evidence about
+# code that no longer exists. The earlier readers (journey-west, letter-writer,
+# newyear-gift, twelve-zodiac, yugong-mountain) and conversions
+# (el-espanol-de-oran, gurruminos) are retired on
+# claude/graded-reader-setup-ermfsg and stay in history; this allowlist is
+# already written for that state, so their directories disappear when it lands.
 workspace/*
+# graded-reader
+!workspace/being-earnest/
+# pdf2epub
 !workspace/alcaldes-encontrados/
-!workspace/el-espanol-de-oran/
-!workspace/gurruminos/
-!workspace/journey-west/
-!workspace/letter-writer/
-!workspace/newyear-gift/
-!workspace/twelve-zodiac/
-!workspace/yugong-mountain/
