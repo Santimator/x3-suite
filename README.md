@@ -1,107 +1,147 @@
 # X3 suite
 
-Tools that produce EPUBs for an e-ink reader — concretely an **Xteink X3**
-running CrossPoint firmware, fed over WiFi by the suite's own OPDS server. One
-mindset across all of them:
+## Preface
 
-> **LLM roles for judgment, deterministic scripts for mechanics, and a
-> deterministic gate after every LLM step.** Models handle what varies
-> (writing prose, restoring mangled text, inferring structure); scripts
-> measure, validate, track state, and assemble — they never invent. Trust
-> comes from the gates, not the model.
+Hi fellow readers! Allow me to introduce you to my humble project. In it you'll
+find sophisticated tools like an AI-assisted PDF to EPUB converter (that might
+or might not work) or something as simple as a custom Chinese font I like.
 
-The suite is **infrastructure** — a builder and a server — plus two
-**services** (the AI tools), each a self-contained directory at the repo root.
-Every service converges on the **common book format** —
-`chapters/*.md + book.json` in a `workspace/<slug>/` folder — which the builder
-consumes and the server delivers. Each directory's `SKILL.md` is its canonical
-documentation.
+This is a project I do for myself to make my life around the X3 easier and
+better. Feel free to add, comment, fork, use… I am not a super huge fan of
+locking tools or info behind copyright stuff so whatever I did, it's yours to
+use. This is particularly true in this new era where AI is actually doing a lot
+of it and my Claude is no different from your Claude. Hopefully we are entering
+a new era of abundance and cordiality.
 
-## Before you trust any of this
+Everything here is built for an **Xteink X3 running CrossPoint 1.4.1**, and it
+is all vibe-coded — written by an LLM at my direction, tested by me using it.
+So each chapter opens with a line saying what has actually been checked. Where
+something is machine-checked it stays checked; whether a book is *nice to read*
+is me squinting at an e-ink screen.
 
-This is vibe-coded software. Every line was written by an LLM at my direction,
-and the "testing" is my own sparse use — one person, one device, the handful of
-books I actually wanted to read. No CI, no test matrix, no second pair of eyes.
+But I digress. Let's move to the guide.
 
-That isn't quite the same as untested, and the difference is the useful part:
+---
 
-- The **self-tests are real, and they gate real things** — vocabulary level,
-  EPUB structural integrity, whether the reader's own OPDS client can see every
-  book. Where something is machine-checked, it stays checked.
-- They cover **mechanics, not taste**. Nothing verifies that a book is pleasant
-  to read on the device. That part is me, squinting at an e-ink screen.
-- Each tool carries its **own status marker** below — *working*,
-  *contract-verified but not device-confirmed*. Those are meant literally, and
-  they are the honest ones.
-
-So: expect edges, and read any claim here as "worked for me on an X3" rather
-than "verified". Issues and pull requests are welcome — very much including the
-ones that just say this is wrong.
-
-## Architecture
-
-Two pieces of infrastructure, two services emitting the builder's format:
+## 1. What to find where
 
 ```
-epub-builder/               infrastructure — the book format's contract
-                            (FORMAT.md), build_epub.py, shared verify_epub.py
-opds-server/                infrastructure — serves build/ output to the X3
-                            over WiFi as an OPDS catalog
+epub-builder/           the book format's contract (FORMAT.md) + build + verify
+opds-server/            serves built books to the reader over WiFi
 services/
-  ├─ graded-reader/         service — writes leveled Chinese books
-  └─ pdf2epub/              service — converts PDFs into clean EPUBs
-workspace/<slug>/           one folder per book/job (inputs → build/ outputs)
-reference/                  device notes + SD-ready fonts for the X3
+  ├─ graded-reader/     writes leveled Chinese books
+  └─ pdf2epub/          converts PDFs into clean EPUBs
+workspace/<slug>/       one folder per book — inputs, and build/ outputs
+reference/              device notes, fonts, cover assets
 ```
 
-The split is by what's in the loop, not by what the thing does: services carry
-a model and gate it; infrastructure is pure mechanics — the builder produces,
-the server delivers, both deterministic.
+Each directory has a **`SKILL.md`** that is its real documentation. This guide
+tells you what a thing is for and how to run it; `SKILL.md` tells you how it
+works. `AGENTS.md` at the root is the same map written for a coding agent.
 
-The layout is agent-agnostic: `AGENTS.md` at the root is the entry point for
-any coding agent, and `.claude/skills/` symlinks the four directories so
-Claude Code still auto-loads them as skills.
+**`workspace/` is yours.** It's gitignored apart from two committed samples, so
+your books stay your books.
 
-Each AI tool has the **same shape**, and it's the shape worth copying for a
-new one:
+### The idea
 
-- **A briefing** — the `SKILL.md` (plus role prompts for graded-reader) that
-  tells the model how to undertake the task and when to defer to a tool.
-- **Deterministic tools for the parts models are bad at** — segmenting and
-  grading vocabulary, extracting and OCR-ing a PDF, reflowing text, cutting
-  chapters, assembling and verifying the EPUB. Scripts measure, transform,
-  and check; they never invent.
-- **A deterministic gate after every model step** — vocabulary rate gates for
-  the writer; a restore fidelity gate and an EPUB coverage+integrity gate for
-  the converter. The model proposes; a gate disposes.
+Let the model do what models are good at, and nothing else:
 
-So the division of labour is constant: **the model supplies judgement
-(prose, a restore policy, chapter structure), scripts supply mechanics and
-verification, and trust comes from the gates, not the model.** Where the
-model needs to touch model-unfriendly ground directly — e.g. a one-off OCR
-fix in pdf2epub — it does so through a *guarded* path: a deterministic check
-bounds and prints the edit (see pdf2epub stage 2b). The model can adjust
-parameters and re-run, or make a small, bounded correction; it can't quietly
+- **The model supplies judgement** — writing prose, inferring chapter structure,
+  deciding how to restore mangled text.
+- **Scripts supply mechanics** — segmenting vocabulary, extracting a PDF,
+  reflowing text, assembling the EPUB. They measure and transform; they never
+  invent.
+- **A deterministic gate follows every model step.** Vocabulary level, EPUB
+  integrity, feed correctness. The model proposes, the gate disposes.
+
+That's why "AI-assisted" here doesn't mean "hope for the best". When a model
+must touch prose directly, it goes through a checked path that bounds and
+prints the edit — it can re-run with different parameters, it can't quietly
 rewrite.
 
-The tools are plain CLI scripts with typed JSON/file I/O, so any agent that
-can run a shell and read files drives them — Claude Code, or graded-reader's
-optional headless runner against any OpenAI-compatible endpoint.
+---
 
-## Infrastructure
+## 2. The book format
 
-### epub-builder — the shared EPUB builder
+**Tested:** every tool below targets it, and the builder rejects anything else.
 
-One builder for every task, hand-built XHTML/OPF, deterministic output
-(same source → byte-identical EPUB). Its input contract — what tasks are
-allowed to hand it — is
-[`epub-builder/FORMAT.md`](epub-builder/FORMAT.md).
-Pinyin is marked by the graded-reader service before the build; generic
-books build with zero CJK dependencies.
+One shape, so tools compose. A book is a folder:
 
-It also ships `verify_epub.py` — the one structural-integrity check (mimetype,
-manifest⇄zip parity, well-formed XML, link resolution) that both tasks share,
-so "is this a sound EPUB?" has a single implementation.
+```
+workspace/<slug>/
+  book.json          title, author, language, chapter list
+  chapters/ch01.md   one markdown file per chapter, '# Title' on line 1
+  build/             outputs — never an input
+```
+
+The full contract, including covers, verse, images and endnotes:
+[`epub-builder/FORMAT.md`](epub-builder/FORMAT.md). If it isn't described
+there, the builder doesn't support it.
+
+---
+
+## 3. Writing a Chinese graded reader
+
+**Tested:** working, with a self-test (`selftest.py`) that grades every
+committed book and builds it. The sample, `workspace/being-earnest`, is a
+12-chapter HSK 3 retelling of *The Importance of Being Earnest*.
+
+A *planner* outlines the book, a *scribe* drafts each chapter against a
+mechanically-built vocabulary brief, validation gates the HSK level
+(out-of-list ≤ 5%, stretch ≤ 15%), a *glossary editor* prunes the harvested
+glossary, and `annotate.py` marks each glossary word's first appearance with
+its pinyin.
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r services/graded-reader/requirements.txt
+S=services/graded-reader/scripts
+
+.venv/bin/python $S/validate.py workspace/being-earnest   # grade a book
+.venv/bin/python $S/selftest.py                           # full pipeline check
+```
+
+Drive it with Claude Code, or with the optional headless runner in
+`services/graded-reader/headless/` against any OpenAI-compatible endpoint. On
+Debian/Ubuntu install `jieba` inside a venv — system setuptools breaks its
+legacy `setup.py`.
+
+Docs: [`services/graded-reader/SKILL.md`](services/graded-reader/SKILL.md)
+
+---
+
+## 4. Converting a PDF
+
+**Tested:** by worked conversion rather than self-test — whether it works is
+whether a real PDF becomes an EPUB a human finds sound. The committed proof is
+`workspace/alcaldes-encontrados`, a 1793 Spanish entremés, written up with the
+gaps it surfaced in
+[`CONVERSIONS.md`](services/pdf2epub/CONVERSIONS.md).
+
+A PDF says where ink goes; an EPUB says what the text is. The pipeline recovers
+the second from the first: triage characterises the source, scripts extract and
+restore on the happy path, and the agent confirms routes, diagnoses failures and
+emits decisions that scripts apply. The model never bulk-generates — every byte
+traces back to the extraction, residual OCR noise included.
+
+```bash
+.venv/bin/pip install -r services/pdf2epub/requirements.txt
+```
+
+Docs: [`services/pdf2epub/SKILL.md`](services/pdf2epub/SKILL.md) · design and
+open questions: [`DESIGN.md`](services/pdf2epub/DESIGN.md)
+
+---
+
+## 5. Building the EPUB
+
+**Tested:** shared by both services, so both self-tests exercise it. Output is
+deterministic — the same source builds a byte-identical file, which is also how
+regressions get caught.
+
+One builder for everything. Hand-built XHTML/OPF, simple CSS, no embedded fonts
+(the reader can't use them). It also ships the single structural check both
+services rely on: mimetype, manifest⇄zip parity, well-formed XML, links resolve.
 
 ```bash
 .venv/bin/python epub-builder/scripts/build_epub.py \
@@ -110,152 +150,78 @@ so "is this a sound EPUB?" has a single implementation.
     workspace/<slug>/build/<slug>.epub
 ```
 
-### opds-server — the built books, over WiFi *(device-confirmed, 2026-07)*
+Docs: [`epub-builder/SKILL.md`](epub-builder/SKILL.md)
 
-Serves `workspace/*/build/*.epub` as an **OPDS 1.2** catalog the X3 browses and
-downloads from directly — no SD card shuffling, and no library manager in
-between. Build a book and it is on the reader by the next page turn. Stdlib
-only, no dependencies.
+---
 
-Docs: [`opds-server/SKILL.md`](opds-server/SKILL.md)
+## 6. Onto the reader
+
+**Tested:** device-confirmed, 2026-07 — an X3 browsed a served catalog and
+downloaded books from it. The self-test walks a real library through a port of
+the reader's *own* OPDS client, because a standards-valid feed can still lose
+books on this device.
+
+Serves `workspace/*/build/*.epub` as an OPDS catalog the X3 browses directly.
+Build a book and it's on the reader by the next page turn. Stdlib only.
 
 ```bash
 python3 opds-server/scripts/serve_opds.py     # serve workspace/ on :6737
 python3 opds-server/scripts/library.py        # what would be served
-python3 opds-server/scripts/selftest.py       # the gate
 ```
 
-Then on the device: Settings → System → OPDS Servers → Add Server, and enter the
-URL the server prints — **starting with `http://`**, since the reader only does
-verified HTTPS and can't be given a self-signed certificate.
+On the device: Settings → System → OPDS Servers → Add Server, and enter the URL
+the server prints — **starting with `http://`**. The reader only does verified
+HTTPS and can't be given a self-signed certificate, so `https://` fails with a
+generic "Failed to fetch feed".
 
-**You don't need a config file.** Every setting has a working default, and the
-startup banner says `config (defaults)` when you're using them:
+**No config file needed.** Defaults: serves `workspace/`, binds `0.0.0.0:6737`
+(6737 is "OPDS" on a phone keypad — not 8080, which everything else wants),
+open, 25 entries per page. The startup banner says `config (defaults)` when
+that's what you're on.
 
-| | default | why |
-|---|---|---|
-| library roots | `workspace/` | the builder's output; resolved against the repo, not your shell's directory |
-| excludes | `*-DIAGNOSTIC.epub` | the builder's render-test EPUBs aren't books |
-| bind | `0.0.0.0:6737` | every interface, so the reader can reach it. 6737 is "OPDS" on a phone keypad — not 8080, which everything else wants |
-| auth | off | open on your LAN, and the banner says so at startup |
-| page size | 25 entries | a feed page the device holds comfortably |
+Change something once with a flag — `--root DIR` (repeatable), `--port`
+(`0` picks a free one and prints it), `--host`, `--page-size`. Change it
+permanently by copying `config.example.json` to `config.json`, which is
+gitignored and annotated key by key. Basic auth lives there too, with the
+password in `secrets/` — over plain HTTP it's cleartext, which is a real limit
+of the device and not sloppiness.
 
-For a one-off change, use a flag:
+To leave it running, `opds-server/opds-server.service` is a systemd unit: edit
+two lines, `systemctl enable --now opds-server`. The commands and what they do
+are in [`helper-info.txt`](opds-server/helper-info.txt). The unit passes no
+flags, so under systemd anything non-default belongs in `config.json`. It's
+written for Debian; elsewhere, hand it to your favourite AI.
 
-```bash
-python3 opds-server/scripts/serve_opds.py --root ~/Books --port 8123
-```
+Docs: [`opds-server/SKILL.md`](opds-server/SKILL.md)
 
-`--root DIR` (repeatable) serves somewhere else · `--port` (`0` picks any free
-one and prints it) · `--host` · `--page-size` · `--config` for a config file
-elsewhere.
+---
 
-To make a change permanent, copy `opds-server/config.example.json` to
-`config.json` — it's gitignored, and every key is annotated in place. That's
-also where you turn on Basic auth: set `auth.username`, put the password in
-gitignored `secrets/`, and read [`secrets/README.md`](opds-server/secrets/README.md)
-first — over plain HTTP it's cleartext, which is a real limit and not a
-sloppy one.
+## 7. Fonts
 
-To leave it running, `opds-server/opds-server.service` is a systemd unit — edit
-two lines, `systemctl enable --now opds-server`, done; the commands and what
-they do are in [`opds-server/helper-info.txt`](opds-server/helper-info.txt).
-Note the unit runs the script with **no flags**, so under systemd anything
-non-default belongs in `config.json`. It's written for Debian; on anything else,
-hand the file to your favourite AI and ask for the equivalent.
+**Tested:** device-confirmed. Stock firmware shows hanzi as tofu boxes; these
+render.
 
-Its design is dictated by what the firmware's client *actually* parses, read
-from source rather than docs: an entry with no title or unresolvable href is
-dropped **silently**, an acquisition link needs `type` exactly
-`application/epub+zip`, `rel="search"` must carry the `{searchTerms}` template
-inline (the conventional OpenSearch descriptor is never fetched), relative hrefs
-are appended rather than resolved, and self-signed HTTPS cannot connect at all.
-The table lives in [`reference/readers.md`](reference/readers.md).
+Copy a family folder from `reference/fonts/` to the SD card under `/fonts/`,
+power-cycle (fonts are scanned once at boot), then pick it under Settings →
+Reader → Font Family.
 
-So the gate here isn't "is this valid OPDS?" — a valid feed can lose books on
-this device. `selftest.py` serves a real library and walks it through a port of
-**the firmware's own client**, checking that every book is reachable, that
-pagination loses nothing, and that a download arrives byte-identical and still
-passes the shared `verify_epub.py`.
+- **`WenZilla/`** — the recommended Chinese font. LXGW WenKai kaiti for hanzi,
+  NV Zilla Slab for Latin and pinyin, so mixed text reads well.
+- **`WenKaiFull/`** — pure kaiti baseline.
 
-## Tasks
+Glyphs stream from the SD card, so a big font costs no RAM. Build rules for
+making your own — including the trap where a subset font loads in the picker and
+then silently fails — are in [`reference/readers.md`](reference/readers.md),
+along with the rendering verdicts every tool here is shaped by: embedded EPUB
+fonts are ignored, ruby and interlinear pinyin are broken, RAM is ~400 KB.
 
-### graded-reader — generate Chinese graded readers *(working)*
+---
 
-Write leveled Chinese books chapter-by-chapter: a *planner* outlines, a
-*scribe* drafts each chapter against a mechanically-built vocabulary brief,
-deterministic validation gates the HSK level (out-of-list ≤ 5%, stretch
-≤ 15%), a *glossary editor* prunes the harvested glossary, and the builder
-`annotate.py` marks each glossary word's first appearance with its pinyin, and
-the generic builder assembles the EPUB.
+## 8. Making it yours
 
-Docs: [`services/graded-reader/SKILL.md`](services/graded-reader/SKILL.md)
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r services/graded-reader/requirements.txt
-S=services/graded-reader/scripts
-
-.venv/bin/python $S/validate.py workspace/being-earnest       # grade a book
-.venv/bin/python $S/selftest.py                               # full pipeline check
-# EPUB assembly: the shared epub-builder (see Infrastructure above)
-```
-
-Two drivers: Claude Code interactively, or the optional headless runner in
-`services/graded-reader/headless/` (`run_book.py`) against any
-OpenAI-compatible endpoint — kept out of the core so the skill is just the
-briefing plus deterministic tools. On Debian/Ubuntu install `jieba` inside a
-venv — system setuptools breaks its legacy `setup.py`.
-
-### pdf2epub — convert PDFs into clean EPUBs *(fully implemented and proven end-to-end on its test fixture)*
-
-PDFs are page descriptions (where ink goes); EPUB is a document (what the
-text is). The pipeline recovers intent from ink, **deterministic-first,
-agent-on-error**: triage characterizes the source, scripts extract and
-restore the text on the happy path, and the agent orchestrates and
-verifies — confirming routes, diagnosing failures, and emitting decisions
-(policy switches, chapter anchors) that scripts apply. The model never bulk-
-generates: every byte in the EPUB traces back to the extraction.
-
-Docs: [`services/pdf2epub/SKILL.md`](services/pdf2epub/SKILL.md) ·
-design + open questions: [`DESIGN.md`](services/pdf2epub/DESIGN.md)
-
-```bash
-.venv/bin/pip install -r services/pdf2epub/requirements.txt
-```
-
-Proof by worked conversion, not self-test: whether pdf2epub works is whether an
-agent can turn a real PDF into a faithful EPUB a human finds sound, so the proof
-is the committed sample under `workspace/` — the public-domain Spanish
-entremés `alcaldes-encontrados`, a full vision transcription with a built,
-verified EPUB — annotated,
-with the tool gaps they surfaced, in
-[`services/pdf2epub/CONVERSIONS.md`](services/pdf2epub/CONVERSIONS.md). The
-pipeline strips furniture, normalizes OCR marks, recovers spacing, and reflows
-verse or prose, faithfully preserving residual OCR noise — never inventing
-corrections.
-
-## Shared ground
-
-```
-reference/readers.md    Xteink X3 / CrossPoint device notes: confirmed
-                        rendering verdicts, font build rules, SD layout —
-                        read before touching anything device-facing
-workspace/<slug>/       one folder per book/job (source, chapters/, book.json,
-                        build/ outputs). Gitignored apart from the committed
-                        samples below — your books are yours, not the repo's
-reference/fonts/        SD-ready .cpfont families for the device: WenZilla
-                        (recommended Chinese hybrid — WenKai kaiti + Zilla Slab
-                        Latin/pinyin), WenKaiFull (pure kaiti, confirmed
-                        working)
-```
-
-Device facts that shape every tool (details in `reference/readers.md`):
-embedded EPUB fonts are useless (the reader rasterizes only pre-converted
-`.cpfont` bitmaps), ruby and interlinear pinyin are confirmed broken (use the
-`reading_style: after`), RAM is ~400 KB — keep books lean and CSS simple.
-
-## License
+To add a tool, copy the shape: a `SKILL.md` briefing, deterministic scripts for
+the parts models are bad at, and a gate after every model step. Everything
+speaks plain files and JSON, so any agent that can run a shell drives it.
 
 The code and documentation are **MIT** licensed — see [`LICENSE`](LICENSE).
 
@@ -264,16 +230,17 @@ The code and documentation are **MIT** licensed — see [`LICENSE`](LICENSE).
 > intellectual property was built to protect is fading. Take it, adapt it,
 > make it yours.
 
-Two kinds of bundled third-party content keep their own terms:
+Two kinds of bundled content keep their own terms:
 
-- **Fonts** are under the **SIL Open Font License 1.1**: the `.cpfont`
-  families in `reference/fonts/` (conversions of LXGW WenKai, Zilla Slab, Noto
-  CJK), and `reference/covers/IMFellEnglish-Regular.ttf`, which sets Latin
-  cover titles. Notices, sources, and the license texts in
-  [`reference/fonts/ATTRIBUTION.md`](reference/fonts/ATTRIBUTION.md),
-  [`reference/fonts/OFL.txt`](reference/fonts/OFL.txt) and
-  [`reference/covers/IMFellEnglish-OFL.txt`](reference/covers/IMFellEnglish-OFL.txt).
-- **Sample book texts** under `workspace/` are either original to this project
-  or public-domain source material — Oscar Wilde's *The Importance of Being
-  Earnest*, retold in Chinese as a graded reader, and the 1793 entremés
-  *Los alcaldes encontrados* — retold or converted as pipeline demonstrations.
+- **Fonts**, under the **SIL Open Font License 1.1** — the `.cpfont` families in
+  `reference/fonts/` (from LXGW WenKai, Zilla Slab, Noto CJK) and
+  `reference/covers/IMFellEnglish-Regular.ttf` for cover titles. Notices in
+  [`ATTRIBUTION.md`](reference/fonts/ATTRIBUTION.md),
+  [`OFL.txt`](reference/fonts/OFL.txt) and
+  [`IMFellEnglish-OFL.txt`](reference/covers/IMFellEnglish-OFL.txt).
+- **Sample texts** under `workspace/`, either original here or public domain —
+  Oscar Wilde's *The Importance of Being Earnest*, retold in Chinese, and the
+  1793 entremés *Los alcaldes encontrados*.
+
+Issues and pull requests are welcome, very much including the ones that just
+say this is wrong.
