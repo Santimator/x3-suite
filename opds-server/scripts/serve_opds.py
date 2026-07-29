@@ -109,6 +109,31 @@ class OpdsHandler(BaseHTTPRequestHandler):
     def version_string(self) -> str:
         return self.server_version  # the default appends a trailing sys_version
 
+    def handle_one_request(self) -> None:
+        """Diagnose a TLS handshake rather than answering it with binary noise.
+
+        A device configured with an `https://` URL opens TLS against this plain
+        HTTP port. Left alone, http.server reads the ClientHello as a request
+        line and logs `Bad HTTP/0.9 request type ('\\x16\\x03\\x03\\x01')`,
+        which is true, unreadable, and three steps from the actual problem —
+        while the reader just says "Failed to fetch feed". So catch the one
+        byte that identifies it (0x16 = TLS handshake record) and say what to
+        change instead.
+        """
+        try:
+            if self.rfile.peek(1)[:1] == b"\x16":
+                self.log_message(
+                    "%s", "TLS handshake on a plain-HTTP port — the OPDS server URL "
+                    "stored on the device starts with https://. Change it to http:// "
+                    "(the X3 verifies certificates against a bundled CA store, so no "
+                    "self-signed certificate can connect; plain HTTP on the LAN is the "
+                    "supported transport).")
+                self.close_connection = True
+                return
+        except (OSError, ValueError):
+            pass  # nothing buffered, or a closed socket — let the base class deal
+        super().handle_one_request()
+
     def log_message(self, fmt: str, *args) -> None:
         sys.stderr.write(f"{self.address_string()} {fmt % args}\n")
 

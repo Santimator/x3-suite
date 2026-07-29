@@ -91,6 +91,22 @@ unrepresentable.
 The library is rescanned on demand (short TTL), so a book built while the server
 is running appears without a restart.
 
+## When the device says it failed
+
+The reader reports one thing — **"Failed to fetch feed"** — for every network
+problem there is. The server's log is what tells them apart:
+
+| Server log shows | What it is |
+|---|---|
+| `TLS handshake on a plain-HTTP port` | The URL stored on the device starts with `https://`. Re-enter it as `http://<ip>:6737/opds`, or with no scheme at all — the firmware prepends `http://` when there isn't one. The X3 cannot do HTTPS here at all (see the transport note below). |
+| **nothing** | The request never arrived. Wrong IP, a different network or VLAN, or a firewall on this machine. The startup banner prints the address it believes it's on; try that URL from a phone on the same WiFi. |
+| `401` | Auth is on and the device isn't sending usable credentials. It only sends them when *both* username and password are set on the server entry. |
+| `200`, and the device says **"No entries"** | The feed arrived and parsed, but every entry was dropped — a missing title or an unresolvable href — or that section is genuinely empty. Run `selftest.py`; that is the exact failure it exists to catch. |
+
+A book that lists but 404s on download means the library was rescanned and the
+file moved or was rebuilt under a different name — ids are derived from the
+path. Re-open the catalog to pick up the new one.
+
 ## What the device's client actually requires
 
 The whole design is downstream of CrossPoint's OPDS client, read from source
