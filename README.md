@@ -22,9 +22,31 @@ But I digress. Let's move to the guide.
 
 ---
 
-## 1. The idea, and what to find where
+## 1. What's here, and the idea behind it
 
-Let the model do what models are good at, and nothing else:
+This is a suite of tools. You'll find:
+
+- **`opds-server/`** — serves your built books to the reader over WiFi.
+- **`epub-builder/`** — turns the common book format into an EPUB. The services
+  hand it their books; you can also run it on your own.
+- **`services/`** — the AI-assisted tools:
+  - **`graded-reader/`** — writes leveled Chinese books.
+  - **`pdf2epub/`** — converts PDFs into clean EPUBs.
+- **`reference/`** — device notes and things for the X3 itself. Special mention
+  to **WenKai**, the Chinese font that makes CrossPoint render hanzi properly,
+  plus whatever else I end up adding.
+- **`workspace/`** — one folder per book, inputs and `build/` outputs. **Yours:**
+  gitignored apart from two committed samples, so your books stay your books.
+
+Each directory has a **`SKILL.md`** that is its real documentation. This guide
+tells you what a thing is for and how to run it; `SKILL.md` tells you how it
+works. `AGENTS.md` at the root is the same map written for a coding agent.
+
+### The services' philosophy
+
+The builder and the server are plain deterministic tools — no model anywhere
+near them. The two services are where an LLM does the work, and there the rule
+is to let the model do what models are good at, and nothing else:
 
 - **The model supplies judgement** — writing prose, inferring chapter structure,
   deciding how to restore mangled text.
@@ -38,25 +60,6 @@ That's why "AI-assisted" here doesn't mean "hope for the best". When a model
 must touch prose directly, it goes through a checked path that bounds and
 prints the edit — it can re-run with different parameters, it can't quietly
 rewrite.
-
-### What to find where
-
-```
-epub-builder/           the book format's contract (FORMAT.md) + build + verify
-opds-server/            serves built books to the reader over WiFi
-services/
-  ├─ graded-reader/     writes leveled Chinese books
-  └─ pdf2epub/          converts PDFs into clean EPUBs
-workspace/<slug>/       one folder per book — inputs, and build/ outputs
-reference/              device notes, fonts, cover assets
-```
-
-Each directory has a **`SKILL.md`** that is its real documentation. This guide
-tells you what a thing is for and how to run it; `SKILL.md` tells you how it
-works. `AGENTS.md` at the root is the same map written for a coding agent.
-
-**`workspace/` is yours.** It's gitignored apart from two committed samples, so
-your books stay your books.
 
 ### Setup
 
