@@ -1,93 +1,57 @@
 # AGENTS.md
 
-Guidance for any coding agent working in this repository. (Human-readable too —
-it's just how the repo is laid out and how to work in it.)
+Rules for **changing** this repository. For what it is and how to run it, read
+[`README.md`](README.md) — it's the guide, and this file deliberately doesn't
+repeat it.
 
-## What this is
+Each of the four top-level units — `epub-builder/`, `opds-server/`,
+`services/graded-reader/`, `services/pdf2epub/` — has a **`SKILL.md`** that is
+its canonical documentation. Read the one for the unit you're touching before
+you touch it. (`.claude/skills/` symlinks all four so Claude Code loads them as
+skills; the real content lives in the directories.)
 
-A suite that produces EPUBs for an **Xteink X3** e-ink reader and delivers them
-to it: shared **infrastructure** (a builder and an OPDS server) plus two
-**services** (AI-assisted tools) that target the builder's format. Read
-[`README.md`](README.md) for the full picture; the guiding idea is *LLM
-judgement, deterministic scripts for mechanics, and a deterministic gate after
-every LLM step*.
-
-## Layout
-
-```
-epub-builder/            shared infrastructure: the book-format contract
-                         (FORMAT.md) + build_epub.py + verify_epub.py
-opds-server/             shared infrastructure: serves build/ output to the
-                         device over WiFi as an OPDS catalog
-services/
-  graded-reader/         service: writes leveled Chinese readers
-  pdf2epub/              service: converts PDFs into clean EPUBs
-workspace/<slug>/        one folder per book/job (source, chapters/, book.json,
-                         build/ outputs)
-reference/               device notes (readers.md) + SD-ready .cpfont fonts
-```
-
-`workspace/` is **gitignored except for the committed samples** — books belong
-to whoever made them, not to the repo. The samples that *are* committed are
-there as proof and as self-test fixtures (pdf2epub's worked conversions,
-graded-reader's readers), so committing a new one means adding it to the
-allowlist in `.gitignore` on purpose. Never assume a book you find in
-`workspace/` is in version control.
-
-The split is by what's in the loop: a **service** carries a model and gates it;
-**infrastructure** is pure mechanics, no model anywhere. Each of the four
-top-level units has a **`SKILL.md`** that is its canonical, self-contained
-documentation — read it before changing that unit. `.claude/skills/` contains
-symlinks to these four so Claude Code auto-loads them; the real content lives in
-the directories above.
-
-## How a service is built (the pattern to follow)
-
-Every service is the same three things:
-
-1. **A briefing** (`SKILL.md`, plus `prompts/` for graded-reader) — how to do
-   the task and when to defer to a tool.
-2. **Deterministic tools** (`scripts/`) for the parts models are unreliable at
-   — they measure, transform, and check; they never invent.
-3. **A deterministic gate after every model step.** The model proposes; a gate
-   disposes. Trust comes from the gates, not the model.
-
-When the model must touch prose directly (e.g. a one-off OCR fix), it goes
-through a *guarded* path bounded and printed by a deterministic check — see
-pdf2epub's stage 2b.
-
-## Working here
+## What to run before you commit
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -r services/graded-reader/requirements.txt
-.venv/bin/pip install -r services/pdf2epub/requirements.txt
+.venv/bin/pip install -r services/graded-reader/requirements.txt   # jieba, pypinyin
+.venv/bin/pip install -r services/pdf2epub/requirements.txt        # + system tesseract
 ```
 
-How each service is verified differs, by design:
+The builder and the server are stdlib only — plain `python3`, nothing to install.
 
-- **graded-reader** has a deterministic self-test (its gates are objective —
-  vocabulary level, EPUB integrity):
-  `.venv/bin/python services/graded-reader/scripts/selftest.py`
-- **pdf2epub** does **not** — whether it works is whether an agent can convert
-  a real PDF to a faithful EPUB a human finds sound. Its proof is the worked
-  conversions under `workspace/` + [`services/pdf2epub/CONVERSIONS.md`](services/pdf2epub/CONVERSIONS.md);
-  to sanity-check the scripts, re-run a sample by hand and read the EPUB.
-- **opds-server** has one too, and its oracle is unusual on purpose: a port of
-  the *device's own* OPDS client, because a standards-valid feed can still lose
-  books on this reader. `python3 opds-server/scripts/selftest.py` — no venv
-  needed, it is stdlib only. Anything touching feed markup must keep it green,
-  and the client contract it encodes is tabulated in `reference/readers.md`.
+How each unit is verified differs, by design:
 
-Changes under `epub-builder/` are shared infrastructure: run the graded-reader
-self-test **and** keep its annotated EPUB output byte-identical
-(`workspace/being-earnest` is the canary). They also change what the server
-hands the device, so run the opds-server self-test too.
+- **graded-reader** — `.venv/bin/python services/graded-reader/scripts/selftest.py`.
+  Its gates are objective (vocabulary level, EPUB integrity), so a self-test
+  can hold them.
+- **opds-server** — `python3 opds-server/scripts/selftest.py`. Its oracle is a
+  port of the *device's own* OPDS client, because a standards-valid feed can
+  still lose books on this reader. Anything touching feed markup keeps it
+  green; the client contract is tabulated in `reference/readers.md`.
+- **pdf2epub** — no self-test, deliberately. Whether it works is whether an
+  agent can turn a real PDF into an EPUB a human finds sound, so the proof is
+  the worked conversion under `workspace/` plus
+  [`CONVERSIONS.md`](services/pdf2epub/CONVERSIONS.md). To sanity-check the
+  scripts, re-run a sample by hand and read the result.
+- **epub-builder** — shared by everything. Run the graded-reader self-test
+  **and** keep its EPUB output byte-identical (`workspace/being-earnest` is the
+  canary), then the opds-server self-test, since a builder change alters what
+  the server hands the device.
 
 ## Conventions
 
-- Deterministic scripts have typed JSON/file I/O and exit non-zero on a failed
-  gate — any shell-capable agent can drive them; no framework required.
-- Device constraints shape everything — read `reference/readers.md` before
-  touching anything that affects the EPUB output or fonts.
-- Licensing: code is MIT; bundled fonts are OFL (`reference/fonts/ATTRIBUTION.md`).
+- **Extend the contract before the builder.** `epub-builder/FORMAT.md` is what
+  the builder accepts; if a construct isn't described there, add it there first.
+- **Scripts measure, transform and check — they never invent.** Typed JSON/file
+  I/O, non-zero exit on a failed gate, so any shell-capable agent can drive them
+  with no framework.
+- **`workspace/` is gitignored except for the committed samples**, which are
+  proof and self-test fixtures. Never assume a book you find there is in version
+  control; committing a new sample means adding it to the `.gitignore` allowlist
+  on purpose.
+- **Read `reference/readers.md` before touching anything device-facing** — EPUB
+  output, fonts, or the OPDS feed. It records what the device actually does, and
+  marks which verdicts are device-confirmed.
+- **Licensing:** code is MIT; bundled fonts are OFL
+  (`reference/fonts/ATTRIBUTION.md`).
