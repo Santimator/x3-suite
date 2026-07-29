@@ -25,6 +25,23 @@ Two consequences: Settings → Reader → Font Size will also offer 8 and 10 as
 reading sizes, and on firmware older than 1.5.0 the extra files are simply
 inert.
 
+**After copying, verify the card — do not trust the copy.** Font discovery
+parses *filenames only*; it never opens a `.cpfont`. So a truncated or
+half-copied file still appears in Settings → Reader → Font Size, and only fails
+when you select it — at which point the family silently reverts to the built-in
+Noto. Check what the device actually holds, over WiFi, no card removal:
+
+```bash
+curl http://crosspoint.local/api/fonts     # every family, file and byte count
+```
+
+Every `size` there must match `CHECKSUMS.tsv` in this directory. Device-confirmed
+2026-07: an SD copy left `WenZilla_8/10` truncated at ~236 KB (of 1.7 / 2.5 MB)
+and never wrote WenKaiFull's two at all, which presented exactly as "the 8 and
+10 pt sizes don't work" — same visible symptom as the sparse-interval trap
+below, entirely different cause. Eject the card properly (let the write buffer
+flush) and re-check before concluding anything about the fonts themselves.
+
 **About the pinyin tones (WenZilla):** NV Zilla Slab ships most pinyin vowels
 but lacks eight — `ǎ ǐ ǒ Ǎ` and the ü-tones `ǖ ǘ ǚ ǜ`. `synth_pinyin.py`
 (here) draws them into Zilla's own style as composites (base vowel + the font's

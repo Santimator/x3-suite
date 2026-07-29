@@ -1,0 +1,24 @@
+# Expected bytes and MD5 for every .cpfont in this directory.
+#
+# Why this file exists: the reader lists installed fonts by *filename only* —
+# it never opens them — so a truncated copy still shows up in the font/size
+# menu and only fails when selected. Compare against what the device actually
+# holds, no card removal needed:
+#
+#   curl http://crosspoint.local/api/fonts
+#
+# The "size" of each file there must match the bytes column below.
+#
+# file	bytes	md5
+WenKaiFull/WenKaiFull_8.cpfont	1710064	8ca68788c7423c91d0d8279affc3950a
+WenKaiFull/WenKaiFull_10.cpfont	2469171	c40545c9f03512ad938b399bfa096d22
+WenKaiFull/WenKaiFull_12.cpfont	3303926	7c47794f9d53cc148047feb9a7357928
+WenKaiFull/WenKaiFull_14.cpfont	4368068	4646252379a491dffb9011843c2bce56
+WenKaiFull/WenKaiFull_16.cpfont	5494293	54e4e3af124a4e345bf4aca4bbc0a880
+WenKaiFull/WenKaiFull_18.cpfont	6803334	5e12f2c866b4d470bf4050359b5b63fc
+WenZilla/WenZilla_8.cpfont	1719443	32b176f3937a4d7ca77690648a7ca2aa
+WenZilla/WenZilla_10.cpfont	2475724	fdd264955777330234f722016c65d806
+WenZilla/WenZilla_12.cpfont	3306490	fd33f3fc245ca18e86649c236986bb28
+WenZilla/WenZilla_14.cpfont	4365789	be5505a01a5e432ea0706ab21b97c035
+WenZilla/WenZilla_16.cpfont	5487775	aa8c5f52ad4a393d5fb13987364eabfd
+WenZilla/WenZilla_18.cpfont	6794203	cb4f7f3b9ce11b3d1fb0a4b75e4316bd

@@ -80,11 +80,44 @@ sizes also appear in Settings → Reader → Font Size (reading at 8 pt is your
 call), and a mixed title renders *entirely* in the SD font, Latin included.
 With no SD font selected there is no fallback and CJK breaks again.
 
-**Still to confirm on-device** (nothing here has been seen on a 1.5.0 X3 yet):
-that the chapter list, the library and the file browser all come back, and that
-loading three extra sizes doesn't upset a 400 KB-RAM device — it shouldn't,
-since only the ~60–100-entry interval table is resident per font and the glyphs
-stream from SD.
+**Device-confirmed on a 1.5.0 RC (2026-07):** with a 12 pt `.cpfont` installed,
+CJK book titles render on the home screen — the UI fallback works. The 10 pt
+list rows are the other half and need the 10 pt file actually intact on the card
+(see below). Free heap on that device sat at ~35 KB, and loading the extra UI
+sizes did not disturb it: only the interval table is resident per font (~370
+bytes at 61 intervals), glyphs stream from SD.
+
+### When a size "doesn't work", suspect the card before the font
+
+Selecting a size and watching the reader fall back to built-in Noto has (at
+least) two causes with one symptom:
+
+1. **The file is not what you think it is.** Font discovery parses *filenames
+   only* — `parseFilename()` never opens the file — so a truncated copy is
+   listed in the size menu and only fails when it is selected and actually
+   loaded. *Device-confirmed 2026-07: an SD copy left both new WenZilla files
+   truncated at ~236 KB and silently skipped WenKaiFull's, which looked exactly
+   like "the 8 and 10 pt builds are broken". They were byte-perfect in the
+   repo.*
+2. **Sparse intervals** — the build-time trap in the next section.
+
+Tell them apart in one request, without pulling the card:
+
+```bash
+curl http://crosspoint.local/api/status    # firmware version, free heap
+curl http://crosspoint.local/api/fonts     # every installed file + byte count
+```
+
+Byte counts must match `reference/fonts/CHECKSUMS.tsv`. Only once they do is it
+worth suspecting the font build.
+
+**On identifying an RC build:** `/api/status` on the 1.5.0 RC returned
+`"version":"1.5.0-rc+"` — the commit hash after the `+` is empty, so that binary
+cannot be traced back to a commit. Nor is the web flasher's "RC2" built from the
+public `release/1.5.0` branch: crosspoint-tools stores admin-uploaded binaries
+(`builds/beta/{id}/firmware.bin`) and serves those. The RC ships code that
+branch does not have — reader font size by point value, for one. Read the device
+first, the source second.
 
 Two upstream issue candidates: the exact-size lookup could use the
 `findNearestSize` that already exists next to it, and a UI font without U+FFFD
