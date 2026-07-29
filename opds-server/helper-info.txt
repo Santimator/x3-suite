@@ -26,12 +26,19 @@ INSTALLING
       from the unit's [Install] section and creates a symlink. "--now" also starts
       it immediately, so you don't reboot to find out whether it works.
 
-  journalctl -u opds-server -f
+  sudo journalctl -u opds-server -f
 
       systemd captures the script's output into the journal; this reads it back,
       filtered to this unit, following live like tail -f. You'll see the startup
       banner — book count, config source, and the URL to type into the reader —
       then a line per request.
+
+      The sudo matters. A system unit logs to the system journal even when it
+      runs as you, and without root you see only your own journal — journalctl
+      prints a hint about groups 'adm' and 'systemd-journal' and then nothing
+      else. To drop the sudo permanently:
+
+          sudo usermod -aG adm $USER      # log out and back in
 
       Ctrl-C stops watching the log. It does not stop the service.
 
@@ -43,8 +50,8 @@ DAY TO DAY
   sudo systemctl restart opds-server        after editing config.json
   sudo systemctl stop opds-server           stop now, still starts at boot
   sudo systemctl disable --now opds-server  stop now and unhook it from boot
-  journalctl -u opds-server -n 50           last 50 lines, without following
-  journalctl -u opds-server --since today   just today's
+  sudo journalctl -u opds-server -n 50      last 50 lines, without following
+  sudo journalctl -u opds-server --since today   just today's
 
 
 SETTINGS

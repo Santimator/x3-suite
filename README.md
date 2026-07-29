@@ -110,7 +110,7 @@ so "is this a sound EPUB?" has a single implementation.
     workspace/<slug>/build/<slug>.epub
 ```
 
-### opds-server — the built books, over WiFi *(contract-verified against the firmware source; not yet device-confirmed)*
+### opds-server — the built books, over WiFi *(device-confirmed, 2026-07)*
 
 Serves `workspace/*/build/*.epub` as an **OPDS 1.2** catalog the X3 browses and
 downloads from directly — no SD card shuffling, and no library manager in

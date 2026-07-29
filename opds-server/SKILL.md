@@ -73,7 +73,7 @@ the repo — then:
 sudo cp opds-server/opds-server.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now opds-server
-journalctl -u opds-server -f          # the startup banner, then requests
+sudo journalctl -u opds-server -f     # the startup banner, then requests
 ```
 
 It runs as your user (the books live in your home), and since the server only
@@ -184,10 +184,15 @@ and that unknown ids, path-shaped ids and Basic auth all behave.
 Fixtures cover the hazards on purpose: a CJK title and author, a Latin book, a
 title full of `&` and angle brackets, and a book with no author at all.
 
-**Status: contract-verified, not device-confirmed.** The port proves the feed
-satisfies the rules that firmware applies; it is not a photograph of an X3
-browsing the catalog. `reference/readers.md` marks which verdicts have on-device
-evidence — this one does not yet.
+**Status: device-confirmed (2026-07).** An X3 on WiFi browsed a catalog served
+by this server. The client port remains the gate —
+it is what catches a regression before a device ever sees it — but the
+end-to-end claim is now evidence, not inference.
+
+The one failure worth knowing from that first run: the URL saved on the device
+had been typed with `https://`, so the reader opened TLS against a plain-HTTP
+port and reported "Failed to fetch feed" while the server logged a ClientHello
+as a bad request. Hence the diagnosis in the table above.
 
 ## Files
 
