@@ -15,9 +15,8 @@ a new era of abundance and cordiality.
 
 Everything here is built for an **Xteink X3 running CrossPoint 1.4.1**, and it
 is all vibe-coded — written by an LLM at my direction, tested by me using it.
-So each chapter opens with a line saying what has actually been checked. Where
-something is machine-checked it stays checked; whether a book is *nice to read*
-is me squinting at an e-ink screen.
+So each chapter opens with what's actually been checked: by a script where a
+script can check it, by me squinting at an e-ink screen where it can't.
 
 But I digress. Let's move to the guide.
 
@@ -41,6 +40,16 @@ works. `AGENTS.md` at the root is the same map written for a coding agent.
 
 **`workspace/` is yours.** It's gitignored apart from two committed samples, so
 your books stay your books.
+
+### Setup
+
+`epub-builder` and `opds-server` need nothing installed — they're stdlib only,
+run them with plain `python3`. The two services do need packages, so make a
+venv once and install whichever you'll use (chapters 3 and 4 name theirs):
+
+```bash
+python3 -m venv .venv
+```
 
 ### The idea
 
@@ -93,7 +102,6 @@ glossary, and `annotate.py` marks each glossary word's first appearance with
 its pinyin.
 
 ```bash
-python3 -m venv .venv
 .venv/bin/pip install -r services/graded-reader/requirements.txt
 S=services/graded-reader/scripts
 
@@ -126,6 +134,8 @@ traces back to the extraction, residual OCR noise included.
 
 ```bash
 .venv/bin/pip install -r services/pdf2epub/requirements.txt
+# the OCR route also needs the system binary:
+#   apt install tesseract-ocr tesseract-ocr-spa   (or your source language)
 ```
 
 Docs: [`services/pdf2epub/SKILL.md`](services/pdf2epub/SKILL.md) · design and
@@ -144,9 +154,9 @@ One builder for everything. Hand-built XHTML/OPF, simple CSS, no embedded fonts
 services rely on: mimetype, manifest⇄zip parity, well-formed XML, links resolve.
 
 ```bash
-.venv/bin/python epub-builder/scripts/build_epub.py \
+python3 epub-builder/scripts/build_epub.py \
     workspace/<slug> --out workspace/<slug>/build/<slug>.epub
-.venv/bin/python epub-builder/scripts/verify_epub.py \
+python3 epub-builder/scripts/verify_epub.py \
     workspace/<slug>/build/<slug>.epub
 ```
 
@@ -169,10 +179,14 @@ python3 opds-server/scripts/serve_opds.py     # serve workspace/ on :6737
 python3 opds-server/scripts/library.py        # what would be served
 ```
 
-On the device: Settings → System → OPDS Servers → Add Server, and enter the URL
-the server prints — **starting with `http://`**. The reader only does verified
-HTTPS and can't be given a self-signed certificate, so `https://` fails with a
-generic "Failed to fetch feed".
+### On the device
+
+Settings → System → OPDS Servers → Add Server, and enter the URL the server
+prints — **starting with `http://`**. The reader only does verified HTTPS and
+can't be given a self-signed certificate, so `https://` fails with a generic
+"Failed to fetch feed".
+
+### Configuring
 
 **No config file needed.** Defaults: serves `workspace/`, binds `0.0.0.0:6737`
 (6737 is "OPDS" on a phone keypad — not 8080, which everything else wants),
@@ -186,8 +200,10 @@ gitignored and annotated key by key. Basic auth lives there too, with the
 password in `secrets/` — over plain HTTP it's cleartext, which is a real limit
 of the device and not sloppiness.
 
-To leave it running, `opds-server/opds-server.service` is a systemd unit: edit
-two lines, `systemctl enable --now opds-server`. The commands and what they do
+### Leaving it running
+
+`opds-server/opds-server.service` is a systemd unit: edit two lines,
+`systemctl enable --now opds-server`. The commands and what they do
 are in [`helper-info.txt`](opds-server/helper-info.txt). The unit passes no
 flags, so under systemd anything non-default belongs in `config.json`. It's
 written for Debian; elsewhere, hand it to your favourite AI.
