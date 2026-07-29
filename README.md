@@ -7,22 +7,39 @@ find sophisticated tools like an AI-assisted PDF to EPUB converter (that might
 or might not work) or something as simple as a custom Chinese font I like.
 
 This is a project I do for myself to make my life around the X3 easier and
-better. Feel free to add, comment, fork, use… I am not a super huge fan of
-locking tools or info behind copyright stuff so whatever I did, it's yours to
-use. This is particularly true in this new era where AI is actually doing a lot
-of it and my Claude is no different from your Claude. Hopefully we are entering
-a new era of abundance and cordiality.
+better — mine is an **Xteink X3 running CrossPoint 1.4.1**, and that's what
+everything here is built and tested against. Feel free to add, comment, fork,
+use… I am not a super huge fan of locking tools or info behind copyright stuff
+so whatever I did, it's yours to use. This is particularly true in these new
+times where AI is actually doing a lot of it and my Claude is no different from
+your Claude. Hopefully we are entering a new era of abundance and cordiality.
 
-Everything here is built for an **Xteink X3 running CrossPoint 1.4.1**, and it
-is all vibe-coded — written by an LLM at my direction, tested by me using it.
-So each chapter opens with what's actually been checked: by a script where a
-script can check it, by me squinting at an e-ink screen where it can't.
+It's also all vibe-coded: written by an LLM at my direction, tested by me using
+it. So each chapter opens with what's actually been checked — by a script where
+a script can check it, by me squinting at an e-ink screen where it can't.
 
 But I digress. Let's move to the guide.
 
 ---
 
-## 1. What to find where
+## 1. The idea, and what to find where
+
+Let the model do what models are good at, and nothing else:
+
+- **The model supplies judgement** — writing prose, inferring chapter structure,
+  deciding how to restore mangled text.
+- **Scripts supply mechanics** — segmenting vocabulary, extracting a PDF,
+  reflowing text, assembling the EPUB. They measure and transform; they never
+  invent.
+- **A deterministic gate follows every model step.** Vocabulary level, EPUB
+  integrity, feed correctness. The model proposes, the gate disposes.
+
+That's why "AI-assisted" here doesn't mean "hope for the best". When a model
+must touch prose directly, it goes through a checked path that bounds and
+prints the edit — it can re-run with different parameters, it can't quietly
+rewrite.
+
+### What to find where
 
 ```
 epub-builder/           the book format's contract (FORMAT.md) + build + verify
@@ -50,23 +67,6 @@ venv once and install whichever you'll use (chapters 3 and 4 name theirs):
 ```bash
 python3 -m venv .venv
 ```
-
-### The idea
-
-Let the model do what models are good at, and nothing else:
-
-- **The model supplies judgement** — writing prose, inferring chapter structure,
-  deciding how to restore mangled text.
-- **Scripts supply mechanics** — segmenting vocabulary, extracting a PDF,
-  reflowing text, assembling the EPUB. They measure and transform; they never
-  invent.
-- **A deterministic gate follows every model step.** Vocabulary level, EPUB
-  integrity, feed correctness. The model proposes, the gate disposes.
-
-That's why "AI-assisted" here doesn't mean "hope for the best". When a model
-must touch prose directly, it goes through a checked path that bounds and
-prints the edit — it can re-run with different parameters, it can't quietly
-rewrite.
 
 ---
 
