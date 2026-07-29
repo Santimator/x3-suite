@@ -63,6 +63,31 @@ what this serves is your own library — which is the point, but worth knowing
 before you open a port on it. Add absolute paths to `library_roots` to serve
 books kept elsewhere.
 
+## Running it as a service
+
+[`opds-server.service`](opds-server.service) is a systemd system unit. Edit the
+two `CHANGEME`s — the account whose home holds the books, and where you cloned
+the repo — then:
+
+```bash
+sudo cp opds-server/opds-server.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now opds-server
+journalctl -u opds-server -f          # the startup banner, then requests
+```
+
+It runs as your user (the books live in your home), and since the server only
+ever reads, the unit confines it accordingly: the filesystem read-only, home
+readable but not writable.
+
+Port, library roots and auth all stay in `config.json` — the unit doesn't
+repeat them, so changing any of them is `systemctl restart opds-server` and
+nothing more.
+
+Written for Debian: `/usr/bin/python3`, `multi-user.target`. On another distro
+or init system, hand the file to your favourite AI and ask for the equivalent —
+it's twenty declarative lines.
+
 ## The catalog
 
 ```
@@ -165,6 +190,7 @@ evidence — this one does not yet.
 ```
 SKILL.md                     this file
 config.example.json          copy to config.json (gitignored)
+opds-server.service          systemd unit (Debian; edit two lines)
 secrets/                     gitignored; the Basic-auth password
 scripts/
   serve_opds.py              the server (stdlib http.server)

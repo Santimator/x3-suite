@@ -126,9 +126,15 @@ python3 opds-server/scripts/selftest.py       # the gate
 ```
 
 Then on the device: Settings → System → OPDS Servers → Add Server, and enter the
-URL the server prints. Local config and the optional Basic-auth password live in
-gitignored `config.json` / `secrets/` (copy `config.example.json`); with no
-config at all it serves the builder's output folder, open on the LAN.
+URL the server prints — **starting with `http://`**, since the reader only does
+verified HTTPS and can't be given a self-signed certificate. Local config and the
+optional Basic-auth password live in gitignored `config.json` / `secrets/` (copy
+`config.example.json`); with no config at all it serves the builder's output
+folder, open on the LAN.
+
+To leave it running, `opds-server/opds-server.service` is a systemd unit — edit
+two lines, `systemctl enable --now opds-server`, done. It's written for Debian;
+on anything else, hand the file to your favourite AI and ask for the equivalent.
 
 Its design is dictated by what the firmware's client *actually* parses, read
 from source rather than docs: an entry with no title or unresolvable href is
