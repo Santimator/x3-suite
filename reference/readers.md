@@ -81,8 +81,9 @@ rule at 480px width (`prepare.py`).
 `src/network/HttpDownloader.cpp`, `src/util/UrlUtils.cpp`,
 `src/activities/browser/OpdsBookBrowserActivity.cpp`, master @ 2026-07), not from
 the user guide. **Source-confirmed, and device-confirmed 2026-07** — an X3
-browsed a catalog served by `opds-server/`, which implements all of it; its
-self-test grades against a port of this client.*
+browsed a catalog served by `opds-server/` and downloaded books from it; that
+server implements all of it, and its self-test grades against a port of this
+client.*
 
 | What | Requirement |
 |---|---|

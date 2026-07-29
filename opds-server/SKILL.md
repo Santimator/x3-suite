@@ -185,7 +185,7 @@ Fixtures cover the hazards on purpose: a CJK title and author, a Latin book, a
 title full of `&` and angle brackets, and a book with no author at all.
 
 **Status: device-confirmed (2026-07).** An X3 on WiFi browsed a catalog served
-by this server. The client port remains the gate —
+by this server and downloaded books from it. The client port remains the gate —
 it is what catches a regression before a device ever sees it — but the
 end-to-end claim is now evidence, not inference.
 
