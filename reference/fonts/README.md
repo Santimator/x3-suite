@@ -15,6 +15,16 @@ All SIL OFL licensed. Built with CrossPoint's own `fontconvert_sdcard.py`; the
 reproducible recipe (and the full device debugging record, including why
 charset-subsetted fonts must NOT be used) is in `../readers.md`.
 
+**Why six sizes (8, 10, 12, 14, 16, 18).** 12–18 are reading sizes. 8, 10 and
+12 are what CrossPoint **1.5.0+** loads to draw CJK in the *interface* — the
+chapter list, the library, the file browser — because the built-in UI fonts are
+Latin-only. It matches by exact point size, so a missing UI size means those
+rows stay unreadable (blank on 1.5.0's predecessor 1.4.1, where the fallback
+didn't exist at all). Full story in `../readers.md`, "CJK in the interface".
+Two consequences: Settings → Reader → Font Size will also offer 8 and 10 as
+reading sizes, and on firmware older than 1.5.0 the extra files are simply
+inert.
+
 **About the pinyin tones (WenZilla):** NV Zilla Slab ships most pinyin vowels
 but lacks eight — `ǎ ǐ ǒ Ǎ` and the ü-tones `ǖ ǘ ǚ ǜ`. `synth_pinyin.py`
 (here) draws them into Zilla's own style as composites (base vowel + the font's
@@ -24,5 +34,6 @@ Zilla, not in a fallback face. Run it before the font build.
 **Hard-won rule: build CJK fonts with broad preset intervals
 (`latin-ext,cjk`), never with sparse custom ranges.** Sparse-interval
 `.cpfont` files pass every format check but silently fail to load on the
-device (the font setting reverts to built-in Noto). Confirmed on CrossPoint
-1.4.1 / X3, 2026-07 — upstream issue candidate.
+device (the font setting reverts to built-in Noto). Found on CrossPoint
+1.4.1 / X3, 2026-07, and not re-tested since — the converter and the loader
+are unchanged in 1.5.0, so assume it still bites. Upstream issue candidate.

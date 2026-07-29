@@ -1,22 +1,29 @@
 # Device notes — Xteink X3 (CrossPoint firmware)
 
 The suite's EPUBs target an **Xteink X3** (ESP32-C3, ~400 KB RAM, 528×792
-e-ink) running **CrossPoint** (open-source firmware; 1.4.1 as of mid-2026),
+e-ink) running **CrossPoint** (open-source firmware; 1.5.0 as of mid-2026),
 fed over WiFi from the suite's own OPDS server (`opds-server/`) or by SD card.
 Everything below is **device-confirmed** (photos, 2026-07) unless marked
 otherwise.
 
 ## The working recipe (confirmed end-to-end)
 
-1. **Firmware:** CrossPoint (web-flash from https://crosspointreader.com/;
-   stock is restorable the same way). Stock firmware ships no CJK glyphs at
-   all — hanzi render as tofu boxes — so it is not an option for Chinese.
+1. **Firmware:** CrossPoint **1.5.0 or newer** (web-flash from
+   https://crosspointreader.com/; stock is restorable the same way). Stock
+   firmware ships no CJK glyphs at all — hanzi render as tofu boxes — so it is
+   not an option for Chinese. 1.5.0 is the floor because it is the first
+   release that renders CJK in the *interface* (chapter list, library, file
+   browser) — see "CJK in the interface" below. *This step is the one part of
+   the recipe not yet device-confirmed: it is read from the firmware source,
+   and the photos above were taken on 1.4.1.*
 2. **Font:** copy a family folder from `reference/fonts/` to the SD card under
    `/fonts/`, power-cycle (fonts scan once at boot), select it under Settings →
    Reader → Font Family. **`WenZilla/`** is the recommended Chinese font — LXGW
    WenKai kaiti for hanzi + NV Zilla Slab for Latin/pinyin, so mixed
    hanzi+pinyin reads nicely. **`WenKaiFull/`** is the pure-kaiti baseline
-   (device-confirmed). Glyphs stream from SD. Install details: `reference/fonts/README.md`.
+   (device-confirmed). Glyphs stream from SD. Both ship sizes **8, 10, 12, 14,
+   16, 18** — the small three exist for the UI fallback, not for reading.
+   Install details: `reference/fonts/README.md`.
 3. **Books:** build with `reading_style: after` in book.json (pinyin after each
    glossed word) — see the rendering verdicts below.
 
@@ -30,10 +37,59 @@ otherwise.
 | `reading_style: after` (trailing pinyin) | Works — the X3 default |
 | Embedded EPUB fonts (`@font-face`) | Ignored — the renderer only rasterizes pre-converted `.cpfont` bitmaps; never fatten the books with fonts |
 | Glossary/internal links | Harmless; not tappable (no touchscreen) — kept for phone reading |
+| CJK in *interface* text (TOC, library, browser) | Needs 1.5.0 **and** 8/10/12 pt `.cpfont` sizes — see below. On 1.4.1 those rows render **blank** |
 
 Keep chapter CSS trivial: the engine honors basic text properties only.
 `reading_style: ruby` remains for capable readers (Apple Books renders ruby
 beautifully) — never for the X3.
+
+## CJK in the interface (why the chapter list was blank)
+
+*Source-confirmed against the firmware (tags 1.4.1 and 1.5.0), symptom
+device-confirmed 2026-07.*
+
+The book *body* and the *interface* are drawn with different fonts. Body text
+uses the SD-card family you selected; every list row, header and title in the
+UI uses a **built-in Ubuntu face compiled into flash — Latin only**
+(`UI_10_FONT_ID` for list rows, `UI_12_FONT_ID` for headers/titles,
+`SMALL_FONT_ID` — Noto Sans — for subtitle lines). Selecting a CJK SD font
+never changed that.
+
+On **1.4.1** the result is a chapter list of **blank but navigable rows**: the
+EPUB nav is parsed correctly (the rows are there, and selecting one jumps to
+the right chapter), the labels simply draw nothing. Blank rather than tofu
+because `EpdFont::getGlyph()` substitutes U+FFFD for a missing glyph, and
+Ubuntu has no U+FFFD — the converter validates it away, so the substitution
+also misses and the renderer draws nothing at all. The 8 pt Noto face *does*
+carry U+FFFD, which is the tell: at 8 pt you get boxes, at 10/12 pt you get
+nothing. A title like `诚实的重要 · 分级读物 (HSK 3)` shows up as `· (HSK 3)`.
+
+**1.5.0** adds a size-matched CJK fallback (`SdCardFontSystem::setupUiFallbacks`):
+a UI string containing CJK the built-in font can't draw is rendered — whole
+string, not per glyph — with your selected SD family. Two conditions, both
+required:
+
+- the SD family must actually cover CJK (probed with 一/あ/ア/가), and
+- it must ship `.cpfont` files at **exactly 8, 10 and 12 pt**. The lookup is
+  `findFile(pointSize)`, an exact match — there is no nearest-size fallback, so
+  a 12–18 family (what this repo shipped until 2026-07) leaves the 10 pt list
+  rows blank even on 1.5.0.
+
+Hence the sizes in `reference/fonts/`. Side effects worth knowing: those three
+sizes also appear in Settings → Reader → Font Size (reading at 8 pt is your
+call), and a mixed title renders *entirely* in the SD font, Latin included.
+With no SD font selected there is no fallback and CJK breaks again.
+
+**Still to confirm on-device** (nothing here has been seen on a 1.5.0 X3 yet):
+that the chapter list, the library and the file browser all come back, and that
+loading three extra sizes doesn't upset a 400 KB-RAM device — it shouldn't,
+since only the ~60–100-entry interval table is resident per font and the glyphs
+stream from SD.
+
+Two upstream issue candidates: the exact-size lookup could use the
+`findNearestSize` that already exists next to it, and a UI font without U+FFFD
+fails silently (blank) instead of showing the boxes the firmware's own
+`docs/sd-card-fonts.md` promises.
 
 ## Screen text capacity (measured on-device, 2026)
 
@@ -83,7 +139,11 @@ rule at 480px width (`prepare.py`).
 the user guide. **Source-confirmed, and device-confirmed 2026-07** — an X3
 browsed a catalog served by `opds-server/` and downloaded books from it; that
 server implements all of it, and its self-test grades against a port of this
-client.*
+client. Those four files are byte-identical between 1.5.0 and the master that
+was read, so this table describes 1.5.0 exactly. 1.5.0 did rework them
+substantially from 1.4.1 — notably it now percent-encodes unsafe characters in
+a URL before fetching it, which our server is unaffected by (its slugs are
+ASCII, and `{searchTerms}` is substituted before that encoding runs).*
 
 | What | Requirement |
 |---|---|
@@ -117,21 +177,33 @@ the official catalog contains zero CJK families).
    but opening a book reverts the setting to built-in Noto. The identical
    font content built with broad presets (`latin-ext,cjk` → ~100 wide
    intervals, 22.5k glyphs) loads and renders. Glyphs stream from SD, so the
-   big font costs no RAM. *Upstream issue candidate; verified on 1.4.1.*
-2. **Layout:** one folder per family — `/fonts/<Family>/<Family>_<size>.cpfont`;
+   big font costs no RAM. *Upstream issue candidate; found and verified on
+   1.4.1, not re-tested since — the converter and loader are unchanged in
+   1.5.0, so assume it still holds.*
+2. **Ship 8, 10 and 12 pt as well as the reading sizes.** Those three are what
+   the 1.5.0 UI fallback looks for, by exact size, to draw CJK in the chapter
+   list, library and browser (see "CJK in the interface"). Cost: ~4 MB of SD
+   per family, and a couple of KB of RAM — only the interval table is resident,
+   glyphs stream.
+3. **Layout:** one folder per family — `/fonts/<Family>/<Family>_<size>.cpfont`;
    loose files are ignored. Scan happens at boot only.
-3. **Reproducible build** (what produced `reference/fonts/`):
+4. **Reproducible build** (what produced `reference/fonts/`):
 
 ```bash
 pip install freetype-py fonttools
-curl -sSLO https://raw.githubusercontent.com/crosspoint-reader/crosspoint-reader/master/lib/EpdFont/scripts/fontconvert_sdcard.py
-curl -sSLO https://raw.githubusercontent.com/crosspoint-reader/crosspoint-reader/master/lib/EpdFont/scripts/cpfont_version.py
+# Pinned to the 1.5.0 tag, not master: master's converter has since grown
+# ligature extraction, which changes the bytes it emits for Latin faces.
+BASE=https://raw.githubusercontent.com/crosspoint-reader/crosspoint-reader/1.5.0/lib/EpdFont/scripts
+curl -sSLO $BASE/fontconvert_sdcard.py
+curl -sSLO $BASE/cpfont_version.py
 
 # WenKaiFull: LXGW WenKai + Noto Sans SC fallback, full CJK presets.
 # TTF sources: github.com/lxgw/LxgwWenKai releases, or Ubuntu's
-# fonts-lxgw-wenkai package; Noto from github.com/notofonts/noto-cjk.
+# fonts-lxgw-wenkai package; Noto from github.com/notofonts/noto-cjk
+# (Sans/SubsetOTF/SC/NotoSansSC-Regular.otf).
+# 8,10,12 are the UI-fallback sizes; 12-18 are the reading sizes.
 python3 fontconvert_sdcard.py --intervals latin-ext,cjk \
-    --sizes 12,14,16,18 \
+    --sizes 8,10,12,14,16,18 \
     --regular LXGWWenKai-Regular.ttf --fallback-regular NotoSansSC-Regular.otf \
     --name WenKaiFull --output-dir WenKaiFull/
 
@@ -142,13 +214,18 @@ python3 fontconvert_sdcard.py --intervals latin-ext,cjk \
 # NV_Zilla_Slab-Regular.ttf). First patch in the 8 pinyin glyphs Zilla lacks:
 python3 ../fonts/synth_pinyin.py            # NV_Zilla_Slab-Regular.ttf -> ...-Pinyin.ttf
 python3 fontconvert_sdcard.py --intervals latin-ext,cjk \
-    --sizes 12,14,16,18 \
+    --sizes 8,10,12,14,16,18 \
     --regular NV_Zilla_Slab-Pinyin.ttf --fallback-regular LXGWWenKai-Regular.ttf \
     --name WenZilla --output-dir WenZilla/
 # Regular only: bold/italic would duplicate the 22k CJK bitmaps per style (~4x
 # size) for no CJK gain, since WenKai has no bold/italic.
 
 ```
+
+The recipe is deterministic: re-running it reproduces the committed 12 pt files
+of both families **byte for byte** (checked when the 8 and 10 pt sizes were
+added, 2026-07). That is the cheap way to confirm your sources and script
+version match this repo's before you trust a new size you built.
 
 ## Font style guide
 

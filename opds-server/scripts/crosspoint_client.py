@@ -17,7 +17,8 @@ So this module reimplements the client's behaviour rather than the standard:
                      `src/activities/browser/OpdsBookBrowserActivity.cpp`
                      plus `src/util/StringUtils.cpp`
 
-Ported from master as read on 2026-07-28 (firmware 1.4.x). It is a port, not the
+Ported from master as read on 2026-07-28; every source file above is identical
+in the 1.5.0 tag, so this tracks **firmware 1.5.0**. It is a port, not the
 device: it proves a feed satisfies the rules that firmware applies. On-device
 confirmation is a separate claim, and `reference/readers.md` marks which
 verdicts have it.
@@ -49,7 +50,7 @@ EPUB_TYPE = "application/epub+zip"
 ATOM_MARKER = "application/atom+xml"
 SEARCH_PLACEHOLDER = "{searchTerms}"
 MAX_REDIRECTS = 5
-USER_AGENT = "CrossPoint-ESP32-1.4.1"
+USER_AGENT = "CrossPoint-ESP32-1.5.0"
 
 
 @dataclass
@@ -198,18 +199,46 @@ def extract_host(url: str) -> str:
     return url if path_start == -1 else url[:path_start]
 
 
+UNSAFE_URL_CHARS = '"<>\\^`{|}'
+
+
+def encode_unsafe_url_chars(url: str) -> str:
+    """`UrlUtils::encodeUnsafeUrlChars` — percent-encode what esp_http_client
+    will not accept raw. Byte-wise, like the firmware: an already-escaped `%XX`
+    passes through, a lone `%` is encoded, and a non-ASCII character becomes one
+    escape per UTF-8 byte. Added in firmware 1.5.0."""
+    out = []
+    i = 0
+    while i < len(url):
+        char = url[i]
+        code = ord(char)
+        escape = url[i + 1:i + 3]
+        if (char == "%" and i + 2 < len(url)
+                and all(c in "0123456789abcdefABCDEF" for c in escape)):
+            out.append(url[i:i + 3])
+            i += 3
+            continue
+        if char == "%" or code <= 0x20 or code >= 0x7F or char in UNSAFE_URL_CHARS:
+            out.extend(f"%{byte:02X}" for byte in char.encode("utf-8"))
+        else:
+            out.append(char)
+        i += 1
+    return "".join(out)
+
+
 def build_url(server_url: str, path: str) -> str:
     """`UrlUtils::buildUrl` — naive by design, and the reason this server emits
     only absolute URLs."""
     if "://" in path:
-        return path
+        return encode_unsafe_url_chars(path)
     url_with_protocol = ensure_protocol(server_url)
     if not path:
-        return url_with_protocol
+        return encode_unsafe_url_chars(url_with_protocol)
     if path[0] == "/":
-        return extract_host(url_with_protocol) + path
+        return encode_unsafe_url_chars(extract_host(url_with_protocol) + path)
     base = url_with_protocol.split("?", 1)[0]
-    return base + path if base.endswith("/") else base + "/" + path
+    joined = base + path if base.endswith("/") else base + "/" + path
+    return encode_unsafe_url_chars(joined)
 
 
 def sanitize_filename(name: str, max_bytes: int = 100) -> str:
