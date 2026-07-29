@@ -80,6 +80,10 @@ It runs as your user (the books live in your home), and since the server only
 ever reads, the unit confines it accordingly: the filesystem read-only, home
 readable but not writable.
 
+[`helper-info.txt`](helper-info.txt) sits next to the unit and explains each of
+those commands, the day-to-day ones (`status`, `restart`, `stop`, reading the
+log without following it), and what to check when the reader can't fetch.
+
 Port, library roots and auth all stay in `config.json` — the unit doesn't
 repeat them, so changing any of them is `systemctl restart opds-server` and
 nothing more.
@@ -191,6 +195,7 @@ evidence — this one does not yet.
 SKILL.md                     this file
 config.example.json          copy to config.json (gitignored)
 opds-server.service          systemd unit (Debian; edit two lines)
+helper-info.txt              what each systemctl/journalctl command does
 secrets/                     gitignored; the Basic-auth password
 scripts/
   serve_opds.py              the server (stdlib http.server)

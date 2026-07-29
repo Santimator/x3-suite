@@ -127,14 +127,42 @@ python3 opds-server/scripts/selftest.py       # the gate
 
 Then on the device: Settings → System → OPDS Servers → Add Server, and enter the
 URL the server prints — **starting with `http://`**, since the reader only does
-verified HTTPS and can't be given a self-signed certificate. Local config and the
-optional Basic-auth password live in gitignored `config.json` / `secrets/` (copy
-`config.example.json`); with no config at all it serves the builder's output
-folder, open on the LAN.
+verified HTTPS and can't be given a self-signed certificate.
+
+**You don't need a config file.** Every setting has a working default, and the
+startup banner says `config (defaults)` when you're using them:
+
+| | default | why |
+|---|---|---|
+| library roots | `workspace/` | the builder's output; resolved against the repo, not your shell's directory |
+| excludes | `*-DIAGNOSTIC.epub` | the builder's render-test EPUBs aren't books |
+| bind | `0.0.0.0:6737` | every interface, so the reader can reach it. 6737 is "OPDS" on a phone keypad — not 8080, which everything else wants |
+| auth | off | open on your LAN, and the banner says so at startup |
+| page size | 25 entries | a feed page the device holds comfortably |
+
+For a one-off change, use a flag:
+
+```bash
+python3 opds-server/scripts/serve_opds.py --root ~/Books --port 8123
+```
+
+`--root DIR` (repeatable) serves somewhere else · `--port` (`0` picks any free
+one and prints it) · `--host` · `--page-size` · `--config` for a config file
+elsewhere.
+
+To make a change permanent, copy `opds-server/config.example.json` to
+`config.json` — it's gitignored, and every key is annotated in place. That's
+also where you turn on Basic auth: set `auth.username`, put the password in
+gitignored `secrets/`, and read [`secrets/README.md`](opds-server/secrets/README.md)
+first — over plain HTTP it's cleartext, which is a real limit and not a
+sloppy one.
 
 To leave it running, `opds-server/opds-server.service` is a systemd unit — edit
-two lines, `systemctl enable --now opds-server`, done. It's written for Debian;
-on anything else, hand the file to your favourite AI and ask for the equivalent.
+two lines, `systemctl enable --now opds-server`, done; the commands and what
+they do are in [`opds-server/helper-info.txt`](opds-server/helper-info.txt).
+Note the unit runs the script with **no flags**, so under systemd anything
+non-default belongs in `config.json`. It's written for Debian; on anything else,
+hand the file to your favourite AI and ask for the equivalent.
 
 Its design is dictated by what the firmware's client *actually* parses, read
 from source rather than docs: an entry with no title or unresolvable href is
