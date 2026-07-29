@@ -25,22 +25,19 @@ Two consequences: Settings → Reader → Font Size will also offer 8 and 10 as
 reading sizes, and on firmware older than 1.5.0 the extra files are simply
 inert.
 
-**After copying, verify the card — do not trust the copy.** Font discovery
-parses *filenames only*; it never opens a `.cpfont`. So a truncated or
-half-copied file still appears in Settings → Reader → Font Size, and only fails
-when you select it — at which point the family silently reverts to the built-in
-Noto. Check what the device actually holds, over WiFi, no card removal:
+**Get these files with GitHub's Download button or a clone — never with "save
+link as", which hands you the HTML page under a `.cpfont` name.** Then verify
+the card rather than trusting the copy: the reader lists fonts by filename and
+never opens them, so a truncated file appears in the size menu and only fails
+when selected, reverting to built-in Noto.
 
 ```bash
 curl http://crosspoint.local/api/fonts     # every family, file and byte count
 ```
 
-Every `size` there must match `CHECKSUMS.tsv` in this directory. Device-confirmed
-2026-07: an SD copy left `WenZilla_8/10` truncated at ~236 KB (of 1.7 / 2.5 MB)
-and never wrote WenKaiFull's two at all, which presented exactly as "the 8 and
-10 pt sizes don't work" — same visible symptom as the sparse-interval trap
-below, entirely different cause. Eject the card properly (let the write buffer
-flush) and re-check before concluding anything about the fonts themselves.
+Every `size` there must match `CHECKSUMS.tsv` in this directory. The failure
+modes this catches, and the others that look identical, are in `../readers.md`
+under "Stupid errors".
 
 **About the pinyin tones (WenZilla):** NV Zilla Slab ships most pinyin vowels
 but lacks eight — `ǎ ǐ ǒ Ǎ` and the ü-tones `ǖ ǘ ǚ ǜ`. `synth_pinyin.py`

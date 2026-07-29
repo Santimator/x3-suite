@@ -1,9 +1,10 @@
 # Expected bytes and MD5 for every .cpfont in this directory.
 #
 # Why this file exists: the reader lists installed fonts by *filename only* —
-# it never opens them — so a truncated copy still shows up in the font/size
-# menu and only fails when selected. Compare against what the device actually
-# holds, no card removal needed:
+# it never opens them — so a truncated copy (a GitHub "save link as" that
+# grabbed the HTML page, an interrupted card write) still shows up in the
+# font/size menu and only fails when selected. Compare against what the device
+# actually holds, no card removal needed:
 #
 #   curl http://crosspoint.local/api/fonts
 #

@@ -7,7 +7,7 @@ find sophisticated tools like an AI-assisted PDF to EPUB converter (that might
 or might not work) or something as simple as a custom Chinese font I like.
 
 This is a project I do for myself to make my life around the X3 easier and
-better — mine is an **Xteink X3 running CrossPoint 1.5.0**, and that's what
+better — mine is an **Xteink X3 running the CrossPoint 1.5.0 RC**, and that's what
 everything here is built and tested against. Feel free to add, comment, fork,
 use… I am not a super huge fan of locking tools or info behind copyright stuff
 so whatever I did, it's yours to use. This is particularly true in these new

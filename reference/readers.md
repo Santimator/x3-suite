@@ -13,9 +13,7 @@ otherwise.
    firmware ships no CJK glyphs at all — hanzi render as tofu boxes — so it is
    not an option for Chinese. 1.5.0 is the floor because it is the first
    release that renders CJK in the *interface* (chapter list, library, file
-   browser) — see "CJK in the interface" below. *This step is the one part of
-   the recipe not yet device-confirmed: it is read from the firmware source,
-   and the photos above were taken on 1.4.1.*
+   browser) — see "CJK in the interface" below.
 2. **Font:** copy a family folder from `reference/fonts/` to the SD card under
    `/fonts/`, power-cycle (fonts scan once at boot), select it under Settings →
    Reader → Font Family. **`WenZilla/`** is the recommended Chinese font — LXGW
@@ -80,44 +78,11 @@ sizes also appear in Settings → Reader → Font Size (reading at 8 pt is your
 call), and a mixed title renders *entirely* in the SD font, Latin included.
 With no SD font selected there is no fallback and CJK breaks again.
 
-**Device-confirmed on a 1.5.0 RC (2026-07):** with a 12 pt `.cpfont` installed,
-CJK book titles render on the home screen — the UI fallback works. The 10 pt
-list rows are the other half and need the 10 pt file actually intact on the card
-(see below). Free heap on that device sat at ~35 KB, and loading the extra UI
-sizes did not disturb it: only the interval table is resident per font (~370
+**Device-confirmed end to end on a 1.5.0 RC (2026-07):** with 8/10/12 pt
+`.cpfont` files installed, the chapter list and the home-screen book titles
+render their hanzi. Free heap on that device sat at ~35 KB and the extra UI
+sizes did not disturb it — only the interval table is resident per font (~370
 bytes at 61 intervals), glyphs stream from SD.
-
-### When a size "doesn't work", suspect the card before the font
-
-Selecting a size and watching the reader fall back to built-in Noto has (at
-least) two causes with one symptom:
-
-1. **The file is not what you think it is.** Font discovery parses *filenames
-   only* — `parseFilename()` never opens the file — so a truncated copy is
-   listed in the size menu and only fails when it is selected and actually
-   loaded. *Device-confirmed 2026-07: an SD copy left both new WenZilla files
-   truncated at ~236 KB and silently skipped WenKaiFull's, which looked exactly
-   like "the 8 and 10 pt builds are broken". They were byte-perfect in the
-   repo.*
-2. **Sparse intervals** — the build-time trap in the next section.
-
-Tell them apart in one request, without pulling the card:
-
-```bash
-curl http://crosspoint.local/api/status    # firmware version, free heap
-curl http://crosspoint.local/api/fonts     # every installed file + byte count
-```
-
-Byte counts must match `reference/fonts/CHECKSUMS.tsv`. Only once they do is it
-worth suspecting the font build.
-
-**On identifying an RC build:** `/api/status` on the 1.5.0 RC returned
-`"version":"1.5.0-rc+"` — the commit hash after the `+` is empty, so that binary
-cannot be traced back to a commit. Nor is the web flasher's "RC2" built from the
-public `release/1.5.0` branch: crosspoint-tools stores admin-uploaded binaries
-(`builds/beta/{id}/firmware.bin`) and serves those. The RC ships code that
-branch does not have — reader font size by point value, for one. Read the device
-first, the source second.
 
 Two upstream issue candidates: the exact-size lookup could use the
 `findNearestSize` that already exists next to it, and a UI font without U+FFFD
@@ -272,6 +237,39 @@ version match this repo's before you trust a new size you built.
 - Alternatives if taste differs: Noto Sans/Serif SC (print-style, sturdier
   at tiny sizes), TW-Kai (traditional-oriented), Ma Shan Zheng (true brush
   calligraphy — pretty, tiring as body text).
+
+## Stupid errors (each one cost an evening)
+
+Written down because every one of them *looks* like a broken font or a broken
+book, and none of them is.
+
+- **Downloading a font from GitHub with "save link as".** On a file's GitHub
+  page that saves the HTML page, not the binary — you get a few hundred KB of
+  markup with a `.cpfont` name. Use the raw **Download** button (or
+  `git clone` / `curl -L` on the raw URL). *This is what produced two 236 KB
+  "fonts" that looked exactly like a bad build.*
+- **Trusting the copy to the SD card.** Discovery parses *filenames only* — it
+  never opens the file — so a truncated or half-written `.cpfont` still appears
+  in Settings → Reader → Font Size and only fails when selected, at which point
+  the family silently reverts to built-in Noto. Verify what the device actually
+  holds, over WiFi, and match it against `reference/fonts/CHECKSUMS.tsv`:
+
+  ```bash
+  curl http://crosspoint.local/api/fonts     # families, files, byte counts
+  curl http://crosspoint.local/api/status    # firmware version, free heap
+  ```
+
+- **Forgetting the power-cycle.** Fonts are scanned once at boot. A file copied
+  to a running device does not exist as far as the reader is concerned.
+- **Expecting an RC build to match the public source.** `/api/status` on the
+  1.5.0 RC returns `"version":"1.5.0-rc+"` — nothing after the `+`, so the
+  binary names no commit. And the web flasher serves admin-uploaded binaries
+  (crosspoint-tools keeps them at `builds/beta/{id}/firmware.bin`), not builds
+  of the public `release/1.5.0` branch, which lacks code the RC clearly has.
+  Read the device first, the source second.
+- **Reading the sparse-interval rule as optional.** It is the one build-time
+  trap that also ends in "reverts to built-in Noto" — see the font-building
+  rules above.
 
 ## Alternative firmware (evaluated, not needed)
 
