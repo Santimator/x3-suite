@@ -115,8 +115,9 @@ against, not targets to hit*:
 ## Cover images (EPUB, not wallpaper)
 
 The **embedded EPUB cover** is a normal image the reader renders — distinct
-from the device *sleep-screen wallpaper* (`.pxc`/`.bmp`, 2-bit, built by tools
-like wallpaperconverter.jakegreen.dev; not our concern). For the cover:
+from the device *sleep-screen wallpaper*, which is a separate feature with its
+own format and folder (see "The sleep screen" below; `wallpaper-maker/` builds
+those). For the cover:
 
 - **PNG or baseline JPEG only.** Progressive JPEG and GIF fall back to an
   `[Image]` placeholder on-device.
@@ -128,6 +129,59 @@ like wallpaperconverter.jakegreen.dev; not our concern). For the cover:
 `epub-builder/scripts/prepare_cover.py` enforces all three (and can draw
 the title onto a template cover). Content figures follow the same grayscale
 rule at 480px width (`prepare.py`).
+
+## The sleep screen (wallpaper)
+
+*Source-confirmed against the firmware (`src/activities/boot_sleep/SleepActivity.cpp`,
+`lib/GfxRenderer/Bitmap.cpp`, `lib/GfxRenderer/BitmapHelpers.cpp`,
+`lib/FsHelpers/FsHelpers.cpp`), tags 1.5.0 and master @ 2026-08 — byte-identical
+for all of it apart from the quick-resume refresh mode, which does not touch
+this path. **Not device-confirmed:** no photo of an X3 drawing one of our
+wallpapers yet.* `wallpaper-maker/` builds these and pushes them.
+
+| What | Requirement |
+|---|---|
+| Format | **BMP only.** The folder scan filters on `hasBmpExtension` (case-insensitive) and opens nothing else |
+| `.pxc` | **Not a wallpaper format** — it is the EPUB reader's *pixel cache* (`lib/Epub/Epub/converters/PixelCache.h`), written beside a decoded JPEG. Web converters that offer `.pxc` for a sleep screen are wrong for this firmware; the file is skipped in silence |
+| Where | `/.sleep/` (preferred, checked first, one file picked at random per sleep), else `/sleep/`, else a single `/sleep.bmp` at the root. **`/.sleep` existing makes `/sleep` invisible** |
+| Names | Anything starting with `.` is skipped inside those folders, whatever it holds |
+| Enabled by | Settings → Display → Sleep Screen = **Custom** (enum index 2; `COVER` draws the open book's cover instead, `COVER_CUSTOM` does both by context) |
+| Bit depths accepted | 1, 2, 4, 8, 24, 32; `BI_RGB` only (`BI_BITFIELDS` for 32) |
+| Palette offset | Read from a **fixed offset after the first 40 DIB bytes** — not from `biSize`, not from `bfOffBits`. A BITMAPV4/V5 header feeds colour-space fields to the palette reader |
+| Native palette | If every palette entry's luma is within ±21 of 0/85/170/255, the firmware maps pixels straight through (`lum >> 6`) and **dithers nothing**. Otherwise it re-dithers on-device (Atkinson). `adjustPixel` is identity — shipped with `USE_BRIGHTNESS = false` |
+| Grey vs BW | `hasGreyscale()` is `bpp > 1`: a 1-bpp file gets the plain BW waveform, never the four-level grey pipeline |
+| Size | Panel-exact **528×792**. Larger is scaled down and centred; **smaller is never scaled up** — it is centred in black |
+| Refresh | A single HALF refresh (stock parity), plus two extra passes for the grey planes |
+
+So the file to emit is a **528×792, 4-bpp indexed BMP, 40-byte DIB header,
+palette on 0/85/170/255, pre-dithered** — the one shape where the panel shows
+exactly the pixels that were computed off-device.
+
+## Getting files onto the device over WiFi
+
+*Source-confirmed (`src/network/CrossPointWebServer.cpp`,
+`src/network/WebDAVHandler.cpp`, `docs/webserver-endpoints.md`), master @
+2026-08 = 1.5.0 byte-for-byte.*
+
+The OPDS client (above) is a **book-only pull**: acquisition type exactly
+`application/epub+zip`, saved to the SD root as `<author> - <title>.epub`.
+Nothing else can be delivered through it, to anywhere. Everything that is not a
+book goes the other way — a push into the firmware's file-transfer web server,
+started on the device at **Home → File Transfer → Join a Network** and running
+only while that screen is up.
+
+| What | Detail |
+|---|---|
+| Transport | Plain HTTP, **port 80**, no auth, CORS open. `crosspoint.local` via mDNS |
+| Discovery | UDP **8134**: send `hello`, get `crosspoint (on <hostname>);<ws port>` |
+| Upload | `POST /upload?path=DIR`, multipart. Path is a *query* param — the handler needs it before the body finishes arriving |
+| Overwrite | **Not supported.** An upload onto an existing name returns 400 `File already exists`; `POST /delete?path=...` first |
+| Folders | `POST /mkdir?path=PARENT&name=NAME`, no name validation — dot-prefixed folders are fine |
+| Listing | `GET /api/files?path=...`. **Hides dot-prefixed entries** unless the device's `showHiddenFiles` is on, so a missing folder and a hidden one look alike |
+| Settings | `GET`/`POST /api/settings`, partial JSON by key (`{"sleepScreen": 2}`); keys are in `src/SettingsList.h` |
+| Fonts | `POST /api/fonts/upload` with `family` + `file` — the network route for `reference/fonts/` |
+| WebDAV | Port 80, PUT overwrites atomically. **Refuses any path segment beginning with `.`** — so `/.sleep` is unreachable this way, and `/sleep` is not |
+| Also | WebSocket fast upload on **81** (`START:<name>:<size>:<path>` → `READY` → binary → `DONE`) |
 
 ## OPDS client — what the firmware actually requires
 

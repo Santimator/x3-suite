@@ -29,6 +29,8 @@ This is a suite of tools. You'll find:
 - **`opds-server/`** — serves your built books to the reader over WiFi.
 - **`epub-builder/`** — turns the common book format into an EPUB. The services
   hand it their books; you can also run it on your own.
+- **`wallpaper-maker/`** — turns any image into a sleep screen for the reader,
+  and pushes it onto the device.
 - **`services/`** — the AI-assisted tools:
   - **`graded-reader/`** — writes leveled Chinese books.
   - **`pdf2epub/`** — converts PDFs into clean EPUBs.
@@ -44,9 +46,10 @@ works. `AGENTS.md` at the root is the same map written for a coding agent.
 
 ### The services' philosophy
 
-The builder and the server are plain deterministic tools — no model anywhere
-near them. The two services are where an LLM does the work, and there the rule
-is to let the model do what models are good at, and nothing else:
+The builder, the server and the wallpaper maker are plain deterministic tools —
+no model anywhere near them. The two services are where an LLM does the work,
+and there the rule is to let the model do what models are good at, and nothing
+else:
 
 - **The model supplies judgement** — writing prose, inferring chapter structure,
   deciding how to restore mangled text.
@@ -64,8 +67,9 @@ rewrite.
 ### Setup
 
 `epub-builder` and `opds-server` need nothing installed — they're stdlib only,
-run them with plain `python3`. The two services do need packages, so make a
-venv once and install whichever you'll use (chapters 3 and 4 name theirs):
+run them with plain `python3`. The two services do need packages, and
+`wallpaper-maker` needs Pillow, so make a venv once and install whichever
+you'll use (chapters 3, 4 and 7 name theirs):
 
 ```bash
 python3 -m venv .venv
@@ -215,7 +219,54 @@ Docs: [`opds-server/SKILL.md`](opds-server/SKILL.md)
 
 ---
 
-## 7. Fonts
+## 7. The sleep screen
+
+**Tested:** by self-test, not yet by a device. Every rule below was read from
+the firmware source, and the gate enforces all of them; nobody has yet
+photographed an X3 drawing one of these.
+
+Drop pictures in `workspace/wallpapers/`, run one command, and they're files
+the reader can draw. Run the second and they're on it.
+
+```bash
+.venv/bin/pip install -r wallpaper-maker/requirements.txt
+.venv/bin/python wallpaper-maker/scripts/make_wallpaper.py   # -> .../build/*.bmp
+python3 wallpaper-maker/scripts/push_wallpaper.py            # -> the device
+```
+
+Nothing to configure and nothing to answer: 528×792, four grey levels,
+Floyd–Steinberg, cover-cropped, tone-stretched for e-ink. Each of those has a
+right answer on this panel, so it's already chosen — the table in the SKILL
+says why each one and not the alternative. Add `--preview` to get a PNG of the
+result you can look at before it goes anywhere near the device.
+
+This is the *sleep screen*, not an EPUB cover — a separate firmware feature,
+different format, different folder. And a warning worth repeating: **`.pxc` is
+not a wallpaper format** on this firmware, whatever the converters on the web
+offer. It's the EPUB reader's internal pixel cache, and the sleep-screen scan
+skips it in silence.
+
+### Onto the device — which is not OPDS
+
+The catalog can't carry it. The X3's OPDS client only follows links typed
+exactly `application/epub+zip` and only ever saves to the SD root, so there's
+no content type it accepts and no destination it can be aimed at. A catalog is
+a pull, and this device only pulls books.
+
+So it's a push instead, into the file-transfer web server the firmware already
+ships. On the device: **Home → File Transfer → Join a Network**; it prints an
+address and holds the server up while that screen is open. `push_wallpaper.py`
+finds it there (or by mDNS, or by the firmware's own UDP discovery ping),
+uploads into `/.sleep/` — or into `/sleep/` if you already keep wallpapers
+there, since creating `/.sleep` would silently shadow them — and sets the sleep
+screen to Custom so the pool is actually used.
+
+Docs: [`wallpaper-maker/SKILL.md`](wallpaper-maker/SKILL.md) · device rules:
+[`reference/readers.md`](reference/readers.md)
+
+---
+
+## 8. Fonts
 
 **Tested:** device-confirmed. Stock firmware shows hanzi as tofu boxes; these
 render.
@@ -236,7 +287,7 @@ fonts are ignored, ruby and interlinear pinyin are broken, RAM is ~400 KB.
 
 ---
 
-## 8. Making it yours
+## 9. Making it yours
 
 To add a tool, copy the shape: a `SKILL.md` briefing, deterministic scripts for
 the parts models are bad at, and a gate after every model step. Everything

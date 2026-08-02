@@ -1,0 +1,401 @@
+#!/usr/bin/env python3
+"""The gate: would the X3 draw exactly the pixels we computed?
+
+Run after changing anything in this directory:
+
+    .venv/bin/python wallpaper-maker/scripts/selftest.py
+
+A wallpaper has three ways to fail, and only the first is visible from a
+desktop: the file is broken, the device never opens it, or the device opens it
+and *redoes the work* — re-dithering our four-level image with the ESP32's
+integer approximation, which is exactly what we spent the CPU here to avoid.
+Nothing in a normal image-validity check catches the second or third, so this
+grades every output through `crosspoint_bmp`, a port of the firmware's own
+folder scan and BMP reader.
+
+Checks, in order:
+  1. sources of every awkward shape convert at all
+  2. the firmware's folder scan would open the file we wrote
+  3. its BMP parser accepts the headers, and reads the palette we meant
+  4. the palette is *native*, so the device maps pixels through and dithers none
+  5. the file decodes, through the device's own row unpacking, to the exact
+     levels we computed — bit for bit
+  6. it lands at 0,0 unscaled: the panel's size, so nothing is resampled
+  7. the same source converts to a byte-identical file, twice
+  8. the two failure modes we designed around really are failure modes
+  9. the push protocol drives the firmware's file-transfer API correctly
+"""
+
+from __future__ import annotations
+
+import io
+import json
+import struct
+import subprocess
+import sys
+import tempfile
+import threading
+import urllib.parse
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+import crosspoint_bmp as cp
+import make_wallpaper as mw
+from PIL import Image
+
+SCRIPTS = Path(__file__).resolve().parent
+
+failures = []
+
+
+def check(name: str, ok: bool, detail: str = "") -> bool:
+    print(f"  {'ok  ' if ok else 'FAIL'}  {name}" + (f"  — {detail}" if detail and not ok else ""))
+    if not ok:
+        failures.append(name)
+    return ok
+
+
+# ---------------------------------------------------------------- fixtures ---
+# Deliberately awkward: the shapes that break a naive converter. A wide
+# landscape (cover-crop must take the middle, not the left edge), an image
+# smaller than the panel (must be scaled *up* — the device will not do it), an
+# alpha image (must flatten, not multiply into black), a phone-style EXIF
+# rotation (must rotate before cropping, or the crop takes the wrong axis), and
+# a flat gradient (where error diffusion either works or bands visibly).
+
+def make_sources(directory: Path) -> list:
+    made = []
+
+    grad = Image.new("RGB", (1200, 1600))
+    px = grad.load()
+    for y in range(1600):
+        for x in range(0, 1200, 4):
+            v = int(255 * (x / 1200 * 0.5 + y / 1600 * 0.5))
+            for dx in range(4):
+                px[x + dx, y] = (v, v, v)
+    grad.save(directory / "gradient.png")
+    made.append(directory / "gradient.png")
+
+    wide = Image.new("RGB", (2400, 1000), (30, 90, 160))
+    for i in range(0, 2400, 60):
+        for y in range(1000):
+            for x in range(i, min(i + 30, 2400)):
+                wide.putpixel((x, y), (220, 200, 40))
+    wide.save(directory / "wide.jpg", quality=92)
+    made.append(directory / "wide.jpg")
+
+    tiny = Image.new("RGB", (100, 140), (200, 200, 200))
+    tiny.putpixel((50, 70), (0, 0, 0))
+    tiny.save(directory / "tiny.png")
+    made.append(directory / "tiny.png")
+
+    alpha = Image.new("RGBA", (600, 900), (0, 0, 0, 0))
+    for y in range(300, 600):
+        for x in range(200, 400):
+            alpha.putpixel((x, y), (10, 10, 10, 255))
+    alpha.save(directory / "alpha.png")
+    made.append(directory / "alpha.png")
+
+    rotated = Image.new("RGB", (1600, 1200), (140, 140, 140))
+    for x in range(1600):                       # a bright band along the long edge
+        for y in range(0, 120):
+            rotated.putpixel((x, y), (250, 250, 250))
+    exif = Image.Exif()
+    exif[0x0112] = 6                            # "rotate 90 CW", the phone default
+    rotated.save(directory / "rotated.jpg", exif=exif, quality=92)
+    made.append(directory / "rotated.jpg")
+
+    return made
+
+
+# ------------------------------------------------------- a pretend X3 ---------
+# Ported from src/network/CrossPointWebServer.cpp: not a mock of what we wish
+# the endpoints did, but of what they do — including the two behaviours that
+# shape push_wallpaper.py.
+
+class FakeDevice(BaseHTTPRequestHandler):
+    root: Path = None
+    show_hidden = False
+    settings: dict = {}
+
+    def log_message(self, *a):
+        pass
+
+    def _sd(self, path: str) -> Path:
+        return self.root / path.lstrip("/")
+
+    def _args(self) -> dict:
+        query = urllib.parse.urlparse(self.path).query
+        return {k: v[0] for k, v in urllib.parse.parse_qs(query).items()}
+
+    def _send(self, code: int, body: bytes, ctype="text/plain"):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        route = urllib.parse.urlparse(self.path).path
+        if route == "/api/status":
+            return self._send(200, json.dumps(
+                {"version": "1.5.0", "model": "Xteink X3", "ip": "127.0.0.1"}
+            ).encode(), "application/json")
+        if route == "/api/files":
+            target = self._sd(self._args().get("path", "/"))
+            entries = []
+            if target.is_dir():
+                for item in sorted(target.iterdir()):
+                    # scanFiles() hides dot-prefixed entries unless the device's
+                    # showHiddenFiles setting is on.
+                    if item.name.startswith(".") and not self.show_hidden:
+                        continue
+                    entries.append({"name": item.name,
+                                    "size": 0 if item.is_dir() else item.stat().st_size,
+                                    "isDirectory": item.is_dir(),
+                                    "isEpub": item.suffix.lower() == ".epub"})
+            return self._send(200, json.dumps(entries).encode(), "application/json")
+        return self._send(404, b"Not found")
+
+    def do_POST(self):
+        route = urllib.parse.urlparse(self.path).path
+        args = self._args()
+        length = int(self.headers.get("Content-Length", 0))
+        body = self.rfile.read(length) if length else b""
+
+        if route == "/mkdir":
+            target = self._sd(args.get("path", "/")) / args["name"]
+            if target.exists():
+                return self._send(400, b"Folder already exists")
+            target.mkdir(parents=True)
+            return self._send(200, b"Folder created")
+
+        if route == "/delete":
+            target = self._sd(args["path"])
+            if not target.exists():
+                return self._send(400, b"Not found")
+            target.unlink() if target.is_file() else target.rmdir()
+            return self._send(200, b"Deleted")
+
+        if route == "/upload":
+            directory = self._sd(args.get("path", "/"))
+            name, payload = self._multipart(body)
+            if not directory.is_dir():
+                return self._send(400, b"Failed to create file on SD card")
+            dest = directory / name
+            # The firmware refuses a collision instead of overwriting.
+            if dest.exists():
+                return self._send(400, f"File already exists: {name}".encode())
+            dest.write_bytes(payload)
+            return self._send(200, f"File uploaded successfully: {name}".encode())
+
+        if route == "/api/settings":
+            self.settings.update(json.loads(body))
+            return self._send(200, b"Settings applied")
+
+        return self._send(404, b"Not found")
+
+    def _multipart(self, body: bytes):
+        ctype = self.headers.get("Content-Type", "")
+        boundary = ctype.split("boundary=")[-1].encode()
+        part = body.split(b"--" + boundary)[1]
+        head, payload = part.split(b"\r\n\r\n", 1)
+        name = head.split(b'filename="')[1].split(b'"')[0].decode()
+        return name, payload.rsplit(b"\r\n", 1)[0]
+
+
+def serve(root: Path):
+    FakeDevice.root = root
+    FakeDevice.settings = {}
+    server = ThreadingHTTPServer(("127.0.0.1", 0), FakeDevice)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"127.0.0.1:{server.server_address[1]}"
+
+
+# ------------------------------------------------------------------ checks ---
+
+def grade_output(src: Path, bmp: Path) -> None:
+    data = bmp.read_bytes()
+    label = bmp.name
+
+    if not check(f"{label}: the folder scan would open it", cp.sleep_scan_accepts(bmp.name)):
+        return
+
+    try:
+        hdr = cp.parse_headers(data)
+    except cp.BmpReaderError as exc:
+        check(f"{label}: the device's BMP parser accepts it", False, str(exc))
+        return
+    check(f"{label}: the device's BMP parser accepts it", True)
+
+    check(f"{label}: 4 bpp, greyscale pipeline", hdr.bpp == 4 and hdr.has_greyscale,
+          f"bpp={hdr.bpp}")
+    check(f"{label}: palette is native — the device re-dithers nothing",
+          hdr.native_palette)
+    check(f"{label}: exactly the panel, so nothing is resampled",
+          (hdr.width, hdr.height) == (cp.PANEL_W, cp.PANEL_H),
+          f"{hdr.width}x{hdr.height}")
+
+    x, y, scaled = cp.placement(hdr)
+    check(f"{label}: lands at 0,0 unscaled", (x, y, scaled) == (0, 0, False),
+          f"x={x} y={y} scaled={scaled}")
+
+    # The one that matters: recompute the pipeline, then read the file back the
+    # way the firmware reads it. Equal means the panel gets our pixels.
+    intended = mw.dither(mw.tone(mw.fit_panel(mw.load_grayscale(src))))
+    try:
+        got = cp.decode_levels(data, hdr)
+    except cp.BmpReaderError as exc:
+        check(f"{label}: decodes to the levels we computed", False, str(exc))
+        return
+    same = len(got) == len(intended) and all(a == b for a, b in zip(got, intended))
+    check(f"{label}: decodes to the levels we computed", same)
+
+
+def check_designed_failures() -> None:
+    """The two traps the encoder is shaped around. If these ever stop failing,
+    the reasoning in make_wallpaper.py has gone stale and should be re-read."""
+    # Something with all four levels in it, so a misread cannot coincide with
+    # the truth the way an all-black image would.
+    levels = bytearray((x + y) % 4 for y in range(cp.PANEL_H) for x in range(cp.PANEL_W))
+    good = mw.encode_bmp4(levels, cp.PANEL_W, cp.PANEL_H)
+
+    # 1. A real BITMAPV4HEADER: 68 more DIB bytes (masks, colour space, gamma)
+    #    before the palette. The firmware still reads the palette from the fixed
+    #    offset after the first 40, so those fields become the "colours".
+    v4 = bytearray(good)
+    v4[54:54] = bytes(68)
+    struct.pack_into("<I", v4, 14, 108)                       # biSize
+    (off_bits,) = struct.unpack_from("<I", v4, 10)
+    struct.pack_into("<I", v4, 10, off_bits + 68)             # bfOffBits
+    struct.pack_into("<I", v4, 2, len(v4))                    # bfSize
+    try:
+        hdr = cp.parse_headers(bytes(v4))
+        misread = cp.decode_levels(bytes(v4), hdr) != list(levels)
+    except cp.BmpReaderError:
+        misread = True
+    check("a 108-byte DIB header would be misread (why we emit 40)", misread)
+
+    # 2. A 24-bpp file. No palette, so the native test cannot pass and the
+    #    firmware dithers it itself — on an ESP32, over our finished work.
+    grey = Image.new("RGB", (cp.PANEL_W, cp.PANEL_H), (128, 128, 128))
+    buf = io.BytesIO()
+    grey.save(buf, "BMP")
+    hdr24 = cp.parse_headers(buf.getvalue())
+    check("a 24-bpp file would be re-dithered on-device (why we emit 4-bpp)",
+          hdr24.bpp == 24 and not hdr24.native_palette)
+
+
+def check_push(build_dir: Path) -> None:
+    with tempfile.TemporaryDirectory() as sd_dir:
+        sd = Path(sd_dir)
+        server, host = serve(sd)
+        try:
+            run = lambda *extra: subprocess.run(
+                [sys.executable, str(SCRIPTS / "push_wallpaper.py"),
+                 str(build_dir), "--host", host, *extra],
+                capture_output=True, text=True, timeout=60)
+
+            # Looking must not change anything: creating /.sleep just to read it
+            # would shadow whatever the device keeps in /sleep.
+            listed = run("--list")
+            check("push: --list leaves the device alone",
+                  listed.returncode == 0 and not (sd / ".sleep").exists(),
+                  listed.stderr.strip())
+
+            first = run()
+            pushed = sorted(p.name for p in (sd / ".sleep").glob("*.bmp")) \
+                if (sd / ".sleep").is_dir() else []
+            expected = sorted(p.name for p in build_dir.glob("*.bmp"))
+            check("push: creates /.sleep and uploads every wallpaper",
+                  first.returncode == 0 and pushed == expected,
+                  first.stderr.strip() or f"{pushed} != {expected}")
+            check("push: switches the sleep screen to Custom",
+                  FakeDevice.settings.get("sleepScreen") == 2,
+                  str(FakeDevice.settings))
+
+            # The firmware rejects an upload onto an existing name, so a second
+            # push must delete first rather than silently doing nothing.
+            marker = sorted((sd / ".sleep").glob("*.bmp"))[0]
+            marker.write_bytes(b"stale")
+            again = run()
+            check("push: replaces a file already on the device",
+                  again.returncode == 0 and marker.read_bytes() != b"stale",
+                  again.stderr.strip())
+
+            cleared = run("--replace")
+            check("push: --replace clears the folder first",
+                  cleared.returncode == 0
+                  and sorted(p.name for p in (sd / ".sleep").glob("*.bmp")) == expected,
+                  cleared.stderr.strip())
+        finally:
+            server.shutdown()
+
+    # A device that already keeps wallpapers in the visible /sleep must not have
+    # them shadowed by a /.sleep we created.
+    with tempfile.TemporaryDirectory() as sd_dir:
+        sd = Path(sd_dir)
+        (sd / "sleep").mkdir()
+        (sd / "sleep" / "existing.bmp").write_bytes(b"x")
+        server, host = serve(sd)
+        try:
+            result = subprocess.run(
+                [sys.executable, str(SCRIPTS / "push_wallpaper.py"), str(build_dir),
+                 "--host", host], capture_output=True, text=True, timeout=60)
+            check("push: uses /sleep when the device already reads it",
+                  result.returncode == 0 and not (sd / ".sleep").exists()
+                  and len(list((sd / "sleep").glob("*.bmp"))) > 1,
+                  result.stderr.strip())
+        finally:
+            server.shutdown()
+
+
+def main() -> int:
+    print(__doc__.split("Checks, in order:")[0].strip().splitlines()[0])
+    print()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        work = Path(tmp)
+        sources = make_sources(work)
+        build = work / "build"
+
+        print("converting:")
+        outputs = []
+        for src in sources:
+            try:
+                outputs.append((src, mw.convert(src, build)))
+                print(f"  ok    {src.name}")
+            except Exception as exc:
+                check(f"{src.name}: converts", False, str(exc))
+
+        print("\nthrough the device's own reader:")
+        for src, bmp in outputs:
+            grade_output(src, bmp)
+
+        print("\nthe failure modes we design around:")
+        check_designed_failures()
+
+        print("\ndeterminism:")
+        for src, bmp in outputs:
+            before = bmp.read_bytes()
+            again = mw.convert(src, build / "again")
+            check(f"{bmp.name}: byte-identical on a second run",
+                  before == again.read_bytes())
+
+        print("\nthe push protocol, against a port of the device's API:")
+        check_push(build)
+
+    print()
+    if failures:
+        print(f"FAILED: {len(failures)} check(s)")
+        for name in failures:
+            print(f"  - {name}")
+        return 1
+    print("all checks passed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

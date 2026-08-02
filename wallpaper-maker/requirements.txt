@@ -1,0 +1,4 @@
+# wallpaper-maker: decoding whatever image you drop in, and resampling it.
+# Everything else — dithering, the BMP encoder, the push protocol, the gate —
+# is stdlib on purpose.
+Pillow>=10.0
