@@ -49,6 +49,7 @@ Usage:
   make_wallpaper.py photo.jpg             # one file, same output folder
   make_wallpaper.py shots/ --out /tmp/w   # anywhere in, anywhere out
   make_wallpaper.py photo.jpg --preview   # also write a PNG you can look at
+  make_wallpaper.py small.png --waves     # ripple a small one out to the edges
 
 Then get them onto the reader with `push_wallpaper.py`, which is the part OPDS
 cannot do for you (see SKILL.md).
@@ -57,6 +58,9 @@ cannot do for you (see SKILL.md).
 from __future__ import annotations
 
 import argparse
+import hashlib
+import math
+import random
 import re
 import struct
 import sys
@@ -92,6 +96,15 @@ MIN_MAT_AREA = 0.06         # thinner than this reads as a mistake — fill inst
 EDGE_BAND = 0.08            # fraction of the image each mat sector samples
 BLUR_DIVISOR = 12           # --mat blur: panel width / this = blur radius
 BLUR_CONTRAST = 0.55        # ... then flattened, so the sharp image stays foreground
+WAVE_PERIOD = (90.0, 220.0)  # --mat waves: px between crests, per component
+WAVE_COMPONENTS = 3         # ... summed, so the ripple is organic rather than a sine
+WAVE_SOURCE_DEPTH = 3       # ... edge pixels averaged into the travelling line
+# How steep each component is allowed to get, in pixels across per pixel out.
+# This is the knob, and amplitude follows from it — a strand can only move one
+# across per step, so asking a short wave for a tall crest just pins it at 45
+# degrees and the "wave" comes out a zigzag. Three components at 0.35 keep the
+# combined slope under 1, so the walk follows the curve instead of saturating.
+WAVE_SLOPE = 0.35
 
 
 def sanitize_stem(stem: str) -> str:
@@ -167,6 +180,18 @@ def _band_level(img: Image.Image, box) -> int:
     return LEVELS[_nearest(ImageStat.Stat(img.crop(box)).mean[0])]
 
 
+def _mitres(ox: int, oy: int, iw: int, ih: int) -> dict:
+    """The four mat sectors, split from each panel corner to the image corner
+    it faces. Shared by every mat style, so they all frame the same way."""
+    x1, y1 = ox + iw, oy + ih
+    return {
+        "top": [(0, 0), (PANEL_W, 0), (x1, oy), (ox, oy)],
+        "bottom": [(0, PANEL_H), (PANEL_W, PANEL_H), (x1, y1), (ox, y1)],
+        "left": [(0, 0), (ox, oy), (ox, y1), (0, PANEL_H)],
+        "right": [(PANEL_W, 0), (x1, oy), (x1, y1), (PANEL_W, PANEL_H)],
+    }
+
+
 def _edge_mat(img: Image.Image, ox: int, oy: int) -> Image.Image:
     """A passe-partout: four sectors, each continuing the edge it touches.
 
@@ -193,15 +218,9 @@ def _edge_mat(img: Image.Image, ox: int, oy: int) -> Image.Image:
         "right": _band_level(img, (iw - band_w, 0, iw, ih)),
     }
 
-    x1, y1 = ox + iw, oy + ih
     canvas = Image.new("L", (PANEL_W, PANEL_H), levels["top"])
     draw = ImageDraw.Draw(canvas)
-    for side, poly in (
-        ("top", [(0, 0), (PANEL_W, 0), (x1, oy), (ox, oy)]),
-        ("bottom", [(0, PANEL_H), (PANEL_W, PANEL_H), (x1, y1), (ox, y1)]),
-        ("left", [(0, 0), (ox, oy), (ox, y1), (0, PANEL_H)]),
-        ("right", [(PANEL_W, 0), (x1, oy), (x1, y1), (PANEL_W, PANEL_H)]),
-    ):
+    for side, poly in _mitres(ox, oy, iw, ih).items():
         draw.polygon(poly, fill=levels[side])
 
     return canvas, levels
@@ -223,6 +242,124 @@ def _blur_mat(img: Image.Image) -> Image.Image:
     return ImageEnhance.Contrast(washed).enhance(BLUR_CONTRAST)
 
 
+def _wave_walk(span: int, rng: random.Random) -> list:
+    """The path one strand of edge takes as it travels outward.
+
+    Literally the walk you would draw by hand: step out one pixel at a time and
+    go diagonally up, diagonally down, or straight ahead — never more than one
+    across per step. What decides which is a sum of sines, so the wandering
+    comes out as *waves* rather than as noise: where the curve is steep you get
+    a run of diagonals, where it flattens you get a run of straights.
+
+    The one-per-step rule is not a detail, it is the whole guarantee. Strands
+    that never separate by more than a pixel stay neighbours the whole way out,
+    so nothing tears open behind them and no pixel is left unpainted. It also
+    means a thin margin self-limits: the wave can only be as tall as the
+    distance it has had to climb.
+
+    Each component's height therefore *follows* from its length rather than
+    being chosen: a crest a strand cannot climb in the space available is a
+    crest that comes out as a 45-degree zigzag instead of a wave. So the knob
+    is steepness, and amplitude is period * slope / 2pi.
+    """
+    parts = []
+    for _ in range(WAVE_COMPONENTS):
+        period = rng.uniform(*WAVE_PERIOD)
+        parts.append((period * WAVE_SLOPE / (2 * math.pi), period))
+
+    walk, cur = [], 0
+    for d in range(span + 1):
+        target = sum(a * math.sin(2 * math.pi * d / p) for a, p in parts)
+        step = round(target)
+        cur += 1 if step > cur else (-1 if step < cur else 0)
+        walk.append(cur)
+    return walk
+
+
+def _edge_line(img: Image.Image, box, size) -> bytes:
+    """One edge of the image as a single line of pixels.
+
+    Averaged over a few pixels' depth (BOX resampling is a plain mean) so that
+    one noisy pixel does not become a full-length streak.
+    """
+    return img.crop(box).resize(size, Image.BOX).tobytes()
+
+
+def _flow(line: bytes, extent: int, count: int, origin: int, walk: list,
+          distance) -> bytes:
+    """Send `line` outward along `walk`: `count` copies of it, each `extent`
+    long and displaced by where the walk has got to.
+
+    `distance(i)` is how far the i-th copy sits outside the image edge. Lookups
+    past either end of the line clamp to its end pixels, which is what carries
+    the fill into the panel corners with nothing left unpainted.
+    """
+    amp = max((abs(s) for s in walk), default=0)
+    span = len(line)
+    extended = bytes(line[min(max(j - amp - origin, 0), span - 1)]
+                     for j in range(extent + 2 * amp))
+
+    out = bytearray()
+    for i in range(count):
+        d = distance(i)
+        shift = amp + walk[d if 0 <= d < len(walk) else 0]
+        out += extended[shift:shift + extent]
+    return bytes(out)
+
+
+def _waves_mat(img: Image.Image, ox: int, oy: int) -> Image.Image:
+    """Each edge, distorted outward — rippled glass around the picture.
+
+    Every side sends its own edge into its own sector, so the picture appears
+    to keep going in all four directions while wobbling as it travels. The
+    sectors still meet on the mitres, which is what stops four independent
+    ripples from turning into mush: it reads as four panels of distorted glass
+    in a frame, rather than as one confused wash.
+
+    Unlike the flat mat, this one has no snapped level and no keyline: the
+    point is that the edge dissolves into the border rather than sitting inside
+    it, so a hairline would be cutting exactly the join we are drawing.
+
+    The wave shape is seeded from the image itself, so each wallpaper ripples
+    its own way and does so identically on every run.
+    """
+    iw, ih = img.size
+    rng = random.Random(hashlib.sha1(img.tobytes()).digest())
+    depth = max(1, min(WAVE_SOURCE_DEPTH, iw // 2, ih // 2))
+
+    x1, y1 = ox + iw - 1, oy + ih - 1
+    sides = {
+        # side: (edge line, line length, copies, where the line starts, how far out)
+        "top": (_edge_line(img, (0, 0, iw, depth), (iw, 1)),
+                PANEL_W, PANEL_H, ox, lambda y: oy - y),
+        "bottom": (_edge_line(img, (0, ih - depth, iw, ih), (iw, 1)),
+                   PANEL_W, PANEL_H, ox, lambda y: y - y1),
+        "left": (_edge_line(img, (0, 0, depth, ih), (1, ih)),
+                 PANEL_H, PANEL_W, oy, lambda x: ox - x),
+        "right": (_edge_line(img, (iw - depth, 0, iw, ih), (1, ih)),
+                  PANEL_H, PANEL_W, oy, lambda x: x - x1),
+    }
+
+    canvas = Image.new("L", (PANEL_W, PANEL_H))
+    mitres = _mitres(ox, oy, iw, ih)
+    for side, (line, extent, count, origin, distance) in sides.items():
+        walk = _wave_walk(max(PANEL_W, PANEL_H), rng)
+        raw = _flow(line, extent, count, origin, walk, distance)
+
+        if side in ("top", "bottom"):
+            field = Image.frombytes("L", (PANEL_W, PANEL_H), raw)
+        else:
+            # Built column-major — one row per panel column — then stood upright.
+            field = Image.frombytes("L", (PANEL_H, PANEL_W), raw) \
+                         .transpose(Image.TRANSPOSE)
+
+        mask = Image.new("L", (PANEL_W, PANEL_H), 0)
+        ImageDraw.Draw(mask).polygon(mitres[side], fill=255)
+        canvas.paste(field, (0, 0), mask)
+
+    return canvas
+
+
 def mat(img: Image.Image, style: str = "edges") -> Image.Image:
     """Centre a smaller image on the panel and fill what is left around it."""
     if img.size == (PANEL_W, PANEL_H):
@@ -235,6 +372,8 @@ def mat(img: Image.Image, style: str = "edges") -> Image.Image:
         canvas, levels = Image.new("L", (PANEL_W, PANEL_H), 255), None
     elif style == "blur":
         canvas, levels = _blur_mat(img), None
+    elif style == "waves":
+        canvas, levels = _waves_mat(img, ox, oy), None
     else:
         canvas, levels = _edge_mat(img, ox, oy)
 
@@ -430,12 +569,16 @@ def main() -> int:
     ap.add_argument("--fit", choices=("cover", "contain"), default="cover",
                     help="cover: fill the panel, crop the overflow (default). "
                          "contain: keep the whole frame, and mat the rest")
-    ap.add_argument("--mat", choices=("edges", "blur", "none"), default="edges",
-                    dest="mat_style",
+    ap.add_argument("--mat", choices=("edges", "waves", "blur", "none"),
+                    default="edges", dest="mat_style",
                     help="what surrounds an image too small to fill the panel. "
                          "edges: four sectors, each continuing the edge it "
-                         "touches (default). blur: the image itself, enlarged "
-                         "and washed out. none: plain white")
+                         "touches (default). waves: each edge sent outward "
+                         "along a wandering path, like rippled glass. blur: "
+                         "the image itself, enlarged and washed out. none: "
+                         "plain white")
+    ap.add_argument("--waves", action="store_const", const="waves",
+                    dest="mat_style", help="shorthand for --mat waves")
     ap.add_argument("--dither", choices=("floyd", "atkinson", "none"), default="floyd",
                     help="you should not need this; floyd is the default for good reason")
     ap.add_argument("--preview", action="store_true",

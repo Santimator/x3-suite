@@ -43,10 +43,10 @@ There is nothing to configure and nothing to answer. Every parameter below has
 a right answer on this device, so it is already chosen.
 
 Flags exist for the things that are genuinely taste — `--fit contain` to keep
-the whole frame instead of cropping, `--mat blur|none` for a different surround
-on an image too small to fill the panel, `--preview` to also write a PNG of the
-dithered result you can look at on a computer — plus `--dither atkinson|none`,
-which you should not need. For the push: `--host` when mDNS is unhelpful,
+the whole frame instead of cropping, `--mat waves|blur|none` (or just
+`--waves`) for a different surround on an image too small to fill the panel,
+`--preview` to also write a PNG of the dithered result you can look at on a
+computer — plus `--dither atkinson|none`, which you should not need. For the push: `--host` when mDNS is unhelpful,
 `--list` to see what is on the device, `--replace` to clear it first.
 
 ## What comes out, and why
@@ -90,14 +90,44 @@ into a plain single-colour mat — which is the correct behaviour, not a bug, an
 is why there is no separate "fill with black or white by overall lightness"
 mode: that is this one, on a uniform image.
 
-`--mat blur` is the alternative: the image itself, enlarged past all reason and
-washed out, for when the picture should look like it continues rather than like
-it is hung. Blur is what makes that work here — it is the one operation that
-*guarantees* a low-frequency background, and low frequency is what error
-diffusion renders well. Smearing the edge row outward instead (the obvious
-version of the idea) leaves long streaks the dither turns into scan lines, and
-rippling them makes moiré against the dither pattern. `--mat none` is a plain
-white surround.
+### `--mat waves` — the edges through rippled glass
+
+Each edge travels outward into its own sector along a wandering path: step out
+one pixel, go diagonally across or straight ahead, never more than one across
+per step. Every strand of the edge follows the same walk, so the picture
+appears to keep going in all four directions while wobbling as it travels —
+distorted-mirror, not blur.
+
+The one-across-per-step rule is the whole guarantee. Strands that never
+separate by more than a pixel stay neighbours the whole way out, so nothing
+tears open behind them and no pixel is left unpainted. It also means a thin
+margin self-limits: the wave can only be as tall as the distance it has had to
+climb, and lookups past the ends of the edge clamp, which carries the fill into
+the panel corners.
+
+What decides the direction of each step is a sum of three sines, so the
+wandering comes out as waves rather than as noise — where the curve is steep
+you get a run of diagonals, where it flattens, a run of straights. Their
+heights are *not* chosen: a crest a strand cannot climb in the space available
+comes out as a 45° zigzag instead of a wave, so the knob is steepness
+(`WAVE_SLOPE`) and amplitude follows as `period × slope / 2π`. Three components
+at 0.35 keep the combined slope under one, which is what separates a wave from
+a sawtooth. The shape is seeded from the image itself, so every wallpaper
+ripples its own way and does so identically on every run.
+
+The sectors still meet on the mitres — that is what stops four independent
+ripples from becoming mush; it reads as four panes of distorted glass in a
+frame. There is no keyline here and no snapped level: the point is that the
+edge *dissolves* into the border, so a hairline would cut exactly the join
+being drawn.
+
+One thing to expect rather than debug: **the wave only shows where the edge
+varies along its length.** A picture whose top row is flat sky propagates to a
+flat field however hard it wobbles. Busy edges ripple; plain edges do not.
+
+`--mat blur` is the softer alternative: the image itself, enlarged past all
+reason and washed out, for when the picture should look like it continues
+rather than like it is hung. `--mat none` is a plain white surround.
 
 The mat also replaces the old white letterbox in `--fit contain`, so a
 panorama gets framed rather than barred.
@@ -191,7 +221,11 @@ that the file decodes back to the exact levels we computed, that it lands at
 
 It checks the mat the same way, by the property that matters on this panel: a
 block of border must decode to a *single* level, and the sectors above and
-below a light-over-dark picture must not come out the same.
+below a light-over-dark picture must not come out the same. For `--mat waves`
+it asserts the invariant the construction rests on — the walk starts on the
+edge and never moves more than one across per step — and then proves the
+consequence directly: a source containing no black must paint a mat containing
+no black, since the canvas starts black and any hole would still be showing.
 
 It also asserts the two failure modes the encoder is *shaped around* still
 fail — a 108-byte DIB header is misread, a 24-bpp file is not native — so that

@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import io
 import json
+import random
 import struct
 import subprocess
 import sys
@@ -44,7 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import crosspoint_bmp as cp
 import make_wallpaper as mw
-from PIL import Image
+from PIL import Image, ImageDraw
 
 SCRIPTS = Path(__file__).resolve().parent
 
@@ -305,6 +306,53 @@ def check_mat(sources: list) -> None:
     check("mat: --mat blur is a wash, not a flat fill", blurred != edges)
 
 
+def check_waves(sources: list) -> None:
+    """--mat waves, and the property the whole construction rests on.
+
+    A strand of edge may move at most one across per step out. That is what
+    keeps neighbouring strands neighbours the whole way, so nothing tears open
+    behind them — the fill is gap-free by construction rather than by patching
+    holes afterwards.
+    """
+    walk = mw._wave_walk(600, random.Random(1))
+    check("waves: the walk leaves the edge where it found it", walk[0] == 0)
+    check("waves: never more than one across per step out — no tears",
+          all(abs(b - a) <= 1 for a, b in zip(walk, walk[1:])))
+    check("waves: it wanders far enough to see", max(abs(s) for s in walk) >= 8)
+    check("waves: it wanders both ways",
+          min(walk) < 0 < max(walk))
+
+    # Nothing left unpainted, tested directly: the canvas starts black and every
+    # painted pixel comes from a source with no black in it, so a single level-0
+    # pixel anywhere is a hole.
+    source = Image.new("L", (300, 400), 200)
+    ImageDraw.Draw(source).rectangle([0, 0, 299, 30], fill=120)
+    ImageDraw.Draw(source).rectangle([0, 370, 299, 399], fill=90)
+    painted = mw.mat(source, "waves")     # mat() also pastes the picture back on
+    check("waves: every pixel of the mat is painted — no holes",
+          min(painted.tobytes()) > 0,
+          f"{painted.tobytes().count(0)} unpainted pixels")
+
+    ox, oy = (cp.PANEL_W - 300) // 2, (cp.PANEL_H - 400) // 2
+
+    # The four sectors must tile the mat exactly, or the gap shows as black.
+    covered = Image.new("L", (cp.PANEL_W, cp.PANEL_H), 0)
+    for poly in mw._mitres(ox, oy, 300, 400).values():
+        ImageDraw.Draw(covered).polygon(poly, fill=255)
+    ImageDraw.Draw(covered).rectangle([ox, oy, ox + 299, oy + 399], fill=255)
+    check("waves: the four sectors tile the panel with no seam left over",
+          covered.tobytes().count(0) == 0,
+          f"{covered.tobytes().count(0)} px uncovered")
+
+    # Through the whole pipeline: still a wave, still the same one every time.
+    tiny = next(s for s in sources if s.stem == "tiny")
+    rippled = mw.render(tiny, mat_style="waves")
+    check("waves: rippled, not flat like the edge mat",
+          rippled != mw.render(tiny))
+    check("waves: the same source ripples the same way twice",
+          rippled == mw.render(tiny, mat_style="waves"))
+
+
 def check_designed_failures() -> None:
     """The two traps the encoder is shaped around. If these ever stop failing,
     the reasoning in make_wallpaper.py has gone stale and should be re-read."""
@@ -427,6 +475,9 @@ def main() -> int:
 
         print("\nthe mat, on sources too small to fill the panel:")
         check_mat(sources)
+
+        print("\n--mat waves:")
+        check_waves(sources)
 
         print("\nthe failure modes we design around:")
         check_designed_failures()
