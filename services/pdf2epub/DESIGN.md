@@ -192,9 +192,61 @@ Stage 3 emits the **same intermediate format graded-reader uses**:
    "verse-like" pages (short ragged lines, no justification); the restorer
    then defaults to preserving breaks. Needed for the fixture. **Leaning:
    yes, add to triage.**
-6. **Headless runner.** graded-reader has `run_book.py` + `llm.py` parity.
-   Same seam applies here, but **interactive-first**: prove the loop with
-   Claude Code driving before wiring the runner.
+6. **Headless runner.** ~~Interactive-first: prove the loop with Claude Code
+   driving before wiring the runner.~~ **The precondition is met (2026-08) —
+   this is now owed work, not a new feature.** `workspace/alcaldes-encontrados`
+   is a complete worked conversion on the vision route, and SKILL.md calls the
+   pipeline fully implemented. graded-reader has had `run_book.py` + `llm.py`
+   since the start; pdf2epub has no `headless/` at all, so the suite is
+   asymmetric for no reason anyone chose. See "The headless runner, in full"
+   below.
+
+## The headless runner, in full
+
+**The shape.** `services/pdf2epub/headless/` mirroring
+`services/graded-reader/headless/` exactly: a `run_conversion.py` entry point,
+`config.example.json` → gitignored `config.json`, gitignored `secrets/` +
+its README, and the same OpenAI-compatible seam. The seams between stages are
+already file-based (a decision this document made early, for this reason), so
+the runner fills the same slots Claude Code fills interactively — no stage
+changes shape to accommodate it.
+
+**Both routes are drivable. Neither is blocked by the protocol.**
+
+- *Cheap route* — the model's output is small structured decisions: route
+  confirmation, `policy.json`, `draft.json`. Text in, JSON out. This is exactly
+  the shape `run_book.py` already runs, and it needs nothing new.
+- *Vision route* — OpenAI chat completions carry images as `image_url` content
+  parts, base64 `data:` URLs included; llama.cpp's server and NIM both serve
+  vision models that accept them, and `render_pages.py` already emits the PNGs.
+  What stands between us and it is missing code, **not** a protocol limit: the
+  shared `llm.py` sends `content` as a plain string and needs the array form.
+  That file is the seam graded-reader also rides, so touching it means
+  re-running graded-reader's selftest (AGENTS.md units table).
+
+**Two constraints to design against, not discover.**
+
+- *Page budget.* A 200-dpi page PNG is ~1–3 MB, ~1.4× that in base64. A
+  200-page book will not fit anyone's context. The runner needs an explicit
+  downscale-and-batch policy — pages per request, a max dimension, and a
+  resume point — decided up front rather than tuned after the first failure.
+- *Quality is model-bound, and the bar here is high.* The fixture is 1793
+  Spanish in period type. A small local VLM will not transcribe it to the
+  standard `CONVERSIONS.md` sets. So the runner must be **willing to stop** —
+  the same discipline as `run_book.py` refusing to add-and-gloss silently:
+  report the route, report what it could not read, save everything up to that
+  point, and hand the job back. A bad transcription that completes is worse
+  than a run that stops, because the gate for this pipeline is a human reading
+  the result.
+
+**Therefore the CLI driver is not a fallback.** Pointing Claude Code or Codex
+at the folder is the *quality* path for hard scans, and the runner is the
+cheap-and-unattended path — two drivers over the same scripts, differing in
+competence, not in privilege. Nothing about the runner deprecates SKILL.md.
+
+**Verification is unchanged.** pdf2epub has no self-test by design; a runner
+does not earn it one. The gate stays completeness plus a human read, recorded
+in `CONVERSIONS.md`.
 7. **TOC without chapters.** The fixture is an unbroken monologue — no
    chapter headings at all. Architect options: single-chapter EPUB, or
    invented (clearly marked) navigation splits every ~N pages. **Leaning:
