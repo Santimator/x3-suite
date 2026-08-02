@@ -13,6 +13,14 @@ services/graded-reader/headless/secrets/*
 # wallpaper-maker: the reader's address on your LAN, remembered between pushes
 wallpaper-maker/last-device.json
 
+# tgbot: the Telegram token, who is allowed to talk to it, and the delivery
+# queue. The queue is state, not history — deleting it loses whatever was
+# waiting for the device and nothing else.
+tgbot/config.json
+tgbot/secrets/*
+!tgbot/secrets/README.md
+tgbot/state/
+
 # opds-server: local library paths + Basic-auth password (never commit)
 opds-server/config.json
 opds-server/secrets/*

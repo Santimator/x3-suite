@@ -164,11 +164,20 @@ exactly the pixels that were computed off-device.
 ## Getting files onto the device over WiFi
 
 *Source-confirmed (`src/network/CrossPointWebServer.cpp`,
-`src/network/WebDAVHandler.cpp`, `docs/webserver-endpoints.md`), master @
-2026-08 = 1.5.0 byte-for-byte. **Device-confirmed 2026-08** for the HTTP path —
-`/api/status`, `/api/files`, `/mkdir`, `/upload` and `/api/settings` all drove a
-real X3 from `wallpaper-maker/scripts/push_wallpaper.py`. WebDAV and the
-WebSocket upload remain read-from-source.*
+`src/network/WebDAVHandler.cpp`, `docs/webserver-endpoints.md`). **Device-confirmed
+2026-08** for the HTTP path — `/api/status`, `/api/files`, `/mkdir`, `/upload`
+and `/api/settings` all drove a real X3 from
+`wallpaper-maker/scripts/push_wallpaper.py`, and `/rename` was driven by hand on
+a 1.5.0 RC. `/download` and `/move` are wired in `crosspoint_device.py` but
+read-from-source; WebDAV and the WebSocket upload likewise.*
+
+*Careful with the version claim here: this file is **1.5.0**, and master is no
+longer the same. As of 2026-08 `CrossPointWebServer.cpp` is 1974 lines at the
+1.5.0 tag and 1913 on master, and 1.5.0 carries `server->enableCORS(true)` plus
+task-watchdog registration that master does not. The route table below is
+identical across 1.4.1, 1.5.0 and master — every endpoint here has existed since
+at least 1.4.1 — but "master = 1.5.0 byte-for-byte" is no longer true for this
+file and should not be repeated.*
 
 The OPDS client (above) is a **book-only pull**: acquisition type exactly
 `application/epub+zip`, saved to the SD root as `<author> - <title>.epub`.
@@ -184,7 +193,13 @@ only while that screen is up.
 | Upload | `POST /upload?path=DIR`, multipart. Path is a *query* param — the handler needs it before the body finishes arriving |
 | Overwrite | **Not supported.** An upload onto an existing name returns 400 `File already exists`; `POST /delete?path=...` first |
 | Folders | `POST /mkdir?path=PARENT&name=NAME`, no name validation — dot-prefixed folders are fine |
-| Listing | `GET /api/files?path=...`. **Hides dot-prefixed entries** unless the device's `showHiddenFiles` is on, so a missing folder and a hidden one look alike |
+| Listing | `GET /api/files?path=...`. Entries carry `name`, `size`, `isDirectory`, `isEpub`. **Hides dot-prefixed entries** unless the device's `showHiddenFiles` is on, so a missing folder and a hidden one look alike |
+| Download | `GET /download?path=...`. EPUBs come back as `application/epub+zip`, everything else `application/octet-stream`. Refused (403) when the *final* segment starts with a dot |
+| Rename | `POST /rename?path=FILE&name=NEWNAME` — **a real rename, one call**. `name` is a bare name: no `/` or `\` (400), may not start with a dot (403). Files only. Renaming to the current name returns 200 `Name unchanged`. **Device-confirmed 2026-08**, with spaces in both names |
+| Move | `POST /move?path=FILE&dest=DIR`. Files only, not directories |
+| Parameters | Read from **either** the query string or a form body — `hasArg`/`arg` see both. `push_wallpaper.py` and `crosspoint_device.py` use the query form throughout |
+| Protected names | `rename`, `move`, `delete` and `download` all guard on the **final path segment** only. So a file *inside* `/.sleep` is fair game — which is why wallpapers can be replaced — while `/.sleep` itself cannot be renamed or deleted |
+| Names on the card | Whatever is there, byte for byte, and `Storage.exists()` compares bytes. Books from other catalogs arrive **NFD-decomposed** (`é` as `e` + U+0301); normalizing a name before sending it back yields `Item not found` against a file plainly present. Round-trip listings verbatim |
 | Settings | `GET`/`POST /api/settings`, partial JSON by key (`{"sleepScreen": 2}`); keys are in `src/SettingsList.h` |
 | Fonts | `POST /api/fonts/upload` with `family` + `file` — the network route for `reference/fonts/` |
 | WebDAV | Port 80, PUT overwrites atomically. **Refuses any path segment beginning with `.`** — so `/.sleep` is unreachable this way, and `/sleep` is not |

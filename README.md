@@ -34,6 +34,8 @@ This is a suite of tools. You'll find:
 - **`services/`** — the AI-assisted tools:
   - **`graded-reader/`** — writes leveled Chinese books.
   - **`pdf2epub/`** — converts PDFs into clean EPUBs.
+- **`tgbot/`** — a Telegram bot that drives all of the above from your phone.
+  Optional; nothing else needs it.
 - **`reference/`** — device notes and things for the X3 itself. Special mention
   to **WenKai**, the Chinese font that makes CrossPoint render hanzi properly,
   plus whatever else I end up adding.
@@ -306,7 +308,47 @@ fonts are ignored, ruby and interlinear pinyin are broken, RAM is ~400 KB.
 
 ---
 
-## 9. Making it yours
+## 9. From your phone
+
+**Tested:** self-tested; the device half rides endpoints device-confirmed on a
+1.5.0 RC (2026-08).
+
+A Telegram bot that operates everything above without a terminal. Send it a
+photo and it comes back as a sleep-screen preview with the mat choices as
+buttons; send it an EPUB and it lands on the catalog; browse the reader's SD
+card and rename a file from the couch.
+
+```bash
+cp tgbot/config.example.json tgbot/config.json    # then add your Telegram id
+printf '%s' '<token from @BotFather>' > tgbot/secrets/telegram.token
+chmod 600 tgbot/secrets/telegram.token
+python3 tgbot/scripts/bot.py
+```
+
+Stdlib only — nothing to install. It answers exactly one Telegram user id and
+drops everything else without a reply.
+
+The shape worth knowing before you use it: **server-side work happens any time,
+device-side work only when you ask.** A built wallpaper is *queued*, and the
+queue is drained only by an explicit push, only while the X3 is on Home → File
+Transfer → Join a Network. If the reader isn't there, the queue is untouched —
+so you can send pictures all week and push once. Books are never queued: the
+reader pulls those from the catalog itself.
+
+It is **optional by construction**. Nothing else in the repo imports it, and if
+you never want a bot, you never need a token.
+
+Two things it will tell you rather than pretend about: Telegram refuses to let
+any bot download a file over 20 MB (drop those in `workspace/inbox/` and tap
+📥 Inbox), and PDFs are *staged*, not converted — that job still wants a driver,
+which today is Claude Code reading the pdf2epub skill.
+
+Full documentation, including what each button does and how it talks to the
+rest of the suite: [`tgbot/SKILL.md`](tgbot/SKILL.md).
+
+---
+
+## 10. Making it yours
 
 To add a tool, copy the shape: a `SKILL.md` briefing, deterministic scripts for
 the parts models are bad at, and a gate after every model step. Everything
