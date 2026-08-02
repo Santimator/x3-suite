@@ -60,6 +60,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import math
 import random
 import re
@@ -525,6 +526,24 @@ def render(src: Path, *, fit: str = "cover", mat_style: str = "waves",
     return dither(img, algorithm)
 
 
+def probe(src: Path, *, fit: str = "cover") -> dict:
+    """Will this image fill the panel, or does it need a mat?
+
+    Asked by callers that want to offer the mat choice only when there is one
+    to make — `tgbot/` puts it to you as a button. The answer is not "is the
+    image smaller than 528x792": a 500x750 photo is smaller in both dimensions
+    and still fills, because it only has to grow 1.06x and MAX_UPSCALE allows
+    1.5x. Nor is a small overflow matted, since MIN_MAT_AREA rules a sliver out.
+    Both thresholds are judgement calls that live here, so the question is
+    answered by running the real thing rather than by re-deriving it elsewhere.
+    """
+    img = load_grayscale(src)
+    scaled = scale_to_panel(img, fit)
+    return {"file": str(src), "width": img.width, "height": img.height,
+            "fills": scaled.size == (PANEL_W, PANEL_H),
+            "panel": [PANEL_W, PANEL_H]}
+
+
 def convert(src: Path, out_dir: Path, *, fit: str = "cover",
             mat_style: str = "waves", algorithm: str = "floyd",
             preview: bool = False) -> Path:
@@ -576,6 +595,10 @@ def main() -> int:
                     help="you should not need this; floyd is the default for good reason")
     ap.add_argument("--preview", action="store_true",
                     help="also write a PNG of the dithered result, to look at")
+    ap.add_argument("--probe", action="store_true",
+                    help="write nothing; report as JSON whether each image "
+                         "fills the panel or needs a mat, so a caller can ask "
+                         "about the mat only when there is a choice")
     args = ap.parse_args()
 
     inputs = args.inputs or [DEFAULT_IN]
@@ -590,6 +613,11 @@ def main() -> int:
         where = ", ".join(str(i) for i in inputs)
         print(f"make_wallpaper: no images found in {where}", file=sys.stderr)
         return 1
+
+    if args.probe:
+        json.dump([probe(s, fit=args.fit) for s in sources],
+                  sys.stdout, ensure_ascii=False)
+        return 0
 
     if args.out:
         out_dir = args.out

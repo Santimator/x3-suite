@@ -12,7 +12,9 @@ pulls books.
 So delivery goes the other way — a push, into the file-transfer web server the
 firmware already ships (`src/network/CrossPointWebServer.cpp`, port 80, no
 auth, CORS open). That server is the same one the browser file manager talks
-to; this is that conversation without the browser.
+to; this is that conversation without the browser. The conversation itself —
+discovery, listing, upload, delete — lives in `crosspoint_device.py` next door,
+because `tgbot/` holds the same conversation and neither script owns it.
 
 On the device: **Home -> File Transfer -> Join a Network**. It prints an
 address and sits on that screen while we work; the server stops when you leave
@@ -22,6 +24,7 @@ it. Then:
     push_wallpaper.py --ip 192.168.1.42     # if mDNS is unhelpful here
     push_wallpaper.py --list                # what is on the device now
     push_wallpaper.py --replace             # delete its wallpapers first
+    push_wallpaper.py --json                # ... for something else to read
 
 An address that answers is written to `last-device.json` (gitignored) and tried
 first next time, so `--ip` is normally a one-off. mDNS is the thing most likely
@@ -49,30 +52,14 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import socket
 import sys
-from datetime import datetime
-import urllib.error
-import urllib.parse
-import urllib.request
-import uuid
 from pathlib import Path
+
+from crosspoint_device import (DeviceError, delete, find_device, list_dir, mkdir,
+                               remember, set_settings, upload)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DIR = REPO_ROOT / "workspace" / "wallpapers" / "build"
-
-# Where the last address that answered is kept, so the next run starts there.
-# Gitignored: it is a fact about your LAN, not about this repo. X3_LAST_DEVICE
-# moves it, which is how the self-test keeps its hands off yours.
-LAST_DEVICE = Path(os.environ.get("X3_LAST_DEVICE")
-                   or Path(__file__).resolve().parents[1] / "last-device.json")
-
-# The firmware's own defaults: web server on 80, mDNS name crosspoint.local,
-# and a UDP discovery responder on 8134 that answers the payload "hello".
-DEFAULT_HOST = "crosspoint.local"
-DISCOVERY_PORT = 8134
-DISCOVERY_PAYLOAD = b"hello"
 
 PREFERRED_DIR = "/.sleep"
 FALLBACK_DIR = "/sleep"
@@ -81,181 +68,10 @@ FALLBACK_DIR = "/sleep"
 # "sleepScreen" and takes the enum index.
 SLEEP_MODE_CUSTOM = 2
 
-TIMEOUT = 20
-PROBE_TIMEOUT = 3       # just asking "are you there?" — do not stall on a dead address
 
-
-class DeviceError(Exception):
-    pass
-
-
-def discover(timeout: float = 2.0) -> list:
-    """Broadcast the firmware's discovery ping and collect who answers.
-
-    The reply is `crosspoint (on <hostname>);<websocket port>` — we only want
-    the address it came from.
-    """
-    found = []
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    sock.settimeout(timeout)
-    try:
-        sock.sendto(DISCOVERY_PAYLOAD, ("255.255.255.255", DISCOVERY_PORT))
-        while True:
-            try:
-                data, addr = sock.recvfrom(256)
-            except socket.timeout:
-                break
-            if data.startswith(b"crosspoint") and addr[0] not in found:
-                found.append(addr[0])
-    except OSError:
-        pass
-    finally:
-        sock.close()
-    return found
-
-
-def _request(host: str, path: str, *, method: str = "GET", query: dict | None = None,
-             body: bytes | None = None, content_type: str | None = None,
-             timeout: float = TIMEOUT):
-    url = f"http://{host}{path}"
-    if query:
-        url += "?" + urllib.parse.urlencode(query)
-    req = urllib.request.Request(url, data=body, method=method)
-    if content_type:
-        req.add_header("Content-Type", content_type)
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.status, resp.read()
-    except urllib.error.HTTPError as exc:
-        return exc.code, exc.read()
-    except urllib.error.URLError as exc:
-        raise DeviceError(f"cannot reach {host}: {exc.reason}") from exc
-    except (TimeoutError, socket.timeout) as exc:
-        raise DeviceError(f"{host} stopped answering — is it still on the "
-                          f"File Transfer screen?") from exc
-
-
-def status(host: str, timeout: float = TIMEOUT) -> dict:
-    code, body = _request(host, "/api/status", timeout=timeout)
-    if code != 200:
-        raise DeviceError(f"/api/status returned {code}")
-    try:
-        return json.loads(body)
-    except json.JSONDecodeError as exc:
-        raise DeviceError(f"{host} answered, but not like a CrossPoint reader") from exc
-
-
-def remember(host: str) -> None:
-    """Write down the address that answered, for the next run to try first."""
-    try:
-        LAST_DEVICE.write_text(json.dumps(
-            {"host": host,
-             "confirmed": datetime.now().astimezone().isoformat(timespec="seconds")},
-            indent=2) + "\n")
-    except OSError:
-        pass        # a read-only checkout is no reason to fail a push that worked
-
-
-def recall() -> str | None:
-    try:
-        return json.loads(LAST_DEVICE.read_text()).get("host")
-    except (OSError, ValueError, AttributeError):
-        return None
-
-
-def find_device(explicit: str | None):
-    """Locate the reader, and return (host, its /api/status).
-
-    An address given on the command line is used *as given* — if it does not
-    answer that is an error, not a reason to go looking somewhere else and push
-    to whatever turns up. Everything else is a guess, tried cheapest first:
-
-      1. whatever answered last time (this LAN, this DHCP lease)
-      2. crosspoint.local, if mDNS resolves here at all
-      3. the firmware's UDP discovery ping, which needs no name service
-
-    Guesses get a short timeout, so a stale address costs a moment rather than
-    the better part of a minute.
-    """
-    if explicit:
-        return explicit, status(explicit)
-
-    tried = []
-    for candidate in (recall(), DEFAULT_HOST):
-        if not candidate or candidate in tried:
-            continue
-        tried.append(candidate)
-        try:
-            return candidate, status(candidate, timeout=PROBE_TIMEOUT)
-        except DeviceError:
-            pass
-
-    for ip in discover():
-        try:
-            return ip, status(ip, timeout=PROBE_TIMEOUT)
-        except DeviceError:
-            pass
-
-    raise DeviceError(
-        "no reader found" + (f" (tried {', '.join(tried)})" if tried else "") + ".\n"
-        "  On the device: Home -> File Transfer -> Join a Network.\n"
-        "  Then pass the address it prints: --ip 192.168.x.x")
-
-
-def list_dir(host: str, path: str) -> list:
-    """Contents of a folder, as /api/files reports them.
-
-    Note the firmware hides dot-prefixed *entries* from this listing unless the
-    device's `showHiddenFiles` is on — so files inside /.sleep are visible but
-    /.sleep itself is not listed at the root. A missing folder and an empty one
-    both come back as [].
-    """
-    code, body = _request(host, "/api/files", query={"path": path})
-    if code != 200:
-        return []
-    try:
-        return json.loads(body)
-    except json.JSONDecodeError:
-        return []
-
-
-def mkdir(host: str, parent: str, name: str) -> bool:
-    """True if the folder now exists (created, or already there)."""
-    code, body = _request(host, "/mkdir", method="POST",
-                          query={"path": parent, "name": name})
-    if code == 200:
-        return True
-    if b"already exists" in body:
-        return True
-    raise DeviceError(f"mkdir {parent}/{name}: {code} {body.decode(errors='replace')}")
-
-
-def delete(host: str, path: str) -> bool:
-    code, _ = _request(host, "/delete", method="POST", query={"path": path})
-    return code == 200
-
-
-def upload(host: str, directory: str, file: Path) -> None:
-    """POST /upload?path=DIR with the file as multipart form data.
-
-    The destination is a query parameter, not a form field, because the
-    firmware's upload callback needs the path before the multipart body has
-    finished arriving.
-    """
-    boundary = f"----x3suite{uuid.uuid4().hex}"
-    head = (f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="file"; filename="{file.name}"\r\n'
-            f"Content-Type: image/bmp\r\n\r\n").encode()
-    tail = f"\r\n--{boundary}--\r\n".encode()
-    body = head + file.read_bytes() + tail
-
-    code, resp = _request(host, "/upload", method="POST", query={"path": directory},
-                          body=body,
-                          content_type=f"multipart/form-data; boundary={boundary}")
-    if code == 200:
-        return
-    raise DeviceError(f"upload {file.name}: {code} {resp.decode(errors='replace')}")
+def bmps_in(host: str, path: str) -> list:
+    return [f for f in list_dir(host, path)
+            if not f.get("isDirectory") and f.get("name", "").lower().endswith(".bmp")]
 
 
 def choose_dir(host: str, create: bool = True) -> str:
@@ -265,9 +81,7 @@ def choose_dir(host: str, create: bool = True) -> str:
     not exist. So if there are already wallpapers in /sleep, creating /.sleep
     would make them all disappear without a word. Respect what is there.
     """
-    existing = [f for f in list_dir(host, FALLBACK_DIR)
-                if not f.get("isDirectory") and f.get("name", "").lower().endswith(".bmp")]
-    if existing:
+    if bmps_in(host, FALLBACK_DIR):
         return FALLBACK_DIR
     if create:
         mkdir(host, "/", PREFERRED_DIR.lstrip("/"))
@@ -275,10 +89,7 @@ def choose_dir(host: str, create: bool = True) -> str:
 
 
 def set_custom_mode(host: str) -> bool:
-    body = json.dumps({"sleepScreen": SLEEP_MODE_CUSTOM}).encode()
-    code, _ = _request(host, "/api/settings", method="POST", body=body,
-                       content_type="application/json")
-    return code == 200
+    return set_settings(host, {"sleepScreen": SLEEP_MODE_CUSTOM})
 
 
 def main() -> int:
@@ -289,7 +100,7 @@ def main() -> int:
     ap.add_argument("--ip", "--host", dest="host", metavar="ADDR",
                     help="the reader's address. Remembered on success, and "
                          "tried first next time. Without it: the remembered "
-                         f"address, then {DEFAULT_HOST}, then UDP discovery")
+                         "address, then crosspoint.local, then UDP discovery")
     ap.add_argument("--dir", help="target folder on the SD card "
                                   f"(default: {PREFERRED_DIR}, or {FALLBACK_DIR} if in use)")
     ap.add_argument("--list", action="store_true", help="show what is there and stop")
@@ -297,13 +108,25 @@ def main() -> int:
                     help="delete the wallpapers already on the device first")
     ap.add_argument("--no-set-mode", action="store_true",
                     help="do not switch the sleep screen to Custom")
+    ap.add_argument("--json", action="store_true",
+                    help="report as JSON on stdout instead of prose — one "
+                         "record per file, so a caller can say which ones "
+                         "landed. Nothing else is printed")
     args = ap.parse_args()
+
+    report = {"ok": False, "host": None, "target": None, "items": [], "error": None}
+
+    def say(*a, **kw):
+        if not args.json:
+            print(*a, **kw)
 
     try:
         host, info = find_device(args.host)
         remember(host)
-        print(f"reader at {host}: {info.get('model', 'unknown model')}, "
-              f"firmware {info.get('version', '?')}")
+        report["host"] = host
+        report["firmware"] = info.get("version")
+        say(f"reader at {host}: {info.get('model', 'unknown model')}, "
+            f"firmware {info.get('version', '?')}")
 
         # --list must not change the device: creating /.sleep to look inside it
         # would shadow whatever is in /sleep.
@@ -311,16 +134,21 @@ def main() -> int:
         if args.dir and not args.list:
             parent, _, name = args.dir.rstrip("/").rpartition("/")
             mkdir(host, parent or "/", name)
-        present = [f for f in list_dir(host, target)
-                   if not f.get("isDirectory") and f.get("name", "").lower().endswith(".bmp")]
+        report["target"] = target
+        present = bmps_in(host, target)
 
         if args.list:
-            print(f"\n{target}/ — {len(present)} wallpaper(s)")
+            report["ok"] = True
+            report["items"] = [{"name": f["name"], "bytes": f.get("size", 0)}
+                               for f in present]
+            say(f"\n{target}/ — {len(present)} wallpaper(s)")
             for f in present:
-                print(f"  {f['name']}  ({f.get('size', 0) // 1024} KB)")
+                say(f"  {f['name']}  ({f.get('size', 0) // 1024} KB)")
             if target == PREFERRED_DIR:
-                print("\n(this folder is hidden; the device's file browser will "
-                      "not show it unless Show Hidden Files is on)")
+                say("\n(this folder is hidden; the device's file browser will "
+                    "not show it unless Show Hidden Files is on)")
+            if args.json:
+                json.dump(report, sys.stdout, ensure_ascii=False)
             return 0
 
         inputs = args.files or [DEFAULT_DIR]
@@ -333,42 +161,65 @@ def main() -> int:
                 sources.append(item)
         if not sources:
             where = ", ".join(str(i) for i in inputs)
-            print(f"push_wallpaper: no .bmp files in {where} — "
-                  "run make_wallpaper.py first", file=sys.stderr)
+            report["error"] = f"no .bmp files in {where}"
+            if args.json:
+                json.dump(report, sys.stdout, ensure_ascii=False)
+            else:
+                print(f"push_wallpaper: {report['error']} — "
+                      "run make_wallpaper.py first", file=sys.stderr)
             return 1
 
         if args.replace and present:
             for f in present:
                 delete(host, f"{target}/{f['name']}")
-            print(f"cleared {len(present)} wallpaper(s) from {target}/")
+            say(f"cleared {len(present)} wallpaper(s) from {target}/")
             present = []
 
         on_device = {f["name"] for f in present}
-        print(f"\npushing {len(sources)} file(s) to {target}/")
+        say(f"\npushing {len(sources)} file(s) to {target}/")
+        failures = 0
         for src in sources:
             # The firmware refuses an upload onto an existing name rather than
             # overwriting it, so replacing means deleting first.
-            if src.name in on_device:
-                delete(host, f"{target}/{src.name}")
-            upload(host, target, src)
-            print(f"  {src.name}  ({src.stat().st_size // 1024} KB)")
+            item = {"name": src.name, "bytes": src.stat().st_size, "ok": False}
+            try:
+                if src.name in on_device:
+                    delete(host, f"{target}/{src.name}")
+                upload(host, target, src, content_type="image/bmp")
+                item["ok"] = True
+                say(f"  {src.name}  ({src.stat().st_size // 1024} KB)")
+            except DeviceError as exc:
+                # One bad file is not a reason to abandon the rest; the caller
+                # is told exactly which ones landed.
+                item["error"] = str(exc)
+                failures += 1
+                say(f"  {src.name}  FAILED — {exc}", file=sys.stderr)
+            report["items"].append(item)
 
         if not args.no_set_mode:
-            if set_custom_mode(host):
-                print("\nsleep screen set to Custom")
+            report["sleep_mode_set"] = set_custom_mode(host)
+            if report["sleep_mode_set"]:
+                say("\nsleep screen set to Custom")
             else:
-                print("\ncould not set the sleep screen mode — do it on the device: "
-                      "Settings -> Display -> Sleep Screen -> Custom")
+                say("\ncould not set the sleep screen mode — do it on the device: "
+                    "Settings -> Display -> Sleep Screen -> Custom")
         else:
-            print("\nSleep screen must be set to Custom for these to show: "
-                  "Settings -> Display -> Sleep Screen")
+            say("\nSleep screen must be set to Custom for these to show: "
+                "Settings -> Display -> Sleep Screen")
 
-        print("Leave the File Transfer screen and let it sleep.")
+        say("Leave the File Transfer screen and let it sleep.")
+        report["ok"] = failures == 0
+        if args.json:
+            json.dump(report, sys.stdout, ensure_ascii=False)
+        return 0 if failures == 0 else 1
 
     except DeviceError as exc:
-        print(f"push_wallpaper: {exc}", file=sys.stderr)
+        report["error"] = str(exc)
+        if args.json:
+            json.dump(report, sys.stdout, ensure_ascii=False)
+        else:
+            print(f"push_wallpaper: {exc}", file=sys.stderr)
         return 1
-    return 0
 
 
 if __name__ == "__main__":
