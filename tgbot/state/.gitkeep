@@ -1,0 +1,7 @@
+The delivery queue lives here, and nothing in this directory is committed.
+
+The folder itself is, though — as this file. tgbot.service names it in
+ReadWritePaths, and systemd refuses to start a unit whose ReadWritePaths point
+at a directory that does not exist yet: it fails at namespace setup with
+226/NAMESPACE, before Python runs, naming the path but not the reason. A clone
+that has never run the bot would hit that every time.

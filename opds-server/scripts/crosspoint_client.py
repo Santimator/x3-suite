@@ -256,13 +256,46 @@ def sanitize_filename(name: str, max_bytes: int = 100) -> str:
             if len(result) + len(encoded) > max_bytes:
                 break
             result += encoded
-    return result.decode("utf-8", "ignore")
+    # The firmware trims trailing spaces and dots after the budget is spent —
+    # so a title truncated mid-way can lose one more character here — and never
+    # returns empty.
+    trimmed = result.decode("utf-8", "ignore").rstrip(" .")
+    return trimmed or "book"
 
 
-def sd_filename(entry: OpdsEntry) -> str:
-    """What the book will be called on the SD card."""
-    label = (f"{entry.author} - " if entry.author else "") + entry.title
-    return "/" + sanitize_filename(label) + ".epub"
+# `OpdsFilenameFormat` in src/util/OpdsFilename.h. 1.5.0 made this a setting
+# (`opdsFilenameFormat`); before that the layout was always AuthorTitle, which
+# is why 0 is the default here as it is there.
+FILENAME_AUTHOR_TITLE = 0
+FILENAME_TITLE_AUTHOR = 1
+FILENAME_TITLE_ONLY = 2
+
+
+def opds_book_filename(author: str, title: str, fmt: int = FILENAME_AUTHOR_TITLE) -> str:
+    """`opdsBookFilename` — the name a download lands under on the SD card.
+
+    Ported rather than approximated because it is the one string that decides
+    whether two delivery paths agree. A book pushed over the file-transfer API
+    and the same book pulled through this catalog only end up as *one* file on
+    the card if both spell it identically, down to the byte budget and the
+    trailing-dot trim; get it wrong and the reader quietly holds two copies of
+    everything.
+
+    With no author, every format collapses to the title alone.
+    """
+    if fmt == FILENAME_TITLE_AUTHOR:
+        base = f"{title} - {author}" if author else title
+    elif fmt == FILENAME_TITLE_ONLY:
+        base = title
+    else:
+        base = f"{author} - {title}" if author else title
+    # .epub is appended after sanitizing, so the extension is never truncated.
+    return sanitize_filename(base) + ".epub"
+
+
+def sd_filename(entry: OpdsEntry, fmt: int = FILENAME_AUTHOR_TITLE) -> str:
+    """What the book will be called on the SD card, as an absolute path."""
+    return "/" + opds_book_filename(entry.author, entry.title, fmt)
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):

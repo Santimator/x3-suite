@@ -228,19 +228,24 @@ def delete(host: str, path: str) -> bool:
 
 
 def upload(host: str, directory: str, file: Path,
-           content_type: str = "application/octet-stream") -> None:
+           content_type: str = "application/octet-stream",
+           name: str | None = None) -> None:
     """POST /upload?path=DIR with the file as multipart form data.
 
     The destination is a query parameter, not a form field, because the
     firmware's upload callback needs the path before the multipart body has
-    finished arriving.
+    finished arriving. `name` overrides what it is called on the card, for
+    callers that need a destination name the local file does not have — a book
+    has to land under the same name the OPDS client would give it, or the
+    reader ends up holding two copies of it.
 
     The firmware refuses an upload onto an existing name (400 `File already
     exists`) rather than overwriting it, so replacing means `delete` first.
     """
     boundary = f"----x3suite{uuid.uuid4().hex}"
     head = (f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="file"; filename="{file.name}"\r\n'
+            f'Content-Disposition: form-data; name="file"; '
+            f'filename="{name or file.name}"\r\n'
             f"Content-Type: {content_type}\r\n\r\n").encode()
     tail = f"\r\n--{boundary}--\r\n".encode()
     body = head + file.read_bytes() + tail

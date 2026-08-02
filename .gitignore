@@ -19,7 +19,8 @@ wallpaper-maker/last-device.json
 tgbot/config.json
 tgbot/secrets/*
 !tgbot/secrets/README.md
-tgbot/state/
+tgbot/state/*
+!tgbot/state/.gitkeep
 
 # opds-server: local library paths + Basic-auth password (never commit)
 opds-server/config.json

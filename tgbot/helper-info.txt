@@ -1,10 +1,29 @@
 tgbot.service — what the commands do
 ====================================
 
-First, edit tgbot.service: replace every CHANGEME with the account that owns
-the repo, and the path where you cloned it. There are five, and they must all
-match — three of them are ReadWritePaths, which is what stops the bot from
-being confined out of its own workspace.
+Do not hand-edit the paths in tgbot.service. Fill them in from the clone you
+are standing in, so they cannot disagree with each other or lose a directory
+along the way:
+
+  cd /path/to/x3-suite
+  mkdir -p tgbot/state
+  sed -e "s|CHANGEME_REPO|$PWD|g" -e "s|CHANGEME_USER|$(id -un)|g" \
+      tgbot/tgbot.service | sudo tee /etc/systemd/system/tgbot.service
+
+Then skip to "sudo systemctl daemon-reload" below — that one command replaces
+the sudo cp.
+
+Typing the path by hand is how you end up with /home/server_projects/... where
+you meant /home/you/server_projects/..., and systemd reports that as:
+
+  Failed to set up mount namespacing: /run/systemd/unit-root/<path>:
+  No such file or directory
+  Failed at step NAMESPACE spawning /usr/bin/python3
+  status=226/NAMESPACE
+
+which names a path and not the mistake. The same error appears if a
+ReadWritePaths directory genuinely does not exist — hence the mkdir, though a
+fresh clone now ships tgbot/state/ for exactly this reason.
 
 Before any of this, the bot needs two things it will not start without: your
 numeric Telegram id and the bot token. By default those live in
@@ -20,11 +39,12 @@ to the unit.
 INSTALLING
 ----------
 
-  sudo cp tgbot/tgbot.service /etc/systemd/system/
+  (the sed | sudo tee above)
 
-      A plain file copy. /etc/systemd/system/ is where systemd looks for units,
-      and it's the directory for yours specifically — /usr/lib/systemd/system/
-      belongs to packages. Nothing runs yet; systemd hasn't looked.
+      Writes the unit with your paths already in it. /etc/systemd/system/ is
+      where systemd looks for units, and it's the directory for yours
+      specifically — /usr/lib/systemd/system/ belongs to packages. Nothing runs
+      yet; systemd hasn't looked.
 
   sudo systemctl daemon-reload
 

@@ -32,8 +32,10 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT / "wallpaper-maker" / "scripts"))
+sys.path.insert(0, str(REPO_ROOT / "opds-server" / "scripts"))
 
 import crosspoint_device as device            # noqa: E402  (after the path fix)
+import crosspoint_client as opds_client       # noqa: E402
 
 DeviceError = device.DeviceError
 
@@ -166,10 +168,54 @@ def sleep_dir(host: str) -> str:
     return "/.sleep"
 
 
-def push(files: list) -> dict:
-    """Drain to the device. One JSON record per file, so the chat can say
-    which ones landed."""
+def device_book_name(author: str, title: str, host: str | None = None) -> str:
+    """The name this book would land under if the reader downloaded it.
+
+    Pushing a book and pulling the same book must produce **one** file on the
+    SD card, not two — so the upload borrows the OPDS client's own naming,
+    ported in `crosspoint_client.opds_book_filename`. Since 1.5.0 the layout is
+    a device setting (`opdsFilenameFormat`), so when the reader is in front of
+    us we ask it rather than assuming the default.
+    """
+    fmt = opds_client.FILENAME_AUTHOR_TITLE
+    if host:
+        try:
+            fmt = int(device.settings(host).get("opdsFilenameFormat", fmt))
+        except (DeviceError, TypeError, ValueError):
+            pass            # the default is also the pre-1.5.0 behaviour
+    return opds_client.opds_book_filename(author or "", title or "", fmt)
+
+
+def upload_book(host: str, path: Path, name: str) -> None:
+    """Put a book on the SD root, where the reader looks for books.
+
+    The firmware refuses an upload onto an existing name rather than
+    overwriting, so a replacement deletes first — the same dance
+    push_wallpaper.py does. Deleting here is intended: the name is derived from
+    author and title, so a collision *is* this book.
+    """
+    if any(e.get("name") == name for e in device.list_dir(host, "/")):
+        device.delete(host, f"/{name}")
+    dest = path.parent / name
+    if dest != path:
+        # upload() takes the on-disk name from the file itself, so give it one
+        # named the way the device wants without touching the catalog's copy.
+        dest = Path(str(dest))
+        dest.write_bytes(path.read_bytes())
+        try:
+            device.upload(host, "/", dest, content_type="application/epub+zip")
+        finally:
+            dest.unlink(missing_ok=True)
+    else:
+        device.upload(host, "/", path, content_type="application/epub+zip")
+
+
+def push(files: list, host: str | None = None) -> dict:
+    """Drain wallpapers to the device. One JSON record per file, so the chat
+    can say which ones landed."""
     cmd = [PY, "wallpaper-maker/scripts/push_wallpaper.py", "--json"]
+    if host:
+        cmd += ["--ip", host]
     cmd += [str(f) for f in files]
     rc, out, err = run(cmd, timeout=600)
     try:

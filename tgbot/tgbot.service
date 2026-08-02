@@ -5,13 +5,21 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-# Two things to edit: the account that owns the repo and the books, and where
-# you cloned it. Everything else — which Telegram user is served, where the
-# workspace is — comes from tgbot/config.json, so this file stays put once it
-# works.
-User=CHANGEME
-WorkingDirectory=/home/CHANGEME/x3-suite
-ExecStart=/usr/bin/python3 /home/CHANGEME/x3-suite/tgbot/scripts/bot.py
+# Do not hand-edit the two placeholders — let the shell fill them in, from the
+# clone you are standing in. Typing a path by hand is how you get
+# /home/server_projects/... instead of /home/you/server_projects/..., and the
+# error that produces names a directory rather than the mistake:
+#
+#   cd /path/to/x3-suite
+#   mkdir -p tgbot/state
+#   sed -e "s|CHANGEME_REPO|$PWD|g" -e "s|CHANGEME_USER|$(id -un)|g" \
+#       tgbot/tgbot.service | sudo tee /etc/systemd/system/tgbot.service
+#
+# The mkdir matters: ReadWritePaths below refuses to start on a directory that
+# does not exist yet, and tgbot/state/ is gitignored.
+User=CHANGEME_USER
+WorkingDirectory=CHANGEME_REPO
+ExecStart=/usr/bin/python3 CHANGEME_REPO/tgbot/scripts/bot.py
 
 Restart=on-failure
 RestartSec=10
@@ -22,11 +30,15 @@ RestartSec=10
 # last-device.json. So the filesystem is still read-only everywhere else, and
 # those three paths are opened back up by name. Copying opds-server's unit
 # verbatim would give you a bot that dies on its first photo.
+#
+# The leading '-' means "skip this one if it is missing" — without it a
+# vanished state/ fails the whole unit at namespace setup, with a 226/NAMESPACE
+# and no mention of what systemd actually wanted.
 ProtectSystem=strict
 ProtectHome=read-only
-ReadWritePaths=/home/CHANGEME/x3-suite/workspace
-ReadWritePaths=/home/CHANGEME/x3-suite/tgbot/state
-ReadWritePaths=/home/CHANGEME/x3-suite/wallpaper-maker
+ReadWritePaths=-CHANGEME_REPO/workspace
+ReadWritePaths=-CHANGEME_REPO/tgbot/state
+ReadWritePaths=-CHANGEME_REPO/wallpaper-maker
 
 PrivateTmp=yes
 NoNewPrivileges=yes

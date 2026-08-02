@@ -231,11 +231,14 @@ it says, including "not configured".
 ## Running it as a service
 
 [`tgbot.service`](tgbot.service) is a systemd **system unit**, run as your own
-account — the workspace and the books live in your home. Edit the CHANGEMEs
-(there are five, and they must all match), then:
+account — the workspace and the books live in your home. Its two
+placeholders are filled in by the shell rather than by hand, because a path
+typed twice is a path typed differently once:
 
 ```bash
-sudo cp tgbot/tgbot.service /etc/systemd/system/
+mkdir -p tgbot/state
+sed -e "s|CHANGEME_REPO|$PWD|g" -e "s|CHANGEME_USER|$(id -un)|g" \
+    tgbot/tgbot.service | sudo tee /etc/systemd/system/tgbot.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now tgbot
 sudo journalctl -u tgbot -f
