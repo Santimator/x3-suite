@@ -249,9 +249,17 @@ into `wallpaper-maker/`. Those three paths are named in `ReadWritePaths=`;
 everything else stays read-only. Copy the other unit verbatim and you get a
 bot that dies on its first photo.
 
+The unit runs the script **from the repo**, so updating the bot is
+`git pull && sudo systemctl restart tgbot` and nothing else — no reinstall. The
+one exception is this unit file, which installing *copied* to
+`/etc/systemd/system/`: if a pull changes `tgbot.service`, re-copy it,
+`daemon-reload`, and restart. It is a copy rather than a symlink deliberately,
+because the unit carries your account name and clone path, and a tracked file
+you must edit locally is a file that fights every pull.
+
 [`helper-info.txt`](helper-info.txt) sits next to the unit and explains each
-command, the day-to-day ones, and the handful of failures worth recognising on
-sight.
+command, the day-to-day ones, what a `git pull` does and does not need, and the
+handful of failures worth recognising on sight.
 
 ## How it talks to the rest of the suite
 

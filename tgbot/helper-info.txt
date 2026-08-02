@@ -63,6 +63,34 @@ DAY TO DAY
   sudo journalctl -u tgbot --since today   just today's
 
 
+AFTER A GIT PULL
+----------------
+
+The unit runs the script *from the repo* — ExecStart points at
+tgbot/scripts/bot.py where you cloned it — so new code is picked up by a
+restart and nothing else:
+
+  git pull && sudo systemctl restart tgbot
+
+Same for config.json: it is read at startup, so changing it is a restart.
+
+The one exception is this unit file, because installing it *copied* it to
+/etc/systemd/system/. If a pull changes tgbot/tgbot.service, the copy systemd
+runs is still the old one:
+
+  git log --oneline -1 -- tgbot/tgbot.service     # did it change?
+  diff tgbot/tgbot.service /etc/systemd/system/tgbot.service
+
+  # if it did:
+  sudo cp tgbot/tgbot.service /etc/systemd/system/    # re-edit the CHANGEMEs
+  sudo systemctl daemon-reload
+  sudo systemctl restart tgbot
+
+It is a copy rather than a symlink on purpose: the unit carries your account
+name and your clone path, and a tracked file you must edit locally is a file
+that fights every pull.
+
+
 WHEN SOMETHING IS WRONG
 -----------------------
 
