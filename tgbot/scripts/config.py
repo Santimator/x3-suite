@@ -69,10 +69,11 @@ def load(path: Path | None = None) -> dict:
     path = Path(path) if path else DEFAULT_CONFIG
     raw = {}
     if path.exists():
+        text = path.read_text(encoding="utf-8")
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
+            raw = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise ConfigError(f"{path} is not valid JSON: {exc}") from exc
+            raise ConfigError(_json_complaint(path, text, exc)) from None
     cfg = _merge(DEFAULTS, raw)
     cfg["_config_path"] = str(path) if path.exists() else "(defaults)"
     # A relative path in the config is relative to *that config*, not to this
@@ -85,6 +86,32 @@ def load(path: Path | None = None) -> dict:
     cfg["workspace_path"] = _abs(cfg["workspace"])
     cfg["state_path"] = _abs(cfg["state_dir"])
     return cfg
+
+
+def _json_complaint(path: Path, text: str, exc: json.JSONDecodeError) -> str:
+    """Point at the line, and name the likely cause.
+
+    This config is a long annotated file that people edit by hand, and JSON has
+    no comments and no forgiveness about commas. "Expecting ',' delimiter: line
+    19" is technically a complete description and practically a puzzle, because
+    the *missing* comma is at the end of the line before the one it names —
+    that is where the parser was still happy. Showing both lines turns a
+    five-minute hunt into a glance.
+    """
+    lines = text.splitlines()
+    out = [f"{path} is not valid JSON.", f"  {exc.msg}, line {exc.lineno}:", ""]
+    for number in (exc.lineno - 1, exc.lineno):
+        if 1 <= number <= len(lines):
+            marker = "->" if number == exc.lineno else "  "
+            out.append(f"  {marker} {number:>3} | {lines[number - 1].rstrip()[:100]}")
+    out.append("")
+    if "delimiter" in exc.msg:
+        out.append("  A missing comma at the end of the line above the arrow is "
+                   "the usual cause.")
+    else:
+        out.append("  Watch for a trailing comma before a closing brace, or a "
+                   "quote that never closed.")
+    return "\n".join(out)
 
 
 def _abs(value: str) -> Path:
