@@ -19,9 +19,16 @@ address and sits on that screen while we work; the server stops when you leave
 it. Then:
 
     push_wallpaper.py                       # find the reader, push build/*.bmp
-    push_wallpaper.py --host 192.168.1.42   # if mDNS is unhelpful
+    push_wallpaper.py --ip 192.168.1.42     # if mDNS is unhelpful here
     push_wallpaper.py --list                # what is on the device now
     push_wallpaper.py --replace             # delete its wallpapers first
+
+An address that answers is written to `last-device.json` (gitignored) and tried
+first next time, so `--ip` is normally a one-off. mDNS is the thing most likely
+to be missing — a local DNS filter or reverse proxy will happily answer for
+`crosspoint.local` and never mention the reader — which is why a remembered
+address is tried before the name, and the firmware's own UDP discovery ping
+after both.
 
 Where they land, and why it is decided for you:
 
@@ -42,8 +49,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import socket
 import sys
+from datetime import datetime
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -52,6 +61,12 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DIR = REPO_ROOT / "workspace" / "wallpapers" / "build"
+
+# Where the last address that answered is kept, so the next run starts there.
+# Gitignored: it is a fact about your LAN, not about this repo. X3_LAST_DEVICE
+# moves it, which is how the self-test keeps its hands off yours.
+LAST_DEVICE = Path(os.environ.get("X3_LAST_DEVICE")
+                   or Path(__file__).resolve().parents[1] / "last-device.json")
 
 # The firmware's own defaults: web server on 80, mDNS name crosspoint.local,
 # and a UDP discovery responder on 8134 that answers the payload "hello".
@@ -67,6 +82,7 @@ FALLBACK_DIR = "/sleep"
 SLEEP_MODE_CUSTOM = 2
 
 TIMEOUT = 20
+PROBE_TIMEOUT = 3       # just asking "are you there?" — do not stall on a dead address
 
 
 class DeviceError(Exception):
@@ -100,7 +116,8 @@ def discover(timeout: float = 2.0) -> list:
 
 
 def _request(host: str, path: str, *, method: str = "GET", query: dict | None = None,
-             body: bytes | None = None, content_type: str | None = None):
+             body: bytes | None = None, content_type: str | None = None,
+             timeout: float = TIMEOUT):
     url = f"http://{host}{path}"
     if query:
         url += "?" + urllib.parse.urlencode(query)
@@ -108,7 +125,7 @@ def _request(host: str, path: str, *, method: str = "GET", query: dict | None = 
     if content_type:
         req.add_header("Content-Type", content_type)
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return resp.status, resp.read()
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read()
@@ -119,14 +136,71 @@ def _request(host: str, path: str, *, method: str = "GET", query: dict | None = 
                           f"File Transfer screen?") from exc
 
 
-def status(host: str) -> dict:
-    code, body = _request(host, "/api/status")
+def status(host: str, timeout: float = TIMEOUT) -> dict:
+    code, body = _request(host, "/api/status", timeout=timeout)
     if code != 200:
         raise DeviceError(f"/api/status returned {code}")
     try:
         return json.loads(body)
     except json.JSONDecodeError as exc:
         raise DeviceError(f"{host} answered, but not like a CrossPoint reader") from exc
+
+
+def remember(host: str) -> None:
+    """Write down the address that answered, for the next run to try first."""
+    try:
+        LAST_DEVICE.write_text(json.dumps(
+            {"host": host,
+             "confirmed": datetime.now().astimezone().isoformat(timespec="seconds")},
+            indent=2) + "\n")
+    except OSError:
+        pass        # a read-only checkout is no reason to fail a push that worked
+
+
+def recall() -> str | None:
+    try:
+        return json.loads(LAST_DEVICE.read_text()).get("host")
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def find_device(explicit: str | None):
+    """Locate the reader, and return (host, its /api/status).
+
+    An address given on the command line is used *as given* — if it does not
+    answer that is an error, not a reason to go looking somewhere else and push
+    to whatever turns up. Everything else is a guess, tried cheapest first:
+
+      1. whatever answered last time (this LAN, this DHCP lease)
+      2. crosspoint.local, if mDNS resolves here at all
+      3. the firmware's UDP discovery ping, which needs no name service
+
+    Guesses get a short timeout, so a stale address costs a moment rather than
+    the better part of a minute.
+    """
+    if explicit:
+        return explicit, status(explicit)
+
+    tried = []
+    for candidate in (recall(), DEFAULT_HOST):
+        if not candidate or candidate in tried:
+            continue
+        tried.append(candidate)
+        try:
+            return candidate, status(candidate, timeout=PROBE_TIMEOUT)
+        except DeviceError:
+            pass
+
+    for ip in discover():
+        try:
+            return ip, status(ip, timeout=PROBE_TIMEOUT)
+        except DeviceError:
+            pass
+
+    raise DeviceError(
+        "no reader found" + (f" (tried {', '.join(tried)})" if tried else "") + ".\n"
+        "  On the device: Home -> File Transfer -> Join a Network.\n"
+        "  Then pass the address it prints: --ip 192.168.x.x")
 
 
 def list_dir(host: str, path: str) -> list:
@@ -212,8 +286,10 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("files", nargs="*", type=Path,
                     help=f"BMPs or a folder (default: {DEFAULT_DIR.relative_to(REPO_ROOT)}/)")
-    ap.add_argument("--host", help=f"device address (default: {DEFAULT_HOST}, "
-                                   "then UDP discovery)")
+    ap.add_argument("--ip", "--host", dest="host", metavar="ADDR",
+                    help="the reader's address. Remembered on success, and "
+                         "tried first next time. Without it: the remembered "
+                         f"address, then {DEFAULT_HOST}, then UDP discovery")
     ap.add_argument("--dir", help="target folder on the SD card "
                                   f"(default: {PREFERRED_DIR}, or {FALLBACK_DIR} if in use)")
     ap.add_argument("--list", action="store_true", help="show what is there and stop")
@@ -223,24 +299,9 @@ def main() -> int:
                     help="do not switch the sleep screen to Custom")
     args = ap.parse_args()
 
-    # Find the reader: an explicit address, else mDNS, else ask the network.
-    host = args.host
-    if not host:
-        try:
-            status(DEFAULT_HOST)
-            host = DEFAULT_HOST
-        except DeviceError:
-            hosts = discover()
-            if not hosts:
-                print("push_wallpaper: no reader found.\n"
-                      "  On the device: Home -> File Transfer -> Join a Network.\n"
-                      "  Then pass the address it prints: --host 192.168.x.x",
-                      file=sys.stderr)
-                return 1
-            host = hosts[0]
-
     try:
-        info = status(host)
+        host, info = find_device(args.host)
+        remember(host)
         print(f"reader at {host}: {info.get('model', 'unknown model')}, "
               f"firmware {info.get('version', '?')}")
 

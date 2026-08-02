@@ -30,6 +30,7 @@ Checks, in order:
 from __future__ import annotations
 
 import io
+import os
 import json
 import random
 import struct
@@ -274,25 +275,25 @@ def _block(levels: list, x: int, y: int, n: int = 16) -> set:
 def check_mat(sources: list) -> None:
     """The mat, on images too small to fill the panel.
 
-    The point of snapping each sector to a native level is that the mat draws
-    *flat* — a fill anywhere else dithers into a field of grain, which is the
-    one thing a large area on this panel must not do. So the check is literally
-    that: a block of mat decodes to a single level.
+    These are the `--mat edges` checks, asked explicitly rather than by
+    default: the point of snapping each sector to a native level is that the
+    mat draws *flat*, and a fill anywhere else dithers into a field of grain.
+    So the check is literally that — a block of mat decodes to a single level.
     """
     tiny = next(s for s in sources if s.stem == "tiny")
     split = next(s for s in sources if s.stem == "split")
 
-    edges = mw.render(tiny)
+    edges = mw.render(tiny, mat_style="edges")
     check("mat: a small source is framed, not enlarged to fill",
           len(_block(edges, 8, 8)) == 1 and len(set(edges)) > 1)
-    check("mat: the border draws flat — no dither grain",
+    check("mat: --mat edges draws flat — no dither grain",
           all(len(_block(edges, x, y)) == 1
               for x, y in ((8, 8), (cp.PANEL_W - 24, 8),
                            (8, cp.PANEL_H - 24), (cp.PANEL_W - 24, cp.PANEL_H - 24))))
 
     # 200x260 stops at MAX_UPSCALE, so the picture sits centred with mat above
     # and below; sample the middle of each, clear of the mitres.
-    two_tone = mw.render(split)
+    two_tone = mw.render(split, mat_style="edges")
     top = _block(two_tone, cp.PANEL_W // 2 - 8, 16)
     bottom = _block(two_tone, cp.PANEL_W // 2 - 8, cp.PANEL_H - 32)
     check("mat: each sector follows its own edge, light over dark",
@@ -344,13 +345,15 @@ def check_waves(sources: list) -> None:
           covered.tobytes().count(0) == 0,
           f"{covered.tobytes().count(0)} px uncovered")
 
-    # Through the whole pipeline: still a wave, still the same one every time.
+    # Through the whole pipeline: still a wave, still the same one every time,
+    # and still what you get without asking, since waves is the default.
     tiny = next(s for s in sources if s.stem == "tiny")
     rippled = mw.render(tiny, mat_style="waves")
     check("waves: rippled, not flat like the edge mat",
-          rippled != mw.render(tiny))
+          rippled != mw.render(tiny, mat_style="edges"))
     check("waves: the same source ripples the same way twice",
           rippled == mw.render(tiny, mat_style="waves"))
+    check("waves: it is what a plain run produces", rippled == mw.render(tiny))
 
 
 def check_designed_failures() -> None:
@@ -391,11 +394,13 @@ def check_push(build_dir: Path) -> None:
     with tempfile.TemporaryDirectory() as sd_dir:
         sd = Path(sd_dir)
         server, host = serve(sd)
+        remembered = sd / "last-device.json"
+        env = {**os.environ, "X3_LAST_DEVICE": str(remembered)}
         try:
-            run = lambda *extra: subprocess.run(
+            run = lambda *extra, addr=("--ip", host): subprocess.run(
                 [sys.executable, str(SCRIPTS / "push_wallpaper.py"),
-                 str(build_dir), "--host", host, *extra],
-                capture_output=True, text=True, timeout=60)
+                 str(build_dir), *addr, *extra],
+                capture_output=True, text=True, timeout=60, env=env)
 
             # Looking must not change anything: creating /.sleep just to read it
             # would shadow whatever the device keeps in /sleep.
@@ -429,6 +434,19 @@ def check_push(build_dir: Path) -> None:
                   cleared.returncode == 0
                   and sorted(p.name for p in (sd / ".sleep").glob("*.bmp")) == expected,
                   cleared.stderr.strip())
+
+            # --ip is meant to be a one-off: the address that answered is
+            # written down, and the next run finds the reader without being
+            # told where it is.
+            check("push: the address that worked is remembered",
+                  remembered.is_file()
+                  and json.loads(remembered.read_text()).get("host") == host,
+                  remembered.read_text() if remembered.exists() else "not written")
+
+            blind = run("--list", addr=())
+            check("push: a later run finds the reader with no address given",
+                  blind.returncode == 0 and host in blind.stdout,
+                  blind.stderr.strip() or blind.stdout.strip())
         finally:
             server.shutdown()
 

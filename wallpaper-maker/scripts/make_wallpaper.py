@@ -17,11 +17,12 @@ What comes out, and why each part of it:
   a mat, when the        Filling the panel from a small source means enlarging
   source is small        it arbitrarily, and past about half again that is a
                          smear. So enlargement stops, and what is left over is
-                         framed: four sectors mitred from the panel corners,
-                         each taking its level from the image edge it touches.
-                         Snapped to a native level, because a flat area on one
-                         of the four is the only large area this panel draws
-                         without dither grain.
+                         filled: four sectors mitred from the panel corners,
+                         each continuing the image edge it touches. By default
+                         the edge *travels* into its sector along a wandering
+                         path (--mat waves), so the picture appears to carry on
+                         in all four directions through rippled glass; --mat
+                         edges is the quiet version, a flat level per sector.
   4-bpp indexed BMP      BMP because the sleep screen reads nothing else — not
                          PNG, not JPEG, and not .pxc, which is the EPUB reader's
                          internal pixel cache and has never been a wallpaper
@@ -359,7 +360,7 @@ def _waves_mat(img: Image.Image, ox: int, oy: int) -> Image.Image:
     return canvas
 
 
-def mat(img: Image.Image, style: str = "edges") -> Image.Image:
+def mat(img: Image.Image, style: str = "waves") -> Image.Image:
     """Centre a smaller image on the panel and fill what is left around it.
 
     Nothing is drawn between the picture and its border. Every style here works
@@ -510,7 +511,7 @@ def levels_to_image(levels: bytearray, w: int, h: int) -> Image.Image:
     return img
 
 
-def render(src: Path, *, fit: str = "cover", mat_style: str = "edges",
+def render(src: Path, *, fit: str = "cover", mat_style: str = "waves",
            algorithm: str = "floyd") -> bytearray:
     """Source file -> one 2-bit level per panel pixel. The whole pipeline, in
     one place, so the self-test grades the same path the converter writes.
@@ -525,7 +526,7 @@ def render(src: Path, *, fit: str = "cover", mat_style: str = "edges",
 
 
 def convert(src: Path, out_dir: Path, *, fit: str = "cover",
-            mat_style: str = "edges", algorithm: str = "floyd",
+            mat_style: str = "waves", algorithm: str = "floyd",
             preview: bool = False) -> Path:
     levels = render(src, fit=fit, mat_style=mat_style, algorithm=algorithm)
 
@@ -561,16 +562,16 @@ def main() -> int:
     ap.add_argument("--fit", choices=("cover", "contain"), default="cover",
                     help="cover: fill the panel, crop the overflow (default). "
                          "contain: keep the whole frame, and mat the rest")
-    ap.add_argument("--mat", choices=("edges", "waves", "blur", "none"),
-                    default="edges", dest="mat_style",
+    ap.add_argument("--mat", choices=("waves", "edges", "blur", "none"),
+                    default="waves", dest="mat_style",
                     help="what surrounds an image too small to fill the panel. "
-                         "edges: four sectors, each continuing the edge it "
-                         "touches (default). waves: each edge sent outward "
-                         "along a wandering path, like rippled glass. blur: "
-                         "the image itself, enlarged and washed out. none: "
-                         "plain white")
+                         "waves: each edge sent outward along a wandering path, "
+                         "like rippled glass (default). edges: four flat "
+                         "sectors, each on the level of the edge it touches. "
+                         "blur: the image itself, enlarged and washed out. "
+                         "none: plain white")
     ap.add_argument("--waves", action="store_const", const="waves",
-                    dest="mat_style", help="shorthand for --mat waves")
+                    dest="mat_style", help="the default; spelled out")
     ap.add_argument("--dither", choices=("floyd", "atkinson", "none"), default="floyd",
                     help="you should not need this; floyd is the default for good reason")
     ap.add_argument("--preview", action="store_true",

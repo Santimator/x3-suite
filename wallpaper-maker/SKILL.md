@@ -43,11 +43,12 @@ There is nothing to configure and nothing to answer. Every parameter below has
 a right answer on this device, so it is already chosen.
 
 Flags exist for the things that are genuinely taste — `--fit contain` to keep
-the whole frame instead of cropping, `--mat waves|blur|none` (or just
-`--waves`) for a different surround on an image too small to fill the panel,
-`--preview` to also write a PNG of the dithered result you can look at on a
-computer — plus `--dither atkinson|none`, which you should not need. For the push: `--host` when mDNS is unhelpful,
-`--list` to see what is on the device, `--replace` to clear it first.
+the whole frame instead of cropping, `--mat edges|blur|none` for a different
+surround on an image too small to fill the panel, `--preview` to also write a
+PNG of the dithered result you can look at on a computer — plus `--dither
+atkinson|none`, which you should not need. For the push: `--ip` when the reader
+cannot be found by name, `--list` to see what is on the device, `--replace` to
+clear it first.
 
 ## What comes out, and why
 
@@ -67,17 +68,10 @@ computer — plus `--dither atkinson|none`, which you should not need. For the p
 ## The mat: what surrounds an image too small to fill the panel
 
 Four sectors, mitred along the lines from each panel corner to the
-corresponding image corner, each taking its level from a band of the image
-along the edge it touches. A photo with sky above and ground below gets a light
-mat above and a dark one below: the fill matches the pixels it actually meets,
-not the picture's overall mood.
+corresponding image corner, each continuing the edge it touches. **`--mat
+waves` is the default** and is described below; `--mat edges` is the quiet
+version, a single flat level per sector. Both share the same two rules:
 
-Three things make it work on this panel rather than merely be an idea:
-
-- **Each sector snaps to a native level.** A mat filled with the raw mean
-  dithers into a large field of grain; one sitting exactly on 0/85/170/255
-  comes out perfectly flat, and flat is the only large area this panel draws
-  without noise.
 - **The mitre is proportional, not decorative.** Along a corner-to-corner line
   the two sides' distances are equal *relative to their own margins* — the cut
   a picture framer makes. Uneven margins give an uneven mitre, which is right.
@@ -85,15 +79,26 @@ Three things make it work on this panel rather than merely be an idea:
   the edge, so a rule around the image would cut across the one join the whole
   thing exists to make. At four levels a hairline is not a hairline either — it
   is a hard black or white line against whatever it sits on. Sky runs straight
-  into the light sector above it; where a sector matches the edge exactly the
+  into the sector above it; where a sector matches the edge exactly the
   boundary simply disappears, which is the point.
+
+### `--mat edges` — a flat level per side
+
+Each sector takes its level from a band of the image along its edge, so a photo
+with sky above and ground below gets a light mat above and a dark one below:
+the fill matches the pixels it actually meets, not the picture's overall mood.
+
+**Each sector snaps to a native level**, and that is what makes it work here. A
+mat filled with the raw mean dithers into a large field of grain; one sitting
+exactly on 0/85/170/255 comes out perfectly flat, and flat is the only large
+area this panel draws without noise.
 
 If all four bands round to the same level the joins vanish and it degenerates
 into a plain single-colour mat — which is the correct behaviour, not a bug, and
 is why there is no separate "fill with black or white by overall lightness"
 mode: that is this one, on a uniform image.
 
-### `--mat waves` — the edges through rippled glass
+### `--mat waves` — the edges through rippled glass (the default)
 
 Each edge travels outward into its own sector along a wandering path: step out
 one pixel, go diagonally across or straight ahead, never more than one across
@@ -161,9 +166,28 @@ python3 wallpaper-maker/scripts/push_wallpaper.py
 ```
 
 The device stays on that screen while transferring; the server stops when you
-leave it. `push_wallpaper.py` finds the reader at `crosspoint.local`, or by the
-firmware's own UDP discovery ping (`hello` to port 8134) if mDNS is unhelpful,
-or wherever `--host` says.
+leave it.
+
+### Finding the reader
+
+`push_wallpaper.py` tries three things, cheapest first, with a short timeout so
+a stale address costs a moment rather than most of a minute:
+
+1. **The address that answered last time**, kept in `last-device.json` beside
+   this file — gitignored, since it is a fact about your LAN and not about this
+   repo. `X3_LAST_DEVICE` moves it, which is how the self-test keeps its hands
+   off yours.
+2. **`crosspoint.local`**, if mDNS resolves here at all. It often does not: a
+   local DNS filter or reverse proxy will happily answer for a `.local` name
+   and never mention the reader. That is why it is second, not first.
+3. **The firmware's UDP discovery ping** — `hello` to port 8134, which needs no
+   name service and answers `crosspoint (on <host>);<ws port>`.
+
+`--ip 192.168.1.42` (or `--host`, same flag) skips all of it. An address given
+that way is used exactly as given — if it does not answer that is an error, not
+a reason to go hunting and push to whatever turns up. On success it is written
+down, so `--ip` is normally a one-off: the next run finds the reader on its
+own, until the DHCP lease moves and the fallbacks take over again.
 
 Where the files land is decided, not asked:
 
@@ -208,6 +232,7 @@ default sleep screen, with no message anywhere. In order of likelihood:
 | A picture floating in a black frame | Not 528x792 — the firmware never scales *up*, and that black is the device's, not our mat. Re-run `make_wallpaper.py`. |
 | Upload fails with "File already exists" | The firmware refuses collisions. `--replace`, or delete on the device. |
 | `push_wallpaper: cannot reach ...` | The device is not on the File Transfer screen — the web server only runs while it is. |
+| `no reader found (tried ...)` | mDNS is not working here and nothing answered the discovery ping. Read the address off the File Transfer screen and pass `--ip`; it is remembered after that. |
 
 ## The gate
 
@@ -256,6 +281,7 @@ distinction — update both when a device confirms it.
 ```
 SKILL.md                     this file
 requirements.txt             Pillow (the only dependency)
+last-device.json             gitignored; the reader's address, once one answers
 scripts/
   make_wallpaper.py          image -> X3 sleep-screen BMP
   push_wallpaper.py          BMPs -> the device, over its file-transfer API

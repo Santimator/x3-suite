@@ -242,16 +242,15 @@ result you can look at before it goes anywhere near the device.
 
 An image too small to fill the panel isn't blown up to fit — enlargement stops
 at 1.5x and the rest becomes a **mat**: four sectors mitred from the panel
-corners, each taking its shade from the image edge it touches, so sky above
-gets a light border and dark ground below a dark one. Each sector snaps to one
-of the four levels, which is what makes it draw perfectly flat instead of
-dithering into a field of grain.
+corners, each continuing the image edge it touches. By default the edge
+*travels* into its sector along a wandering path — one pixel out, at most one
+across — so the picture seems to keep going in all four directions while
+rippling, like looking at it through distorted glass.
 
-`--waves` is the other one worth trying: each edge travels outward along a
-wandering path — one pixel out, one across at most — so the picture seems to
-keep going in all four directions while rippling, like looking at it through
-distorted glass. `--mat blur` washes an enlarged copy of the image behind it
-instead; `--mat none` gives plain white.
+`--mat edges` is the quiet version: one flat level per sector, snapped to one
+of the panel's four so it draws without a trace of dither grain. `--mat blur`
+washes an enlarged copy of the image behind it instead; `--mat none` gives
+plain white.
 
 This is the *sleep screen*, not an EPUB cover — a separate firmware feature,
 different format, different folder. And a warning worth repeating: **`.pxc` is
@@ -269,10 +268,16 @@ a pull, and this device only pulls books.
 So it's a push instead, into the file-transfer web server the firmware already
 ships. On the device: **Home → File Transfer → Join a Network**; it prints an
 address and holds the server up while that screen is open. `push_wallpaper.py`
-finds it there (or by mDNS, or by the firmware's own UDP discovery ping),
 uploads into `/.sleep/` — or into `/sleep/` if you already keep wallpapers
 there, since creating `/.sleep` would silently shadow them — and sets the sleep
 screen to Custom so the pool is actually used.
+
+To find the reader it tries the address that answered last time, then
+`crosspoint.local`, then the firmware's own UDP discovery ping. If mDNS doesn't
+work on your network — a local DNS filter or reverse proxy will cheerfully
+answer for a `.local` name and never mention the reader — read the address off
+the File Transfer screen and pass `--ip 192.168.x.x` once. It's remembered in a
+gitignored file, so the next run finds it on its own.
 
 Docs: [`wallpaper-maker/SKILL.md`](wallpaper-maker/SKILL.md) · device rules:
 [`reference/readers.md`](reference/readers.md)

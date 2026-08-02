@@ -10,6 +10,9 @@ services/graded-reader/headless/config.json
 services/graded-reader/headless/secrets/*
 !services/graded-reader/headless/secrets/README.md
 
+# wallpaper-maker: the reader's address on your LAN, remembered between pushes
+wallpaper-maker/last-device.json
+
 # opds-server: local library paths + Basic-auth password (never commit)
 opds-server/config.json
 opds-server/secrets/*
