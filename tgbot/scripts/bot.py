@@ -223,6 +223,18 @@ class Bot:
                 self.browse(chat, job["parent"])
             return self.submit(chat, work)
 
+        if job["kind"] == "devdirrename":
+            # Folders go through WebDAV, which is the only route that will
+            # touch one — and which refuses any path with a dotted segment.
+            parent = job["path"].rstrip("/").rpartition("/")[0] or ""
+            dest = f"{parent}/{text}"
+
+            def work():
+                suite.device.dav_move(job["host"], job["path"], dest)
+                self.say(chat, f"✅ folder renamed to <code>{html.escape(dest)}</code>")
+                self.browse(chat, dest)
+            return self.submit(chat, work)
+
         if job["kind"] == "librename":
             src = Path(job["path"])
             if not inside(self.workspace, src):
@@ -568,7 +580,7 @@ class Bot:
         self.say(chat, "📲 The reader answers only while it is on "
                        "<b>Home → File Transfer → Join a Network</b>.",
                  [[("🔎 Find it", "dev:st:"), ("📂 Browse", "dev:ls0:")],
-                  [("📤 Push queue", "push:ask")],
+                  [("🖼 Wallpapers", "dev:wp:"), ("📤 Push queue", "push:ask")],
                   [("🏠 Menu", "m:main")]])
 
     def device_host(self):
@@ -595,6 +607,50 @@ class Bot:
             if path is None:
                 return self.stale(chat)
             return self.submit(chat, lambda: self.browse(chat, path))
+        if action == "wp":
+            def work():
+                host, _ = self.device_host()
+                self.browse(chat, suite.sleep_dir(host))
+            return self.submit(chat, work)
+
+        if action == "dirrn":                      # rename the folder we are in
+            path = self.tokens.get(token)
+            if path is None:
+                return self.stale(chat)
+            if "/." in path or path.startswith("/."):
+                return self.say(
+                    chat,
+                    "That folder can't be renamed. WebDAV — the only way in for "
+                    "a folder — refuses every path with a dot-prefixed segment, "
+                    "and the plain API refuses directories outright.",
+                    [[("📂 Back", f"dev:ls:{self.tokens.put(path)}")]])
+
+            def work():
+                host, _ = self.device_host()
+                self.pending = {"kind": "devdirrename", "host": host, "path": path}
+                self.say(chat, f"Send me the new name for the folder\n"
+                               f"<code>{html.escape(path)}</code>\n\n"
+                               f"(name only — it stays where it is)")
+            return self.submit(chat, work)
+
+        if action == "wpall":                      # preview every BMP here
+            path = self.tokens.get(token)
+            if path is None:
+                return self.stale(chat)
+
+            def work():
+                host, _ = self.device_host()
+                bmps = [e for e in suite.device.list_dir(host, path)
+                        if not e.get("isDirectory")
+                        and e.get("name", "").lower().endswith(".bmp")]
+                if not bmps:
+                    return self.say(chat, "No wallpapers here.")
+                self.say(chat, f"👁 {len(bmps)} wallpaper(s) — one message each, "
+                               f"so you can act on the one you recognise.")
+                for entry in bmps[:10]:
+                    self.preview_bmp(chat, host, path, entry.get("name", ""),
+                                     entry.get("size", 0))
+            return self.submit(chat, work)
 
         payload = self.tokens.get(token)
         if not payload:
@@ -603,11 +659,21 @@ class Bot:
         full = payload["path"]
 
         if action == "f":
+            rows = [[("✏️ Rename", f"dev:rn:{token}"),
+                     ("🗑 Delete", f"dev:rm:{token}")],
+                    [("⬇️ Pull to server", f"dev:get:{token}")],
+                    [("📂 Back", f"dev:ls:{self.tokens.put(parent)}")]]
+            if name.lower().endswith(".bmp"):
+                rows.insert(0, [("👁 Preview", f"dev:see:{token}")])
             return self.say(
                 chat, f"<code>{html.escape(name)}</code>\n{human(payload['size'])}",
-                [[("✏️ Rename", f"dev:rn:{token}"), ("🗑 Delete", f"dev:rm:{token}")],
-                 [("⬇️ Pull to server", f"dev:get:{token}")],
-                 [("📂 Back", f"dev:ls:{self.tokens.put(parent)}")]])
+                rows)
+
+        if action == "see":
+            def work():
+                host, _ = self.device_host()
+                self.preview_bmp(chat, host, parent, name, payload["size"])
+            return self.submit(chat, work)
 
         if action == "rn":
             def work():
@@ -642,6 +708,43 @@ class Bot:
                                f"{html.escape(name)}</code>")
             return self.submit(chat, work)
 
+    def preview_bmp(self, chat, host: str, parent: str, name: str,
+                    size: int = 0) -> None:
+        """Pull a wallpaper off the device and show what the panel would draw.
+
+        The whole reason this exists: wallpapers end up on the SD card with
+        names that say nothing, and there is no way to tell three of them apart
+        without looking. Rendering goes through `crosspoint_bmp`, the port of
+        the firmware's own reader, so the picture in the chat is the picture on
+        the panel — including the black field around an under-size one, and
+        including a warning when the file is one the device would re-dither.
+        """
+        full = f"{parent.rstrip('/')}/{name}"
+        cache = self.state_dir / "cache"
+        local = safe_join(cache, Path(name).name)
+        suite.device.download(host, full, local)
+        report = suite.bmp_preview(local, local.with_suffix(".png"))
+
+        bits = [f"<b>{html.escape(name)}</b>",
+                f"{report['width']}×{report['height']} · {report['bpp']}-bpp · "
+                f"{human(size or local.stat().st_size)}"]
+        if not report.get("drawn_by_sleep_scan"):
+            bits.append("⚠️ the sleep-screen scan skips this name")
+        if not report.get("exact"):
+            bits.append("⚠️ approximate — the palette is not native, so the "
+                        "device would re-dither this one itself")
+        elif report.get("scaled_down"):
+            bits.append("scaled down to fit the panel")
+        elif report.get("x") or report.get("y"):
+            bits.append("smaller than the panel — shown in its black field")
+
+        token = self.tokens.put({"parent": parent, "name": name, "path": full,
+                                 "size": size})
+        self.send_preview(chat, Path(report["png"]), "\n".join(bits),
+                          [[("✏️ Rename", f"dev:rn:{token}"),
+                            ("🗑 Delete", f"dev:rm:{token}")],
+                           [("📂 Back", f"dev:ls:{self.tokens.put(parent)}")]])
+
     def browse(self, chat, path: str) -> None:
         """List a folder on the SD card.
 
@@ -665,9 +768,14 @@ class Bot:
                                          "size": entry.get("size", 0)})
                 icon = "📕" if entry.get("isEpub") else "📄"
                 rows.append([(f"{icon} {name[:32]}", f"dev:f:{token}")])
+        bmps = sum(1 for e in entries if not e.get("isDirectory")
+                   and e.get("name", "").lower().endswith(".bmp"))
+        if bmps:
+            rows.append([(f"👁 Preview all {bmps}", f"dev:wpall:{self.tokens.put(path)}")])
         if path != "/":
             up = path.rstrip("/").rpartition("/")[0] or "/"
-            rows.append([("⬆️ Up", f"dev:ls:{self.tokens.put(up)}")])
+            rows.append([("⬆️ Up", f"dev:ls:{self.tokens.put(up)}"),
+                         ("✏️ Rename folder", f"dev:dirrn:{self.tokens.put(path)}")])
         rows.append([("🏠 Menu", "m:main")])
         self.say(chat, f"📂 <code>{html.escape(path)}</code> — "
                        f"{len(entries)} item(s)", rows)

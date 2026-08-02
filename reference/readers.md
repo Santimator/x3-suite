@@ -202,7 +202,8 @@ only while that screen is up.
 | Names on the card | Whatever is there, byte for byte, and `Storage.exists()` compares bytes. Books from other catalogs arrive **NFD-decomposed** (`é` as `e` + U+0301); normalizing a name before sending it back yields `Item not found` against a file plainly present. Round-trip listings verbatim |
 | Settings | `GET`/`POST /api/settings`, partial JSON by key (`{"sleepScreen": 2}`); keys are in `src/SettingsList.h` |
 | Fonts | `POST /api/fonts/upload` with `family` + `file` — the network route for `reference/fonts/` |
-| WebDAV | Port 80, PUT overwrites atomically. **Refuses any path segment beginning with `.`** — so `/.sleep` is unreachable this way, and `/sleep` is not |
+| WebDAV | Port 80, PUT overwrites atomically. **Refuses any path segment beginning with `.`** — `isProtectedPath` walks every segment, not just the last — so `/.sleep` and everything in it is unreachable this way, and `/sleep` is not |
+| Folders | `/rename` and `/move` both end in "Only files can be…"; a **directory can only be renamed through WebDAV `MOVE`**, which has no directory check and calls the filesystem's own rename. So a visible folder like `/sleep` can be renamed and `/.sleep` cannot, by either route. *Source-confirmed 1.5.0, not yet device-confirmed.* |
 | Also | WebSocket fast upload on **81** (`START:<name>:<size>:<path>` → `READY` → binary → `DONE`) |
 
 ## OPDS client — what the firmware actually requires

@@ -294,6 +294,38 @@ def move(host: str, path: str, dest_dir: str) -> None:
         raise DeviceError(f"move {path}: {code} {body.decode(errors='replace')}")
 
 
+def dav_move(host: str, path: str, dest: str) -> None:
+    """Rename or move via WebDAV, which is the only way to touch a *folder*.
+
+    The HTTP API refuses directories outright — `/rename` and `/move` both end
+    in "Only files can be renamed". WebDAV's MOVE has no such check: it opens
+    the source and calls the filesystem's own rename, which on FAT works for a
+    directory as well as a file.
+
+    The catch is the other guard. WebDAV's `isProtectedPath` inspects **every
+    segment** of the path, not just the last, so anything under a dot-prefixed
+    folder — `/.sleep` and everything in it — is unreachable this way. That is
+    the mirror image of the HTTP API, which only guards the final segment. Use
+    this for folders; use `rename()` for files.
+
+    Source-confirmed at 1.5.0; not yet driven against a device.
+    """
+    url = f"http://{host}{urllib.parse.quote(path)}"
+    req = urllib.request.Request(url, method="MOVE")
+    req.add_header("Destination", urllib.parse.quote(dest))
+    req.add_header("Overwrite", "F")
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as resp:
+            if resp.status in (201, 204):
+                return
+            raise DeviceError(f"move {path}: unexpected {resp.status}")
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace").strip()
+        raise DeviceError(f"move {path}: {exc.code} {detail}") from None
+    except urllib.error.URLError as exc:
+        raise DeviceError(f"cannot reach {host}: {exc.reason}") from exc
+
+
 def settings(host: str) -> dict:
     code, body = request(host, "/api/settings")
     if code != 200:

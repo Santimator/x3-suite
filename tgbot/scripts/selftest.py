@@ -329,6 +329,36 @@ def check_optional() -> None:
     check("nothing outside tgbot/ imports it", not hits, str(hits))
 
 
+# -- 6b. the device file menu ---------------------------------------------
+
+
+def check_device_menu(tmp: Path) -> None:
+    """Menu construction only — no call here reaches the network."""
+    print("\nthe device file menu:")
+    bot, tg = make_bot(tmp)
+
+    def menu_for(name):
+        token = bot.tokens.put({"parent": "/sleep", "name": name,
+                                "path": f"/sleep/{name}", "size": 1234})
+        tg.sent.clear()
+        bot.handle(cb(f"dev:f:{token}"))
+        return [b[0] for row in (tg.sent[-1]["keyboard"] or []) for b in row]
+
+    check("a wallpaper offers a preview", "👁 Preview" in menu_for("x.bmp"))
+    check("... case-insensitively, as the firmware scans",
+          "👁 Preview" in menu_for("SHOT.BMP"))
+    check("a book does not", "👁 Preview" not in menu_for("book.epub"))
+
+    # A folder can only be renamed through WebDAV, and WebDAV refuses every
+    # path containing a dot-prefixed segment — so /.sleep must be turned down
+    # before anything tries, not after a confusing 403.
+    tg.sent.clear()
+    bot.handle(cb(f"dev:dirrn:{bot.tokens.put('/.sleep')}"))
+    check("renaming /.sleep is refused with a reason",
+          "can't be renamed" in tg.sent[-1]["text"], tg.sent[-1]["text"][:80])
+    check("... and nothing was queued behind it", bot.pending is None)
+
+
 # -- 7. secrets that live outside the checkout -----------------------------
 
 
@@ -399,6 +429,7 @@ def main() -> int:
         check_queue(tmp)
         check_push_is_all_or_nothing(tmp)
         check_tokens(tmp)
+        check_device_menu(tmp)
         check_secrets_outside(tmp)
         check_optional()
 

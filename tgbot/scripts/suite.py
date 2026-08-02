@@ -136,6 +136,36 @@ def build_wallpaper(src: Path, mat: str = "waves") -> tuple:
     return bmp, bmp.with_suffix(".png")
 
 
+def bmp_preview(bmp: Path, png: Path) -> dict:
+    """Render a wallpaper as the *panel* would draw it.
+
+    Through `crosspoint_bmp`, the port of the firmware's own reader, not
+    through a general image library — a wallpaper on the SD card is worth
+    looking at precisely when it does not look how you expect, and the useful
+    question is what the device does with it. The report says whether the
+    preview is exact or whether the firmware would re-dither that file.
+    """
+    rc, out, err = run([PY_DEPS, "wallpaper-maker/scripts/crosspoint_bmp.py",
+                        str(bmp), "--png", str(png)], timeout=180)
+    return _json_out(rc, out, err, "preview")
+
+
+def sleep_dir(host: str) -> str:
+    """Which folder the device is actually reading wallpapers from.
+
+    The firmware checks /.sleep first and only falls back to /sleep when it
+    does not exist — and /.sleep never appears in a listing, because
+    /api/files hides dot-prefixed entries. So the bot cannot find it by
+    browsing; it has to ask the same question push_wallpaper.py asks, and
+    without creating anything.
+    """
+    if device.list_dir(host, "/.sleep"):
+        return "/.sleep"
+    if device.list_dir(host, "/sleep"):
+        return "/sleep"
+    return "/.sleep"
+
+
 def push(files: list) -> dict:
     """Drain to the device. One JSON record per file, so the chat can say
     which ones landed."""

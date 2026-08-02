@@ -114,6 +114,28 @@ one is that the device names OPDS downloads `<author> - <title>.epub`, and
 books from other catalogs arrive with names like
 `Historia-de-la-magia-resumen-de-sus-procedimientos-...-Rafael-Urbano.epub`.
 
+**🖼 Wallpapers** jumps straight to the folder the device is actually reading —
+`/.sleep` if it exists, `/sleep` otherwise. That shortcut is not a convenience:
+`/api/files` hides dot-prefixed entries, so `/.sleep` never appears in a
+listing and cannot be reached by browsing at all.
+
+Any `.bmp` offers **👁 Preview**, and a folder full of them offers *Preview
+all* — which is the answer to three wallpapers with names that say nothing.
+The picture is rendered by `crosspoint_bmp.py`, the port of the firmware's own
+reader, so what arrives in the chat is what the panel draws: the same
+native-palette direct map, and an under-size wallpaper shown in the black field
+it will actually sit in. If the file is one the device would *re-dither* — a
+foreign BMP, a non-native palette — the preview falls back to an ordinary
+decode and says so, because identifying the picture is still the job and "the
+device will redo this one" is worth knowing.
+
+**Folders can be renamed, but only some.** `/rename` and `/move` refuse
+directories outright ("Only files can be renamed"), so a folder goes through
+WebDAV `MOVE`, which has no such check. WebDAV's own guard is stricter in the
+other direction: it rejects any path containing a dot-prefixed segment, so
+`/sleep` can be renamed and `/.sleep` cannot, by any route. The bot turns that
+down with the reason rather than letting you discover a 403.
+
 **Device names are opaque tokens.** Whatever `/api/files` returns is what the
 SD card holds, byte for byte, and it is exactly what goes back out in a
 `path=`. This is not fastidiousness: real books on a real device carry

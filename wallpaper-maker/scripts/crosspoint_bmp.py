@@ -218,3 +218,88 @@ def placement(hdr: ParsedBmp, screen_w: int = PANEL_W, screen_h: int = PANEL_H):
             return 0, round((screen_h - screen_w / ratio) / 2), True
         return round((screen_w - screen_h * ratio) / 2), 0, True
     return (screen_w - hdr.width) // 2, (screen_h - hdr.height) // 2, False
+
+
+# --------------------------------------------------------------------------
+# Looking at one — as the panel would
+
+
+def render_png(src, dest) -> dict:
+    """Write what the *device* would draw for this BMP, and say how it read it.
+
+    The point of rendering through this module rather than through Pillow is
+    that a wallpaper already on the SD card is interesting precisely when it
+    does not look like you expect. Pillow shows you the file; this shows you
+    the panel — the native-palette direct map, the 2-bit indices, the placement
+    of an under-size image in its black field.
+
+    When the palette is *not* native the firmware would re-dither the file on
+    the ESP32, and this module deliberately does not emulate that (the gate
+    rejects such files rather than predicting them). Rather than refuse to show
+    anything, we fall back to Pillow's own decode and say the preview is
+    approximate — identifying the picture is the job, and "the device will
+    redo this one" is worth knowing besides.
+
+    Pillow is imported here and nowhere else in this file: parsing stays
+    stdlib, and only looking costs a dependency.
+    """
+    from pathlib import Path
+    from PIL import Image
+
+    src, dest = Path(src), Path(dest)
+    data = src.read_bytes()
+    hdr = parse_headers(data)
+    x, y, scaled = placement(hdr)
+    report = {"file": str(src), "width": hdr.width, "height": hdr.height,
+              "bpp": hdr.bpp, "native_palette": hdr.native_palette,
+              "greyscale": hdr.has_greyscale, "exact": False,
+              "panel": [PANEL_W, PANEL_H], "x": x, "y": y, "scaled_down": scaled,
+              "drawn_by_sleep_scan": sleep_scan_accepts(src.name)}
+
+    try:
+        levels = decode_levels(data, hdr)
+        img = Image.new("L", (hdr.width, hdr.height))
+        img.putdata([NATIVE_LEVELS[v] for v in levels])
+        report["exact"] = True
+    except BmpReaderError as exc:
+        report["note"] = str(exc)
+        img = Image.open(src).convert("L")
+
+    # Show it where it lands: the panel's own field, so an under-size wallpaper
+    # previews as the small picture in black that the device actually paints.
+    if not scaled and (hdr.width < PANEL_W or hdr.height < PANEL_H):
+        canvas = Image.new("L", (PANEL_W, PANEL_H), 0)
+        canvas.paste(img, (x, y))
+        img = canvas
+    img.save(dest)
+    report["png"] = str(dest)
+    return report
+
+
+def main(argv=None) -> int:
+    import argparse
+    import json
+    import sys
+
+    ap = argparse.ArgumentParser(
+        description="What would the X3 draw for this BMP?")
+    ap.add_argument("bmp")
+    ap.add_argument("--png", metavar="OUT",
+                    help="write a PNG of what the panel would show")
+    args = ap.parse_args(argv)
+
+    if args.png:
+        json.dump(render_png(args.bmp, args.png), sys.stdout, ensure_ascii=False)
+        return 0
+
+    from pathlib import Path
+    hdr = parse_headers(Path(args.bmp).read_bytes())
+    json.dump({"width": hdr.width, "height": hdr.height, "bpp": hdr.bpp,
+               "native_palette": hdr.native_palette},
+              sys.stdout, ensure_ascii=False)
+    return 0
+
+
+if __name__ == "__main__":
+    import sys
+    sys.exit(main())
