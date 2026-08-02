@@ -400,6 +400,42 @@ def check_tokens(tmp: Path) -> None:
           str(tg.sent))
 
 
+# -- 5b. the real entry point actually starts ------------------------------
+
+
+def check_entry_point() -> None:
+    """Start bot.py the way systemd does, in a subprocess.
+
+    Importing the modules from *this* file is not the same thing, and the
+    difference has bitten once already: `suite` used to put a sibling unit's
+    `scripts/` on sys.path, where its `config.py` shadowed the bot's own. Which
+    one won depended on import order — and this gate's order was the lucky one,
+    so it passed green while `python3 tgbot/scripts/bot.py` died on an
+    ImportError before reading a line of config.
+
+    So the check is not "can I import it" but "does it run". A missing config
+    is the expected, healthy outcome: it means every module loaded and the bot
+    got as far as looking for its user id.
+    """
+    print("\nthe entry point, started the way systemd starts it:")
+    import subprocess
+
+    bot_py = Path(__file__).resolve().parent / "bot.py"
+    for label, args in (("--help", ["--help"]),
+                        ("with a config that isn't there",
+                         ["--config", "/nonexistent/tgbot.json"])):
+        p = subprocess.run([sys.executable, str(bot_py), *args],
+                           capture_output=True, text=True, timeout=60)
+        output = p.stdout + p.stderr
+        check(f"{label}: no import error",
+              "ImportError" not in output and "Traceback" not in output,
+              output.strip()[-300:])
+    check("... and it complains about the user id, having loaded everything",
+          "user id" in subprocess.run(
+              [sys.executable, str(bot_py), "--config", "/nonexistent/tgbot.json"],
+              capture_output=True, text=True, timeout=60).stderr)
+
+
 # -- 6. it does not reach into the rest of the repo ------------------------
 
 
@@ -517,6 +553,7 @@ def main() -> int:
         check_book_delivery(tmp)
         check_tokens(tmp)
         check_device_menu(tmp)
+        check_entry_point()
         check_secrets_outside(tmp)
         check_optional()
 

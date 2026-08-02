@@ -23,6 +23,7 @@ someone who only ever builds EPUBs must never need a Telegram token.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -31,11 +32,34 @@ import urllib.request
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO_ROOT / "wallpaper-maker" / "scripts"))
-sys.path.insert(0, str(REPO_ROOT / "opds-server" / "scripts"))
 
-import crosspoint_device as device            # noqa: E402  (after the path fix)
-import crosspoint_client as opds_client       # noqa: E402
+
+def _borrow(name: str, path: Path):
+    """Import one module from another unit, by path, without touching sys.path.
+
+    Adding a sibling `scripts/` directory to sys.path looks harmless and is
+    not: every unit here has a `config.py`, so putting `opds-server/scripts`
+    on the path makes `import config` ambiguous, and which one wins depends on
+    the order modules happened to be imported in. That failure is invisible
+    from a test that imports things in a different order than the real entry
+    point does — this bot shipped with exactly that bug, passing its own gate
+    while refusing to start.
+
+    Loading by explicit path gives the module the name we ask for and puts
+    nothing on the search path, so no other unit's files can be reached by
+    accident. Both modules below are stdlib-only, so nothing follows them in.
+    """
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+device = _borrow("crosspoint_device",
+                 REPO_ROOT / "wallpaper-maker" / "scripts" / "crosspoint_device.py")
+opds_client = _borrow("crosspoint_client",
+                      REPO_ROOT / "opds-server" / "scripts" / "crosspoint_client.py")
 
 DeviceError = device.DeviceError
 
