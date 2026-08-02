@@ -177,9 +177,11 @@ a stale address costs a moment rather than most of a minute:
    this file — gitignored, since it is a fact about your LAN and not about this
    repo. `X3_LAST_DEVICE` moves it, which is how the self-test keeps its hands
    off yours.
-2. **`crosspoint.local`**, if mDNS resolves here at all. It often does not: a
-   local DNS filter or reverse proxy will happily answer for a `.local` name
-   and never mention the reader. That is why it is second, not first.
+2. **`crosspoint.local`**, which is how the first device-confirmed run found
+   the reader — mDNS survived a LAN with its own DNS filtering and reverse
+   proxy, so it is worth trying. It is second rather than first only because
+   when it does fail it fails slowly and confusingly: a local resolver will
+   happily answer for a `.local` name and never mention the reader.
 3. **The firmware's UDP discovery ping** — `hello` to port 8134, which needs no
    name service and answers `crosspoint (on <host>);<ws port>`.
 
@@ -270,11 +272,22 @@ own edge), an alpha image (must flatten onto white, not multiply to black), a
 phone-style EXIF rotation (must rotate before cropping), and a flat gradient
 (where dithering either works or bands visibly).
 
-**Status: source-confirmed, not yet device-confirmed.** Every rule above was
-read from the CrossPoint firmware (tag 1.5.0 and master @ 2026-08, which are
-byte-identical for all of it) and is enforced by the gate; no photo of an X3
-showing one of these wallpapers exists yet. `reference/readers.md` keeps that
-distinction — update both when a device confirms it.
+**Status: device-confirmed (2026-08).** An X3 on WiFi took wallpapers built
+here, over the file-transfer web server, and drew them as its sleep screen. The
+whole delivery path went with it: the reader was found at `crosspoint.local`
+with no `--ip` needed, `/.sleep` was created and filled, and the sleep-screen
+mode switched to Custom on its own. Every rule above was read from the
+CrossPoint firmware (tag 1.5.0 and master @ 2026-08, byte-identical for all of
+it) and is enforced by the gate; the end-to-end claim is now evidence rather
+than inference.
+
+**The mat is the exception, and stays inferred.** Every source in that first
+run filled the panel, so nothing was framed — no `--mat waves`, `edges`, `blur`
+or `none` border has been seen on the panel yet. The gate covers it (flat
+sectors decode flat, no hole goes unpainted), and there is no reason to expect
+trouble, since a matted wallpaper is the same 528x792 4-bpp file as any other
+as far as the firmware is concerned. It simply has not been photographed.
+Feeding it something under ~350px wide is all it would take.
 
 ## Files
 

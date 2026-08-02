@@ -221,9 +221,10 @@ Docs: [`opds-server/SKILL.md`](opds-server/SKILL.md)
 
 ## 7. The sleep screen
 
-**Tested:** by self-test, not yet by a device. Every rule below was read from
-the firmware source, and the gate enforces all of them; nobody has yet
-photographed an X3 drawing one of these.
+**Tested:** device-confirmed, 2026-08 — an X3 took wallpapers built here over
+WiFi and drew them as its sleep screen, reader found by name with no address
+given. The one part still unseen on the panel is the *mat*, since every image
+in that run was big enough to fill the screen and never got framed.
 
 Drop pictures in `workspace/wallpapers/`, run one command, and they're files
 the reader can draw. Run the second and they're on it.

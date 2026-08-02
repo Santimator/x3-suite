@@ -136,8 +136,12 @@ rule at 480px width (`prepare.py`).
 `lib/GfxRenderer/Bitmap.cpp`, `lib/GfxRenderer/BitmapHelpers.cpp`,
 `lib/FsHelpers/FsHelpers.cpp`), tags 1.5.0 and master @ 2026-08 — byte-identical
 for all of it apart from the quick-resume refresh mode, which does not touch
-this path. **Not device-confirmed:** no photo of an X3 drawing one of our
-wallpapers yet.* `wallpaper-maker/` builds these and pushes them.
+this path. **Device-confirmed 2026-08:** an X3 drew wallpapers built by
+`wallpaper-maker/` as its sleep screen, from `/.sleep`, with the mode set to
+Custom. Panel-sized 4-bpp files only so far — an image small enough to be
+matted has not been put on the panel yet, so the placement rules for an
+under-size image remain read-from-source.* `wallpaper-maker/` builds these and
+pushes them.
 
 | What | Requirement |
 |---|---|
@@ -161,7 +165,10 @@ exactly the pixels that were computed off-device.
 
 *Source-confirmed (`src/network/CrossPointWebServer.cpp`,
 `src/network/WebDAVHandler.cpp`, `docs/webserver-endpoints.md`), master @
-2026-08 = 1.5.0 byte-for-byte.*
+2026-08 = 1.5.0 byte-for-byte. **Device-confirmed 2026-08** for the HTTP path —
+`/api/status`, `/api/files`, `/mkdir`, `/upload` and `/api/settings` all drove a
+real X3 from `wallpaper-maker/scripts/push_wallpaper.py`. WebDAV and the
+WebSocket upload remain read-from-source.*
 
 The OPDS client (above) is a **book-only pull**: acquisition type exactly
 `application/epub+zip`, saved to the SD root as `<author> - <title>.epub`.
@@ -172,7 +179,7 @@ only while that screen is up.
 
 | What | Detail |
 |---|---|
-| Transport | Plain HTTP, **port 80**, no auth, CORS open. `crosspoint.local` via mDNS |
+| Transport | Plain HTTP, **port 80**, no auth, CORS open. `crosspoint.local` via mDNS — device-confirmed working, including on a LAN running its own DNS filtering and reverse proxy |
 | Discovery | UDP **8134**: send `hello`, get `crosspoint (on <hostname>);<ws port>` |
 | Upload | `POST /upload?path=DIR`, multipart. Path is a *query* param — the handler needs it before the body finishes arriving |
 | Overwrite | **Not supported.** An upload onto an existing name returns 400 `File already exists`; `POST /delete?path=...` first |
