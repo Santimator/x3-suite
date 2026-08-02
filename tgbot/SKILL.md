@@ -159,6 +159,29 @@ credential seam is the one `opds-server` and `services/graded-reader/headless`
 use: the secret is never in the config file, only a path to a gitignored file
 holding it, with an environment variable as the fallback.
 
+### Secrets outside the checkout
+
+This repo is the sort of folder you point a coding agent at, and a token in it
+is a token that agent can read. So neither the token nor the id has to live
+here. One line in `config.json`:
+
+```json
+{ "secrets_dir": "/home/you/private/x3" }
+```
+
+and the bot reads `telegram.token` and `telegram.user_id` from that directory
+instead — each holding one value and nothing else, in the same style as
+`opds-server`'s password file. What stays in the repo is a path.
+
+The id file **wins over** `telegram.user_id` in `config.json` when both exist,
+so moving it out actually moves it rather than leaving a copy behind. The bot
+warns at startup if `secrets_dir` turns out to be inside the repo anyway, and
+if either file is readable by anyone but you.
+
+For the complete version, `--config /somewhere/else.json` moves the whole
+configuration out: relative paths inside a config resolve against *that file's*
+directory, not against `tgbot/`.
+
 **The bot owns no AI configuration.** There is no `ai` block here, on purpose.
 `graded-reader` already has exactly that seam in its own `headless/config.json`
 — base URL, model, key file, provider-neutral — and duplicating it would create
@@ -249,7 +272,11 @@ temporary workspace. It grades the four things that would actually hurt:
 
 Plus: a 200-character device name with decomposed accents round-trips through a
 button token byte-identically, a stale token is answered rather than guessed
-at, and nothing outside `tgbot/` imports `tgbot`.
+at, nothing outside `tgbot/` imports `tgbot`, and — the checks that matter if
+you moved the secrets out — the id and token are read from outside the repo,
+neither value is left in the config that stays behind, the outside file beats a
+leftover id, a relocated config resolves paths against itself, and a
+`secrets_dir` pointing back inside the repo is called out.
 
 **Status: the flows above are implemented and self-tested; the device half is
 built on endpoints device-confirmed on a 1.5.0 RC (2026-08) —

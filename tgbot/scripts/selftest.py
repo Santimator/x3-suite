@@ -329,6 +329,68 @@ def check_optional() -> None:
     check("nothing outside tgbot/ imports it", not hits, str(hits))
 
 
+# -- 7. secrets that live outside the checkout -----------------------------
+
+
+def check_secrets_outside(tmp: Path) -> None:
+    """The point of secrets_dir is that a coding agent pointed at this repo
+    finds nothing. So the tests are about what is *not* in the repo."""
+    print("\nkeeping the token and the id out of the checkout:")
+    import config as conf
+
+    home = tmp / "elsewhere"          # stands in for somewhere outside the repo
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "telegram.token").write_text("111:AAsecret\n")
+    (home / "telegram.user_id").write_text("777\n")
+
+    repo_cfg = tmp / "cfgdir" / "config.json"
+    repo_cfg.parent.mkdir(parents=True, exist_ok=True)
+    repo_cfg.write_text(json.dumps({"secrets_dir": str(home)}))
+
+    cfg = conf.load(repo_cfg)
+    check("the id is read from outside the repo",
+          cfg["telegram"]["user_id"] == 777, str(cfg["telegram"]["user_id"]))
+    check("the token is read from outside the repo",
+          conf.resolve_token(cfg) == "111:AAsecret")
+    written = repo_cfg.read_text()
+    check("neither value appears in the config that stays in the repo",
+          "111:AAsecret" not in written and "777" not in written, written)
+
+    # The outside file is authoritative: a stale id left in the config must not
+    # quietly win, or moving the secret out would change nothing.
+    repo_cfg.write_text(json.dumps({"secrets_dir": str(home),
+                                    "telegram": {"user_id": 111}}))
+    check("the outside file beats a leftover id in the config",
+          conf.load(repo_cfg)["telegram"]["user_id"] == 777)
+
+    # A config moved wholesale out of the repo must resolve its own relative
+    # paths, not paths relative to this source file.
+    away = tmp / "away"
+    (away / "secrets").mkdir(parents=True, exist_ok=True)
+    (away / "secrets" / "telegram.token").write_text("222:BBtoken")
+    (away / "config.json").write_text(json.dumps({"telegram": {"user_id": 5}}))
+    cfg = conf.load(away / "config.json")
+    check("a relocated config resolves paths against itself",
+          conf.resolve_token(cfg) == "222:BBtoken")
+
+    # And the whole point, stated as a check: secrets inside the repo are
+    # called out rather than silently accepted.
+    inside_cfg = tmp / "inside.json"
+    inside_cfg.write_text(json.dumps({"secrets_dir": str(conf.REPO_ROOT / "tgbot"),
+                                      "telegram": {"user_id": 9}}))
+    grumbles = conf.warnings(conf.load(inside_cfg))
+    check("a secrets_dir inside the repo is called out",
+          any("inside the repo" in g for g in grumbles), str(grumbles))
+
+    (home / "telegram.user_id").write_text("not-a-number")
+    try:
+        conf.load(repo_cfg)
+        check("a non-numeric id is refused, not truncated", False, "accepted")
+    except ConfigError as exc:
+        check("a non-numeric id is refused, not truncated",
+              "not a number" in str(exc))
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
@@ -337,6 +399,7 @@ def main() -> int:
         check_queue(tmp)
         check_push_is_all_or_nothing(tmp)
         check_tokens(tmp)
+        check_secrets_outside(tmp)
         check_optional()
 
     print()

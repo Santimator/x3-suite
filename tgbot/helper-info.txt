@@ -7,8 +7,14 @@ match — three of them are ReadWritePaths, which is what stops the bot from
 being confined out of its own workspace.
 
 Before any of this, the bot needs two things it will not start without: your
-numeric Telegram id in tgbot/config.json, and the token in tgbot/secrets/.
-See secrets/README.md.
+numeric Telegram id and the bot token. By default those live in
+tgbot/config.json and tgbot/secrets/telegram.token. If coding agents have read
+access to this checkout, set "secrets_dir" in config.json to a directory
+outside it and keep both there instead — see secrets/README.md.
+
+If you moved them, add the same path to ReadWritePaths only if the bot needs to
+write there. It does not: it only reads those two files, so no change is needed
+to the unit.
 
 
 INSTALLING

@@ -32,6 +32,7 @@ reply and logged here, so a mistyped id looks different from a dead bot.
 
 from __future__ import annotations
 
+import argparse
 import html
 import queue as queuelib
 import re
@@ -46,6 +47,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import suite
 from config import ConfigError, inside, load, resolve_token, safe_join
+from config import warnings as config_warnings
 from state import Notes, Queue, Tokens
 from telegram import GETFILE_LIMIT, Telegram, TelegramError
 
@@ -730,9 +732,17 @@ class Bot:
         self.say(chat, "\n".join(lines), [[("🏠 Menu", "m:main")]])
 
 
-def main() -> int:
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="the X3 suite, operated from a phone")
+    ap.add_argument("--config", type=Path, metavar="PATH",
+                    help="configuration to read (default: tgbot/config.json). "
+                         "Paths inside it resolve against its own directory, so "
+                         "the whole configuration — token included — can live "
+                         "outside this repo")
+    args = ap.parse_args(argv)
+
     try:
-        cfg = load()
+        cfg = load(args.config)
         token = resolve_token(cfg)
     except ConfigError as exc:
         print(f"tgbot: {exc}", file=sys.stderr)
@@ -760,7 +770,10 @@ def main() -> int:
         return 1
 
     log(f"workspace {cfg['workspace_path']}, state {cfg['state_path']}, "
-        f"config {cfg['_config_path']}")
+        f"config {cfg['_config_path']}"
+        + (f", secrets {cfg['secrets_path']}" if cfg.get("secrets_path") else ""))
+    for grumble in config_warnings(cfg):
+        log("warning:", grumble)
     while True:
         try:
             for update in tg.get_updates(cfg["telegram"]["poll_timeout"]):

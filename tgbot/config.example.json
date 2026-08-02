@@ -5,12 +5,18 @@
     "user_id": 0,
     "token_file": "secrets/telegram.token",
     "token_env": "X3_TGBOT_TOKEN",
+    "user_id_file": "telegram.user_id",
+    "user_id_env": "X3_TGBOT_USER_ID",
     "poll_timeout": 30
   },
   "_user_id_note": "Your numeric Telegram id — not your @username. Message @userinfobot to get it. This one id is checked before any handler runs, on messages and on button presses alike; everything else is dropped without a reply and logged to the journal, so a mistyped id looks different from a dead bot.",
-  "_token_file_note": "Path (relative to tgbot/) to a gitignored file holding ONLY the token @BotFather gave you. chmod 600 it. The token is never in this file — same rule as opds-server's password and graded-reader's API key, for the same reason: a config file gets pasted into a chat window one day, and a path is harmless where a token is not.",
-  "_token_env_note": "Fallback: if the token file is absent, read this environment variable instead.",
+  "_token_file_note": "Path to a gitignored file holding ONLY the token @BotFather gave you. chmod 600 it. A relative path resolves against this config file's own directory; an absolute one is used as written. The token is never in this file — same rule as opds-server's password and graded-reader's API key, for the same reason: a config file gets pasted into a chat window one day, and a path is harmless where a token is not.",
+  "_token_env_note": "Fallback: if the token file is absent, read this environment variable instead. Same for user_id_env and the id.",
+  "_user_id_file_note": "Only consulted when secrets_dir is set (or when this is an absolute path): a file holding ONLY the numeric id. When it exists it wins over telegram.user_id above, so moving the id out of the repo actually moves it.",
   "_poll_timeout_note": "Seconds the long poll waits for something to happen before asking again. 30 is unremarkable; lowering it costs requests and buys nothing.",
+
+  "secrets_dir": "",
+  "_secrets_dir_note": "Empty by default: the token lives in tgbot/secrets/ and the id in this file, both gitignored. Set this to a directory OUTSIDE the repo — e.g. '/home/you/private/x3' — and the bot reads 'telegram.token' and 'telegram.user_id' from there instead, each holding one value and nothing else. That is the setting to use when coding agents have read access to this checkout: point it somewhere they cannot see and neither secret is in the repo at all. The bot warns at startup if the directory turns out to be inside the repo anyway. To move the entire configuration out, run the bot with --config /that/path/config.json — relative paths inside a config resolve against its own directory.",
 
   "workspace": "workspace",
   "_workspace_note": "The only place the bot may write or delete, server-side. A relative path resolves against the repo root. Anything that would land outside it — a ../ in a name, a symlink pointing away — is refused rather than sanitized.",
