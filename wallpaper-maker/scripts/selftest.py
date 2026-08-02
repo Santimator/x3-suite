@@ -21,9 +21,10 @@ Checks, in order:
   5. the file decodes, through the device's own row unpacking, to the exact
      levels we computed — bit for bit
   6. it lands at 0,0 unscaled: the panel's size, so nothing is resampled
-  7. the same source converts to a byte-identical file, twice
-  8. the two failure modes we designed around really are failure modes
-  9. the push protocol drives the firmware's file-transfer API correctly
+  7. a source too small to fill is framed, and the frame draws flat
+  8. the same source converts to a byte-identical file, twice
+  9. the two failure modes we designed around really are failure modes
+ 10. the push protocol drives the firmware's file-transfer API correctly
 """
 
 from __future__ import annotations
@@ -97,6 +98,16 @@ def make_sources(directory: Path) -> list:
             alpha.putpixel((x, y), (10, 10, 10, 255))
     alpha.save(directory / "alpha.png")
     made.append(directory / "alpha.png")
+
+    # Small, and split light-over-dark: the case the mat exists for. Each
+    # sector must take its level from the edge it touches, so top and bottom
+    # cannot come out the same.
+    split = Image.new("RGB", (200, 260), (245, 245, 245))
+    for y in range(130, 260):
+        for x in range(200):
+            split.putpixel((x, y), (18, 18, 18))
+    split.save(directory / "split.png")
+    made.append(directory / "split.png")
 
     rotated = Image.new("RGB", (1600, 1200), (140, 140, 140))
     for x in range(1600):                       # a bright band along the long edge
@@ -244,7 +255,7 @@ def grade_output(src: Path, bmp: Path) -> None:
 
     # The one that matters: recompute the pipeline, then read the file back the
     # way the firmware reads it. Equal means the panel gets our pixels.
-    intended = mw.dither(mw.tone(mw.fit_panel(mw.load_grayscale(src))))
+    intended = mw.render(src)
     try:
         got = cp.decode_levels(data, hdr)
     except cp.BmpReaderError as exc:
@@ -252,6 +263,46 @@ def grade_output(src: Path, bmp: Path) -> None:
         return
     same = len(got) == len(intended) and all(a == b for a, b in zip(got, intended))
     check(f"{label}: decodes to the levels we computed", same)
+
+
+def _block(levels: list, x: int, y: int, n: int = 16) -> set:
+    return {levels[(y + dy) * cp.PANEL_W + (x + dx)]
+            for dy in range(n) for dx in range(n)}
+
+
+def check_mat(sources: list) -> None:
+    """The mat, on images too small to fill the panel.
+
+    The point of snapping each sector to a native level is that the mat draws
+    *flat* — a fill anywhere else dithers into a field of grain, which is the
+    one thing a large area on this panel must not do. So the check is literally
+    that: a block of mat decodes to a single level.
+    """
+    tiny = next(s for s in sources if s.stem == "tiny")
+    split = next(s for s in sources if s.stem == "split")
+
+    edges = mw.render(tiny)
+    check("mat: a small source is framed, not enlarged to fill",
+          len(_block(edges, 8, 8)) == 1 and len(set(edges)) > 1)
+    check("mat: the border draws flat — no dither grain",
+          all(len(_block(edges, x, y)) == 1
+              for x, y in ((8, 8), (cp.PANEL_W - 24, 8),
+                           (8, cp.PANEL_H - 24), (cp.PANEL_W - 24, cp.PANEL_H - 24))))
+
+    # 200x260 stops at MAX_UPSCALE, so the picture sits centred with mat above
+    # and below; sample the middle of each, clear of the mitres.
+    two_tone = mw.render(split)
+    top = _block(two_tone, cp.PANEL_W // 2 - 8, 16)
+    bottom = _block(two_tone, cp.PANEL_W // 2 - 8, cp.PANEL_H - 32)
+    check("mat: each sector follows its own edge, light over dark",
+          len(top) == 1 and len(bottom) == 1 and top != bottom,
+          f"top={top} bottom={bottom}")
+
+    plain = mw.render(tiny, mat_style="none")
+    check("mat: --mat none is plain white", _block(plain, 8, 8) == {3})
+
+    blurred = mw.render(tiny, mat_style="blur")
+    check("mat: --mat blur is a wash, not a flat fill", blurred != edges)
 
 
 def check_designed_failures() -> None:
@@ -373,6 +424,9 @@ def main() -> int:
         print("\nthrough the device's own reader:")
         for src, bmp in outputs:
             grade_output(src, bmp)
+
+        print("\nthe mat, on sources too small to fill the panel:")
+        check_mat(sources)
 
         print("\nthe failure modes we design around:")
         check_designed_failures()

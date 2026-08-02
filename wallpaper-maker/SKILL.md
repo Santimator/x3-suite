@@ -42,11 +42,12 @@ python3 wallpaper-maker/scripts/push_wallpaper.py
 There is nothing to configure and nothing to answer. Every parameter below has
 a right answer on this device, so it is already chosen.
 
-Flags exist for the two things that are genuinely taste — `--fit contain` to
-letterbox instead of crop, `--preview` to also write a PNG of the dithered
-result you can look at on a computer — plus `--dither atkinson|none`, which
-you should not need. For the push: `--host` when mDNS is unhelpful, `--list`
-to see what is on the device, `--replace` to clear it first.
+Flags exist for the things that are genuinely taste — `--fit contain` to keep
+the whole frame instead of cropping, `--mat blur|none` for a different surround
+on an image too small to fill the panel, `--preview` to also write a PNG of the
+dithered result you can look at on a computer — plus `--dither atkinson|none`,
+which you should not need. For the push: `--host` when mDNS is unhelpful,
+`--list` to see what is on the device, `--replace` to clear it first.
 
 ## What comes out, and why
 
@@ -60,7 +61,46 @@ to see what is on the device, `--replace` to clear it first.
 | **Floyd–Steinberg, serpentine** | Error diffusion is what makes four levels read as a photograph. Serpentine because straight raster order walks the residual error one way and leaves diagonal worms in skies. Atkinson (the firmware's own pick, for covers) is crisper and will clip a gradient sky flat. |
 | **autocontrast → gamma 0.85 → sharpen** | A phone photo uses half the range; on four levels that half becomes two. Stretch, then lift midtones (e-ink reflects less than the screen you chose the image on), then restore the local contrast the downscale cost. All before dithering. |
 | **cover-crop, centred** | A wallpaper should reach all four edges. `--fit contain` if the whole frame matters. |
+| **enlargement stops at 1.5x** | Past about half again, a photo is a smear even after dithering. What is left over gets a mat — a picture in a frame beats a blurred one that fills the screen. |
 | **EXIF rotation honoured first** | A phone portrait is stored landscape with a rotate flag; cropping before rotating crops the wrong axis. |
+
+## The mat: what surrounds an image too small to fill the panel
+
+Four sectors, mitred along the lines from each panel corner to the
+corresponding image corner, each taking its level from a band of the image
+along the edge it touches. A photo with sky above and ground below gets a light
+mat above and a dark one below: the fill matches the pixels it actually meets,
+not the picture's overall mood.
+
+Three things make it work on this panel rather than merely be an idea:
+
+- **Each sector snaps to a native level.** A mat filled with the raw mean
+  dithers into a large field of grain; one sitting exactly on 0/85/170/255
+  comes out perfectly flat, and flat is the only large area this panel draws
+  without noise.
+- **The mitre is proportional, not decorative.** Along a corner-to-corner line
+  the two sides' distances are equal *relative to their own margins* — the cut
+  a picture framer makes. Uneven margins give an uneven mitre, which is right.
+- **A hairline keyline** separates picture from mat, black against a light
+  sector and white against a dark one, so the result reads as framed rather
+  than as an image that failed to fill the screen.
+
+If all four bands round to the same level the joins vanish and it degenerates
+into a plain single-colour mat — which is the correct behaviour, not a bug, and
+is why there is no separate "fill with black or white by overall lightness"
+mode: that is this one, on a uniform image.
+
+`--mat blur` is the alternative: the image itself, enlarged past all reason and
+washed out, for when the picture should look like it continues rather than like
+it is hung. Blur is what makes that work here — it is the one operation that
+*guarantees* a low-frequency background, and low frequency is what error
+diffusion renders well. Smearing the edge row outward instead (the obvious
+version of the idea) leaves long streaks the dither turns into scan lines, and
+rippling them makes moiré against the dither pattern. `--mat none` is a plain
+white surround.
+
+The mat also replaces the old white letterbox in `--fit contain`, so a
+panorama gets framed rather than barred.
 
 ### `.pxc` is not a wallpaper format
 
@@ -133,7 +173,7 @@ default sleep screen, with no message anywhere. In order of likelihood:
 | Some images appear, one never does | Its name starts with `.` (skipped whatever it contains), or the extension is not `.bmp`, or the header did not parse. |
 | Images stopped appearing after a push | `/.sleep` exists and takes priority; anything in `/sleep` is now invisible. Move them, or delete `/.sleep`. |
 | Grainier or flatter than the preview | The file is not 4-bpp-indexed with a native palette, so the firmware re-dithered it on-device. Re-run `make_wallpaper.py`; do not hand-edit the BMP in an image editor, which will re-save it 24-bpp. |
-| A picture floating in a black frame | Not 528x792. The firmware never scales *up*. |
+| A picture floating in a black frame | Not 528x792 — the firmware never scales *up*, and that black is the device's, not our mat. Re-run `make_wallpaper.py`. |
 | Upload fails with "File already exists" | The firmware refuses collisions. `--replace`, or delete on the device. |
 | `push_wallpaper: cannot reach ...` | The device is not on the File Transfer screen — the web server only runs while it is. |
 
@@ -149,6 +189,10 @@ the parser accepts it, that the palette is native so **nothing is re-dithered**,
 that the file decodes back to the exact levels we computed, that it lands at
 0,0 unscaled, and that a second run is byte-identical.
 
+It checks the mat the same way, by the property that matters on this panel: a
+block of border must decode to a *single* level, and the sectors above and
+below a light-over-dark picture must not come out the same.
+
 It also asserts the two failure modes the encoder is *shaped around* still
 fail — a 108-byte DIB header is misread, a 24-bpp file is not native — so that
 if the firmware ever changes, the reasoning in the code fails loudly instead of
@@ -159,8 +203,9 @@ file-transfer API that keeps its awkward parts: dot-prefixed entries hidden
 from `/api/files`, and uploads rejected rather than overwritten.
 
 Fixtures cover the shapes that break a naive converter: a wide landscape (the
-crop must take the middle), an image smaller than the panel (must be scaled
-up), an alpha image (must flatten onto white, not multiply to black), a
+crop must take the middle), an image far smaller than the panel (must be framed
+rather than blown up), a small light-over-dark one (each sector must follow its
+own edge), an alpha image (must flatten onto white, not multiply to black), a
 phone-style EXIF rotation (must rotate before cropping), and a flat gradient
 (where dithering either works or bands visibly).
 

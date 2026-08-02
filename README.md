@@ -240,6 +240,14 @@ right answer on this panel, so it's already chosen — the table in the SKILL
 says why each one and not the alternative. Add `--preview` to get a PNG of the
 result you can look at before it goes anywhere near the device.
 
+An image too small to fill the panel isn't blown up to fit — enlargement stops
+at 1.5x and the rest becomes a **mat**: four sectors mitred from the panel
+corners, each taking its shade from the image edge it touches, so sky above
+gets a light border and dark ground below a dark one. Each sector snaps to one
+of the four levels, which is what makes it draw perfectly flat instead of
+dithering into a field of grain. `--mat blur` washes an enlarged copy of the
+image behind it instead; `--mat none` gives plain white.
+
 This is the *sleep screen*, not an EPUB cover — a separate firmware feature,
 different format, different folder. And a warning worth repeating: **`.pxc` is
 not a wallpaper format** on this firmware, whatever the converters on the web
