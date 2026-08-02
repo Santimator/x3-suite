@@ -315,8 +315,9 @@ fonts are ignored, ruby and interlinear pinyin are broken, RAM is ~400 KB.
 
 A Telegram bot that operates everything above without a terminal. Send it a
 photo and it comes back as a sleep-screen preview with the mat choices as
-buttons; send it an EPUB and it lands on the catalog; browse the reader's SD
-card and rename a file from the couch.
+buttons; send it an EPUB and it lands on the catalog, with the SD card offered
+as an extra; browse the reader's wallpapers, look at them, and rename or delete
+from the couch.
 
 ```bash
 cp tgbot/config.example.json tgbot/config.json    # then add your Telegram id

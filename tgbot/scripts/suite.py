@@ -196,18 +196,7 @@ def upload_book(host: str, path: Path, name: str) -> None:
     """
     if any(e.get("name") == name for e in device.list_dir(host, "/")):
         device.delete(host, f"/{name}")
-    dest = path.parent / name
-    if dest != path:
-        # upload() takes the on-disk name from the file itself, so give it one
-        # named the way the device wants without touching the catalog's copy.
-        dest = Path(str(dest))
-        dest.write_bytes(path.read_bytes())
-        try:
-            device.upload(host, "/", dest, content_type="application/epub+zip")
-        finally:
-            dest.unlink(missing_ok=True)
-    else:
-        device.upload(host, "/", path, content_type="application/epub+zip")
+    device.upload(host, "/", path, content_type="application/epub+zip", name=name)
 
 
 def push(files: list, host: str | None = None) -> dict:

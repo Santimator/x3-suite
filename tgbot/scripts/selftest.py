@@ -12,7 +12,7 @@ enough to grade the four things that would actually hurt:
      the delete buttons.
   2. **The path jail.** Nothing the chat can name may escape `workspace/`.
   3. **The queue survives.** A crash between two writes must lose nothing, and
-     a book must never end up in a delivery queue.
+     a book is never queued behind your back — only when you ask for one.
   4. **A failed push changes nothing.** No device, no removals — because the
      whole point of queueing all week is that pushing cannot quietly eat it.
 
@@ -240,28 +240,40 @@ def check_queue(tmp: Path) -> None:
 # -- 4. a push that finds nothing -----------------------------------------
 
 
+def no_reader():
+    raise suite.DeviceError("no reader found")
+
+
 def check_push_is_all_or_nothing(tmp: Path) -> None:
     print("\na push with no reader on the network:")
     bot, tg = make_bot(tmp)
     bmp = bot.workspace / "wall.bmp"
     bmp.write_bytes(b"BM fake")
     bot.queue.add("wallpaper", str(bmp), "wall.bmp")
+    book = bot.workspace / "b.epub"
+    book.write_bytes(b"PK\x03\x04")
+    bot.queue.add("book", str(book), "A Book",
+                  meta={"author": "Someone", "title": "A Book"})
+
+    bot.device_host = no_reader
+    bot.do_push(bot.user_id)
+    check("nothing is removed — wallpapers or books",
+          len(bot.queue) == 2, str(bot.queue.items()))
+    check("and it says so out loud",
+          any("No reader" in s["text"] for s in tg.sent), str(tg.sent[-1]))
+
+    # One lands, one fails: exactly the one that landed leaves.
+    print("\na push where one file lands and one does not:")
+    bot, tg = make_bot(tmp)
+    for name in ("wall.bmp", "other.bmp"):
+        p = bot.workspace / name
+        p.write_bytes(b"BM fake")
+        bot.queue.add("wallpaper", str(p), name)
 
     original = suite.push
     try:
-        suite.push = lambda files: {"ok": False, "host": None, "items": [],
-                                    "error": "no reader found"}
-        bot.do_push(bot.user_id)
-        check("the queue is untouched", len(bot.queue) == 1, str(bot.queue.items()))
-        check("and it says so out loud",
-              any("No reader" in s["text"] for s in tg.sent), str(tg.sent[-1]))
-
-        # One file lands, one fails: exactly the one that landed leaves.
-        tg.sent.clear()
-        second = bot.workspace / "other.bmp"
-        second.write_bytes(b"BM fake")
-        bot.queue.add("wallpaper", str(second), "other.bmp")
-        suite.push = lambda files: {
+        bot.device_host = lambda: ("10.0.0.5", {})
+        suite.push = lambda files, host=None: {
             "ok": False, "host": "10.0.0.5", "target": "/.sleep",
             "items": [{"name": "wall.bmp", "ok": True},
                       {"name": "other.bmp", "ok": False, "error": "File already exists"}]}
@@ -280,13 +292,87 @@ def check_push_is_all_or_nothing(tmp: Path) -> None:
     bot.queue.add("wallpaper", str(bot.workspace / "never-existed.bmp"), "ghost")
     original = suite.push
     try:
-        suite.push = lambda files: {"ok": True, "host": "10.0.0.5", "items": []}
+        bot.device_host = lambda: ("10.0.0.5", {})
+        suite.push = lambda files, host=None: {"ok": True, "host": "10.0.0.5",
+                                               "items": []}
         bot.do_push(bot.user_id)
         check("is dropped and named, not pushed",
               len(bot.queue) == 0 and any("gone" in s["text"] for s in tg.sent),
               str(tg.sent))
     finally:
         suite.push = original
+
+
+# -- 4b. books reach the card under the catalog's own name -----------------
+
+
+def check_book_delivery(tmp: Path) -> None:
+    """A book pushed and the same book pulled must be ONE file on the card."""
+    print("\nbooks on the SD card:")
+    import crosspoint_client as opds
+
+    entry = opds.OpdsEntry()
+    entry.author, entry.title = "Tirso de Molina", "Los alcaldes encontrados"
+    check("the push name is the OPDS client's name",
+          "/" + suite.device_book_name(entry.author, entry.title)
+          == opds.sd_filename(entry),
+          suite.device_book_name(entry.author, entry.title))
+
+    long_title = "A" * 200
+    name = suite.device_book_name("Author", long_title)
+    check("the 100-byte budget is respected, extension intact",
+          len(name.encode()) <= 105 and name.endswith(".epub"), name)
+    check("a title of only dots does not produce an empty name",
+          suite.device_book_name("", "...") == "book.epub",
+          suite.device_book_name("", "..."))
+
+    bot, tg = make_bot(tmp)
+    book = bot.workspace / "x.epub"
+    book.write_bytes(b"PK\x03\x04")
+    bot.take_book(bot.user_id, book)
+    check("filing a book still does not queue it", len(bot.queue) == 0)
+
+    offered = [b[1] for s in tg.sent for row in (s["keyboard"] or []) for b in row
+               if b[1].startswith("bq:")]
+    check("but the card is offered as an extra", bool(offered), str(tg.sent[-1]))
+
+    tg.sent.clear()
+    bot.handle(cb(offered[-1]))
+    check("... and asking for it queues one", len(bot.queue) == 1,
+          str(bot.queue.items()))
+    check("the queue remembers author and title, not just a filename",
+          "meta" in bot.queue.items()[0], str(bot.queue.items()[0]))
+
+    sent = []
+    original = suite.upload_book
+    try:
+        bot.device_host = lambda: ("10.0.0.5", {})
+        suite.upload_book = lambda host, path, name: sent.append(name)
+        bot.do_push(bot.user_id)
+        check("it uploads under the device's own naming",
+              sent and sent[0].endswith(".epub"), str(sent))
+        check("and leaves the queue when it lands", len(bot.queue) == 0)
+    finally:
+        suite.upload_book = original
+
+    check("the catalog copy is still there",
+          (bot.workspace / "library" / "x.epub").exists())
+
+    # A book already in the catalog must be sendable too — otherwise the card
+    # is only reachable in the seconds after an upload.
+    bot, tg = make_bot(tmp)
+    token = bot.tokens.put({"path": str(book), "title": "Old Book",
+                            "author": "Someone"})
+    bot.handle(cb(f"lib:f:{token}"))
+    check("a book already on the catalog can be sent as well",
+          any(b[1].startswith("bq:") for row in (tg.sent[-1]["keyboard"] or [])
+              for b in row), str(tg.sent[-1]["keyboard"]))
+
+    # Buttons from before this change carried a bare path string.
+    tg.sent.clear()
+    bot.handle(cb(f"lib:f:{bot.tokens.put(str(book))}"))
+    check("an older button carrying a bare path still opens",
+          tg.sent and "x.epub" in tg.sent[-1]["text"], str(tg.sent))
 
 
 # -- 5. buttons ------------------------------------------------------------
@@ -428,6 +514,7 @@ def main() -> int:
         check_paths(tmp)
         check_queue(tmp)
         check_push_is_all_or_nothing(tmp)
+        check_book_delivery(tmp)
         check_tokens(tmp)
         check_device_menu(tmp)
         check_secrets_outside(tmp)

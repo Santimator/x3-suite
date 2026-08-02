@@ -26,7 +26,7 @@ python3 -m venv .venv
 - Scripts measure, transform, check. Never invent. Typed JSON/file I/O, non-zero exit on failed gate.
 - Device-facing change (EPUB output, fonts, feed) → read `reference/readers.md` first. It marks device-confirmed vs inferred; keep that distinction when you edit it.
 - Feed markup → the opds-server selftest's oracle is a port of the device's own OPDS client. Valid OPDS ≠ readable by this device. Same pattern for wallpapers: the oracle is a port of the firmware's BMP reader, and valid BMP ≠ drawn as computed.
-- Delivery to the device: OPDS is a **book-only pull** (`application/epub+zip`, SD root). Anything else — wallpapers, fonts, settings — is a push to the file-transfer web server. `reference/readers.md` has the API.
+- Delivery to the device: OPDS is a **book-only pull** (`application/epub+zip`, SD root). Anything else — wallpapers, fonts, settings — is a push to the file-transfer web server. A book *can* also be pushed there (`tgbot/` offers it); if you do, name it exactly as the OPDS client would (`crosspoint_client.opds_book_filename`) or the card ends up with two copies. `reference/readers.md` has the API.
 - `tgbot/` is **optional by construction**: it may import from any unit, and no
   unit may import it. Someone who only builds EPUBs must never need a token.
 - `workspace/` is gitignored except allowlisted samples (proof + fixtures). Never assume a book there is tracked. New sample → add to `.gitignore` allowlist deliberately.

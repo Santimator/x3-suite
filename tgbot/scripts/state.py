@@ -56,9 +56,15 @@ class Queue:
     def __len__(self) -> int:
         return len(self._read())
 
-    def add(self, kind: str, path: str, label: str = "") -> dict:
+    def add(self, kind: str, path: str, label: str = "",
+            meta: dict | None = None) -> dict:
         item = {"id": uuid.uuid4().hex[:8], "kind": kind, "path": str(path),
                 "label": label or Path(path).name, "added": time.time()}
+        if meta:
+            # Books carry the author and title they were catalogued under, so
+            # the name they land on the card with is decided when they are
+            # queued, not re-derived from a filename days later.
+            item["meta"] = meta
         items = self._read()
         items.append(item)
         _write_atomic(self.path, items)

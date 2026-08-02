@@ -62,10 +62,14 @@ That last promise is the reason the queue is worth having. You can send photos
 all week from wherever you are, and push once when you are next near the
 device, without ever wondering whether something was half-delivered.
 
-**Books are never queued.** The X3 pulls books from the OPDS catalog by
-itself, so a book in a delivery queue could only ever produce a second copy on
-the SD card under a different name. A book arriving in the chat is *filed*,
-into `workspace/library/`, where `opds-server` already scans.
+**A book is filed before it is anything else.** Every EPUB that arrives goes
+into `workspace/library/`, where `opds-server` scans — always, first, without
+being asked. The catalog is the library; the card is a convenience. So there
+is no path through this bot that puts a book on the device and nowhere else.
+
+Copying it onto the card *as well* is then an offer, not a default, and it is
+safe because the upload borrows the OPDS client's own naming (see below). Push
+and pull converge on one file rather than racing to make two.
 
 ## What the buttons do
 
@@ -157,6 +161,20 @@ title and author **as the device will see them** (read through the catalog's
 own scanner, from the OPF) plus the filename it will get on the SD card. Then
 it says whether `opds-server` is actually answering — because "it's on the
 catalog" is only true if that server is up.
+
+Then it offers **📤 Also send to device**, which queues the book for the SD
+root alongside any wallpapers. Worth having when the reader is off your LAN, or
+when opds-server isn't running, or when you simply have the device in your
+hands. The catalog copy stays either way.
+
+The name it lands under is not ours to choose: it comes from
+`crosspoint_client.opds_book_filename`, the port of the firmware's own
+`opdsBookFilename`, byte budget and trailing-dot trim included. Get that wrong
+and the reader ends up holding two copies of every book you touched twice —
+one from the push, one from a later download. Since 1.5.0 the layout is a
+*device setting* (`opdsFilenameFormat`: author–title, title–author, or title
+alone), so the bot reads it from `/api/settings` while the reader is in front
+of it rather than assuming the default.
 
 ### A PDF
 
@@ -298,10 +316,13 @@ temporary workspace. It grades the four things that would actually hurt:
 2. **The path jail**: `../`, absolute paths, and a symlink that leaves the
    root — refused by resolution, not by string matching.
 3. **The queue survives a restart**, keeps its order, leaves no temporary
-   files, and never accepts a book.
-4. **A failed push changes nothing**, a partial push removes exactly what
-   landed, and a queued file that vanished from disk is dropped by name rather
-   than pushed.
+   files, and never takes a book without being asked.
+4. **A failed push changes nothing** — wallpapers or books — a partial push
+   removes exactly what landed, and a queued file that vanished from disk is
+   dropped by name rather than pushed.
+5. **A pushed book gets the name the OPDS client would give it**, checked
+   against that port directly, including the 100-byte budget and a title of
+   nothing but dots.
 
 Plus: a 200-character device name with decomposed accents round-trips through a
 button token byte-identically, a stale token is answered rather than guessed

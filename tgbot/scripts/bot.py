@@ -284,6 +284,18 @@ class Bot:
         if head == "wpx":
             return self.say(chat, "Dropped it.", [[("🏠 Menu", "m:main")]])
 
+        if head == "bq":                       # queue a book for the SD card
+            book = self.tokens.get(rest)
+            if not book:
+                return self.stale(chat)
+            self.queue.add("book", book["path"],
+                           label=book["title"][:40], meta=book)
+            return self.say(
+                chat,
+                f"📕 queued for the card — {len(self.queue)} waiting.\n"
+                f"It stays on the catalog either way.",
+                [[("📲 Push now", "push:ask"), ("🏠 Menu", "m:main")]])
+
         if head == "qdel":
             self.queue.remove(rest)
             return self.show_queue(chat)
@@ -438,7 +450,15 @@ class Bot:
                      if suite.opds_up(self.cfg["opds_url"])
                      else "⚠️ opds-server is not answering, so the reader "
                           "cannot fetch it yet.")
-        self.say(chat, "\n".join(lines), [[("🏠 Menu", "m:main")]])
+
+        # The catalog is the library; the device is a convenience. So the book
+        # is filed first, always, and copying it onto the card is an extra you
+        # ask for — never the only place it exists.
+        token = self.tokens.put({"path": str(dest), "title": title or dest.stem,
+                                 "author": author or ""})
+        self.say(chat, "\n".join(lines),
+                 [[("📤 Also send to device", f"bq:{token}")],
+                  [("🏠 Menu", "m:main")]])
 
     def take_pdf(self, chat, path: Path) -> None:
         """Stage the conversion and say honestly what happens next.
@@ -498,7 +518,9 @@ class Bot:
                             [[("🏠 Menu", "m:main")]])
         rows = []
         for book in books[:20]:
-            token = self.tokens.put(book["path"])
+            # The whole record, not just the path: sending it to the card later
+            # needs the author and title the catalog knows it by.
+            token = self.tokens.put(book)
             label = f"{book['title'][:28]} · {(book['author'] or '?')[:14]}"
             rows.append([(label, f"lib:f:{token}")])
         rows.append([("🏠 Menu", "m:main")])
@@ -506,14 +528,21 @@ class Bot:
 
     def on_library_callback(self, chat, rest: str) -> None:
         action, _, token = rest.partition(":")
-        path = self.tokens.get(token)
-        if not path:
+        book = self.tokens.get(token)
+        if not book:
             return self.stale(chat)
-        path = Path(path)
+        # Older buttons in the scrollback carried a bare path; newer ones carry
+        # the catalog record.
+        book = book if isinstance(book, dict) else {"path": book}
+        path = Path(book["path"])
         if action == "f":
+            send = self.tokens.put({"path": str(path),
+                                    "title": book.get("title") or path.stem,
+                                    "author": book.get("author") or ""})
             return self.say(
                 chat, f"<code>{html.escape(path.name)}</code>",
-                [[("✏️ Rename", f"lib:rn:{token}"), ("🗑 Delete", f"lib:rm:{token}")],
+                [[("📤 Send to device", f"bq:{send}")],
+                 [("✏️ Rename", f"lib:rn:{token}"), ("🗑 Delete", f"lib:rm:{token}")],
                  [("📚 Library", "m:lib")]])
         if action == "rn":
             self.pending = {"kind": "librename", "path": str(path)}
@@ -811,28 +840,56 @@ class Bot:
         if not live:
             return self.say(chat, "Nothing left to push.", [[("🏠 Menu", "m:main")]])
 
-        report = suite.push([i["path"] for i in live])
-        if not report.get("host"):
+        # Find the reader once, and hand the address to both halves. Two
+        # discovery passes could disagree, and "no reader" has to mean the same
+        # thing for wallpapers and books or the all-or-nothing promise leaks.
+        try:
+            host, _ = self.device_host()
+        except suite.DeviceError as exc:
             return self.say(
                 chat,
                 "📵 No reader found — the queue is untouched.\n\n"
-                f"<pre>{html.escape(str(report.get('error', ''))[:400])}</pre>",
+                f"<pre>{html.escape(str(exc)[:400])}</pre>",
                 [[("Try again", "push:ask")], [("🏠 Menu", "m:main")]])
 
-        landed = {r["name"] for r in report.get("items", []) if r.get("ok")}
-        done = [i for i in live if Path(i["path"]).name in landed]
+        lines = [f"📲 {host}"]
+        done = []
+
+        walls = [i for i in live if i.get("kind") != "book"]
+        if walls:
+            report = suite.push([i["path"] for i in walls], host=host)
+            landed = {r["name"] for r in report.get("items", []) if r.get("ok")}
+            done += [i for i in walls if Path(i["path"]).name in landed]
+            if report.get("target"):
+                lines.append(f"🖼 <code>{html.escape(report['target'])}</code>")
+            for r in report.get("items", []):
+                mark = "✅" if r.get("ok") else "❌"
+                lines.append(f"{mark} {html.escape(r['name'])}"
+                             + ("" if r.get("ok")
+                                else f" — {html.escape(str(r.get('error'))[:80])}"))
+            if report.get("sleep_mode_set"):
+                lines.append("Sleep screen set to Custom.")
+
+        books = [i for i in live if i.get("kind") == "book"]
+        if books:
+            lines.append("📕 SD root")
+            for item in books:
+                meta = item.get("meta") or {}
+                # Named the way the OPDS client would name it, so pushing a
+                # book and later downloading it produce one file, not two.
+                name = suite.device_book_name(meta.get("author", ""),
+                                              meta.get("title", item["label"]),
+                                              host=host)
+                try:
+                    suite.upload_book(host, Path(item["path"]), name)
+                    done.append(item)
+                    lines.append(f"✅ {html.escape(name)}")
+                except suite.DeviceError as exc:
+                    lines.append(f"❌ {html.escape(name)} — "
+                                 f"{html.escape(str(exc)[:80])}")
+
         self.queue.remove_many(i["id"] for i in done)
         self.notes.set("last_push", datetime.now().strftime("%Y-%m-%d %H:%M"))
-
-        target = report.get("target")
-        lines = [f"📲 {report['host']}"
-                 + (f" → <code>{html.escape(target)}</code>" if target else "")]
-        for r in report.get("items", []):
-            mark = "✅" if r.get("ok") else "❌"
-            lines.append(f"{mark} {html.escape(r['name'])}"
-                         + ("" if r.get("ok") else f" — {html.escape(str(r.get('error'))[:80])}"))
-        if report.get("sleep_mode_set"):
-            lines.append("\nSleep screen set to Custom.")
         remaining = len(self.queue)
         lines.append(f"\n{remaining} still queued." if remaining
                      else "\nQueue empty. Leave the File Transfer screen and "
