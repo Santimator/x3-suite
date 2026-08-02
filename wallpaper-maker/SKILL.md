@@ -81,9 +81,12 @@ Three things make it work on this panel rather than merely be an idea:
 - **The mitre is proportional, not decorative.** Along a corner-to-corner line
   the two sides' distances are equal *relative to their own margins* — the cut
   a picture framer makes. Uneven margins give an uneven mitre, which is right.
-- **A hairline keyline** separates picture from mat, black against a light
-  sector and white against a dark one, so the result reads as framed rather
-  than as an image that failed to fill the screen.
+- **Nothing is drawn between the picture and its border.** The mat continues
+  the edge, so a rule around the image would cut across the one join the whole
+  thing exists to make. At four levels a hairline is not a hairline either — it
+  is a hard black or white line against whatever it sits on. Sky runs straight
+  into the light sector above it; where a sector matches the edge exactly the
+  boundary simply disappears, which is the point.
 
 If all four bands round to the same level the joins vanish and it degenerates
 into a plain single-colour mat — which is the correct behaviour, not a bug, and
@@ -117,9 +120,8 @@ ripples its own way and does so identically on every run.
 
 The sectors still meet on the mitres — that is what stops four independent
 ripples from becoming mush; it reads as four panes of distorted glass in a
-frame. There is no keyline here and no snapped level: the point is that the
-edge *dissolves* into the border, so a hairline would cut exactly the join
-being drawn.
+frame. There is no snapped level here: the picture and its border are the same
+pixels, so there is nothing to round to.
 
 One thing to expect rather than debug: **the wave only shows where the edge
 varies along its length.** A picture whose top row is flat sky propagates to a

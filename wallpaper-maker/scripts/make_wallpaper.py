@@ -223,7 +223,7 @@ def _edge_mat(img: Image.Image, ox: int, oy: int) -> Image.Image:
     for side, poly in _mitres(ox, oy, iw, ih).items():
         draw.polygon(poly, fill=levels[side])
 
-    return canvas, levels
+    return canvas
 
 
 def _blur_mat(img: Image.Image) -> Image.Image:
@@ -316,9 +316,8 @@ def _waves_mat(img: Image.Image, ox: int, oy: int) -> Image.Image:
     ripples from turning into mush: it reads as four panels of distorted glass
     in a frame, rather than as one confused wash.
 
-    Unlike the flat mat, this one has no snapped level and no keyline: the
-    point is that the edge dissolves into the border rather than sitting inside
-    it, so a hairline would be cutting exactly the join we are drawing.
+    Unlike the flat mat, this one has no snapped level: the picture and its
+    border are the same pixels, so there is nothing to round to.
 
     The wave shape is seeded from the image itself, so each wallpaper ripples
     its own way and does so identically on every run.
@@ -361,7 +360,13 @@ def _waves_mat(img: Image.Image, ox: int, oy: int) -> Image.Image:
 
 
 def mat(img: Image.Image, style: str = "edges") -> Image.Image:
-    """Centre a smaller image on the panel and fill what is left around it."""
+    """Centre a smaller image on the panel and fill what is left around it.
+
+    Nothing is drawn between the picture and its border. Every style here works
+    by continuing the edge outward, so a rule around the image would cut across
+    the one join the mat exists to make — and at four levels a hairline is not
+    a hairline, it is a hard black or white line against whatever it sits on.
+    """
     if img.size == (PANEL_W, PANEL_H):
         return img
 
@@ -369,28 +374,15 @@ def mat(img: Image.Image, style: str = "edges") -> Image.Image:
     oy = (PANEL_H - img.height) // 2
 
     if style == "none":
-        canvas, levels = Image.new("L", (PANEL_W, PANEL_H), 255), None
+        canvas = Image.new("L", (PANEL_W, PANEL_H), 255)
     elif style == "blur":
-        canvas, levels = _blur_mat(img), None
+        canvas = _blur_mat(img)
     elif style == "waves":
-        canvas, levels = _waves_mat(img, ox, oy), None
+        canvas = _waves_mat(img, ox, oy)
     else:
-        canvas, levels = _edge_mat(img, ox, oy)
+        canvas = _edge_mat(img, ox, oy)
 
     canvas.paste(img, (ox, oy))
-
-    if levels:
-        # A hairline against each sector, so the picture reads as framed rather
-        # than as one that failed to fill the screen. Free at four levels, and
-        # the only place a hard edge is wanted.
-        draw = ImageDraw.Draw(canvas)
-        x1, y1 = ox + img.width - 1, oy + img.height - 1
-        for side, line in (("top", [(ox - 1, oy - 1), (x1 + 1, oy - 1)]),
-                           ("bottom", [(ox - 1, y1 + 1), (x1 + 1, y1 + 1)]),
-                           ("left", [(ox - 1, oy - 1), (ox - 1, y1 + 1)]),
-                           ("right", [(x1 + 1, oy - 1), (x1 + 1, y1 + 1)])):
-            draw.line(line, fill=0 if levels[side] >= 170 else 255)
-
     return canvas
 
 
