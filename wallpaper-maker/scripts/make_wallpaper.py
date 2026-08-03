@@ -35,9 +35,13 @@ What comes out, and why each part of it:
   4 grey levels          0 / 85 / 170 / 255. Not a design choice: they are the
                          four charge states the panel has.
   Floyd-Steinberg,       Error diffusion is what makes four levels look like a
-  serpentine             photograph. Serpentine (alternating scan direction)
-                         because straight raster order walks the residual error
+  serpentine,            photograph. Serpentine (alternating scan direction)
+  nudged by blue noise   because straight raster order walks the residual error
                          in one direction and leaves diagonal worms in skies.
+                         The nudge is for the other failure: diffusion is
+                         deterministic, so a large flat area does not come out
+                         as grain, it locks into a regular lattice that reads as
+                         a grid over the picture. A night sky is the worst case.
   autocontrast, then     A phone photo uses maybe half the range; on four levels
   gamma 0.85, then       that half becomes two. Stretch first, lift the midtones
   unsharp mask           (e-ink reads darker than the screen you chose the image
@@ -89,6 +93,13 @@ SOURCE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif",
 AUTOCONTRAST_CUTOFF = 0.5   # % clipped at each end before the range is stretched
 GAMMA = 0.85                # <1 lifts midtones; e-ink reflects less than a screen
 UNSHARP_AMOUNT = 1.35       # local contrast back after the downscale
+
+# Threshold nudge that stops error diffusion locking into a lattice on flat
+# areas. As a fraction of the 85-wide gap between levels, at the peak of the
+# shaping curve in `_threshold_bias`. Raising it breaks up more but costs local
+# tone accuracy; below about 0.3 the lattice starts showing again.
+DITHER_NOISE = 0.55
+NOISE_SIGMA = 1.6           # blur radius that sets which scales survive as "blue"
 
 # How far a small image is enlarged before we stop and frame it instead. Past
 # about half again, a photo is visibly soft even after dithering, and a picture
@@ -409,6 +420,70 @@ def _nearest(value: float) -> int:
     return 3
 
 
+def _blue_noise(w: int, h: int, seed: bytes) -> list:
+    """A blue-noise field: white noise with its coarse scales removed.
+
+    Used to nudge the dither's decision threshold. It has to be *blue* rather
+    than plain random: white noise carries energy at every scale including the
+    ones the eye resolves, so using it here trades a lattice for visible
+    clumping. High-passing leaves only structure finer than the eye can pick
+    out, which is exactly enough to stop the diffusion locking into a pattern
+    without inventing a coarser one.
+
+    Generated at panel size rather than tiled, so it introduces no period of its
+    own, and seeded from the image, so a given wallpaper always dithers to the
+    same bytes.
+    """
+    rng = random.Random(seed)
+    white = Image.new("L", (w, h))
+    white.putdata([rng.randrange(256) for _ in range(w * h)])
+    lo = white.filter(ImageFilter.GaussianBlur(NOISE_SIGMA)).tobytes()
+
+    hp = [a - b for a, b in zip(white.tobytes(), lo)]
+    n = len(hp)
+    mean = sum(hp) / n
+    var = sum((v - mean) ** 2 for v in hp) / n
+    scale = 1.0 / (2.5 * (var ** 0.5)) if var else 0.0     # roughly into [-1, 1]
+    return [(v - mean) * scale for v in hp]
+
+
+# How hard to nudge the threshold, per source tone. Peaks where the dither is
+# sparse enough to line up; zero on a level and zero halfway between two.
+_SPARSITY = [abs(math.sin(2 * math.pi * v / 85.0)) for v in range(256)]
+
+
+def _threshold_bias(src: bytes, w: int, h: int) -> list:
+    """Per-pixel threshold nudge: blue noise, scaled by how visible a lattice
+    would be at that tone.
+
+    Error diffusion is deterministic, so a large area of near-constant tone does
+    not come out as grain — it locks into a regular lattice of minority pixels,
+    which reads as a grid laid over the picture. A near-black night sky is the
+    worst case and the one that found this.
+
+    The nudge is shaped by the source tone, because the lattice is only visible
+    when the dots are far apart:
+
+      on a level (0, 85, 170, 255)   nothing is dithered at all, so perturbing
+                                     would speckle a solid area — nudge zero
+      halfway between two levels     dots land every other pixel: a checkerboard,
+                                     finer than the eye resolves and the
+                                     smoothest thing this panel can draw — leave
+                                     it exactly alone
+      the sparse ground between      dots are far enough apart to line up, and
+                                     this is where the grid forms — full nudge
+
+    |sin(2*pi*tone/85)| is that shape. Note it keys off the *source* tone, not
+    the running error-diffused value, which swings far too wildly to say
+    anything about how dense the local dither will be.
+    """
+    if not DITHER_NOISE:
+        return [0.0] * (w * h)
+    field = _blue_noise(w, h, hashlib.sha1(src).digest())
+    span = DITHER_NOISE * 85.0
+    return [n * span * _SPARSITY[v] for n, v in zip(field, src)]
+
+
 def dither(img: Image.Image, algorithm: str = "floyd") -> bytearray:
     """8-bit grey -> one 2-bit level index per pixel.
 
@@ -419,13 +494,16 @@ def dither(img: Image.Image, algorithm: str = "floyd") -> bytearray:
     for line art that is already four-tone.
     """
     w, h = img.size
-    buf = [float(v) for v in img.tobytes()]
+    src = img.tobytes()
+    buf = [float(v) for v in src]
     out = bytearray(w * h)
 
     if algorithm == "none":
         for i, v in enumerate(buf):
             out[i] = _nearest(v)
         return out
+
+    bias = _threshold_bias(src, w, h)
 
     for y in range(h):
         row = y * w
@@ -435,7 +513,7 @@ def dither(img: Image.Image, algorithm: str = "floyd") -> bytearray:
         for x in xs:
             i = row + x
             old = buf[i]
-            level = _nearest(old)
+            level = _nearest(old + bias[i])
             out[i] = level
             err = old - LEVELS[level]
             if not err:

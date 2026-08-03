@@ -60,6 +60,7 @@ clear it first.
 | **40-byte DIB header** | The firmware reads the palette from a fixed offset after the first 40 header bytes, not from `biSize` or `bfOffBits`. A BITMAPV4/V5 header feeds it colour-space fields as colours. |
 | **0 / 85 / 170 / 255** | Not a choice: the four charge states the panel has. |
 | **Floyd–Steinberg, serpentine** | Error diffusion is what makes four levels read as a photograph. Serpentine because straight raster order walks the residual error one way and leaves diagonal worms in skies. Atkinson (the firmware's own pick, for covers) is crisper and will clip a gradient sky flat. |
+| **a blue-noise nudge on the threshold** | Diffusion is deterministic, so a large flat area does *not* come out as grain — it locks into a regular lattice that reads as a grid laid over the picture. See below; this one was found by a real wallpaper, not by reasoning. |
 | **autocontrast → gamma 0.85 → sharpen** | A phone photo uses half the range; on four levels that half becomes two. Stretch, then lift midtones (e-ink reflects less than the screen you chose the image on), then restore the local contrast the downscale cost. All before dithering. |
 | **cover-crop, centred** | A wallpaper should reach all four edges. `--fit contain` if the whole frame matters. |
 | **enlargement stops at 1.5x** | Past about half again, a photo is a smear even after dithering. What is left over gets a mat — a picture in a frame beats a blurred one that fills the screen. |
@@ -138,6 +139,44 @@ rather than like it is hung. `--mat none` is a plain white surround.
 
 The mat also replaces the old white letterbox in `--fit contain`, so a
 panorama gets framed rather than barred.
+
+## The grid on flat areas, and why the threshold is nudged
+
+Error diffusion has no randomness in it. Hand it a large area of near-constant
+tone and it does not produce grain — it produces a **regular lattice** of
+minority pixels, evenly spaced, which the eye reads as a grid laid over the
+picture. It is the classic weakness of Floyd–Steinberg and it is invisible
+until an image with a big flat area turns up. A near-black night sky did it
+here: the sky sat at 24 of the 85 between black and the next level, so roughly
+one pixel in 3.5 had to be lifted, and they came out in ranks.
+
+The fix is to perturb the quantiser's threshold per pixel, with two properties
+that both matter:
+
+- **Blue noise, not white.** White noise carries energy at every scale
+  including the ones the eye resolves, so it trades the lattice for visible
+  clumping — measurably worse on mid-greys. High-passing the noise leaves only
+  structure finer than the eye picks out: enough to stop the lock-in, not
+  enough to be seen. The field is generated at panel size rather than tiled, so
+  it adds no period of its own, and it is seeded from the image, so output
+  stays byte-identical run to run.
+- **Shaped by how sparse the dither is at that tone.** The lattice is only
+  visible when the dots are far apart, so the nudge is scaled by
+  `|sin(2π·tone/85)|`:
+
+  | source tone | what the dither does there | nudge |
+  |---|---|---|
+  | exactly on a level | nothing is dithered at all | **none** — otherwise it would speckle a solid area |
+  | halfway between levels | dots land every other pixel: a checkerboard, finer than the eye resolves and the smoothest thing this panel can draw | **none** — perturbing it is pure loss |
+  | the sparse ground between | dots far enough apart to line up — where the grid forms | **full** |
+
+  It keys off the *source* tone, not the running error-diffused value, which
+  swings far too wildly to say anything about local dither density. Getting
+  that wrong is why the first attempt made mid-greys worse.
+
+Cost, measured: local tone accuracy drops from 1.01 to 1.13 RMS — negligible —
+while the lattice score on a flat tone falls from 0.90 to 0.05. `DITHER_NOISE`
+is the amplitude; below about 0.3 the lattice starts showing again.
 
 ### `.pxc` is not a wallpaper format
 

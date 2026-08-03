@@ -356,6 +356,72 @@ def check_waves(sources: list) -> None:
     check("waves: it is what a plain run produces", rippled == mw.render(tiny))
 
 
+def repeat_score(levels, w: int, h: int, reach: int = 6) -> float:
+    """Strongest excess-over-chance self-match when the pattern is slid.
+
+    A lattice matches itself when slid by one cell; grain matches itself at no
+    shift but its own. Returned 0..1, where 0 is "no repeating structure".
+    Deliberately stdlib — the gate must not need numpy when the tool does not.
+    """
+    n = len(levels)
+    p = sum(1 for v in levels if v) / n
+    chance = p * p + (1 - p) * (1 - p)
+    if chance >= 0.999:                       # nothing dithered; nothing to repeat
+        return 0.0
+    best = 0.0
+    for dy in range(0, reach + 1):
+        for dx in range(-reach, reach + 1):
+            if dy == 0 and dx <= 0:
+                continue
+            if abs(dx) <= 1 and dy <= 1:      # touching neighbours are not a repeat
+                continue
+            match = total = 0
+            for y in range(0, h - dy):
+                r1, r2 = y * w, (y + dy) * w
+                for x in range(max(0, -dx), min(w, w - dx)):
+                    total += 1
+                    if levels[r1 + x] == levels[r2 + x + dx]:
+                        match += 1
+            best = max(best, (match / total - chance) / (1 - chance))
+    return best
+
+
+def check_flat_tones() -> None:
+    """No flat area may come out as a lattice.
+
+    This is the regression that a real wallpaper found: error diffusion is
+    deterministic, so a large near-constant area does not become grain, it locks
+    into a regular grid of minority pixels. A near-black night sky did it, and
+    nothing in "is this a valid BMP" or "does the device draw it" could see it.
+
+    Asserted only on the tones the code actually claims to fix — the ones its
+    own shaping curve perturbs. Halfway between two levels the dither *should*
+    repeat: that is a one-pixel checkerboard, finer than the eye resolves and
+    the smoothest thing the panel can draw. A gate that demanded no repeat
+    there would be demanding a worse picture.
+    """
+    graded = worst = 0
+    worst_tone = None
+    for tone in range(4, 256, 6):
+        if mw._SPARSITY[tone] <= 0.5:          # checkerboard territory, left alone
+            continue
+        graded += 1
+        levels = mw.dither(Image.new("L", (56, 56), tone))
+        score = repeat_score(levels, 56, 56)
+        if score > worst:
+            worst, worst_tone = score, tone
+    check(f"flat tones dither to grain, not a lattice ({graded} tones graded)",
+          worst < 0.25, f"worst {worst:.2f} at tone {worst_tone}")
+
+    # The other half of the contract: a tone sitting exactly on a level is not
+    # dithered at all, so the nudge must not speckle it.
+    for level in (0, 85, 170, 255):
+        levels = mw.dither(Image.new("L", (48, 48), level))
+        if not check(f"a solid area at level {level} stays solid",
+                     len(set(levels)) == 1, f"{len(set(levels))} levels present"):
+            break
+
+
 def check_designed_failures() -> None:
     """The two traps the encoder is shaped around. If these ever stop failing,
     the reasoning in make_wallpaper.py has gone stale and should be re-read."""
@@ -496,6 +562,9 @@ def main() -> int:
 
         print("\n--mat waves:")
         check_waves(sources)
+
+        print("\nflat areas, where error diffusion locks into a pattern:")
+        check_flat_tones()
 
         print("\nthe failure modes we design around:")
         check_designed_failures()
