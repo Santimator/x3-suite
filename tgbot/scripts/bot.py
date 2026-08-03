@@ -281,6 +281,24 @@ class Bot:
                 self.browse(chat, dest)
             return self.submit(chat, work)
 
+        if job["kind"] == "wlrename":
+            src = Path(job["path"])
+            if not inside(self.workspace, src):
+                return self.say(chat, "⚠️ that file is outside the workspace.")
+            name = Path(text).name
+            if not name.lower().endswith(".bmp"):
+                name += ".bmp"
+            dest = safe_join(src.parent, name)
+            if dest.exists():
+                return self.say(chat, "⚠️ something is already called that.")
+            src.rename(dest)
+            # The preview beside it carries the same stem, so it follows.
+            png = src.with_suffix(".png")
+            if png.exists():
+                png.rename(dest.with_suffix(".png"))
+            return self.say(chat, f"✅ renamed to <code>{html.escape(dest.name)}</code>",
+                            [[("🖼 Wallpapers", "m:wl")]])
+
         if job["kind"] == "librename":
             src = Path(job["path"])
             if not inside(self.workspace, src):
@@ -697,13 +715,32 @@ class Bot:
 
     # -- the wallpaper collection ------------------------------------------
 
-    def show_wallpapers(self, chat) -> None:
-        """Everything built here, ready to go back on the card.
+    PAGE = 24                      # 8 x 3 cells, one comfortable phone-sized sheet
+
+    def sheet_rows(self, items: list, prefix: str, start: int = 1) -> list:
+        """Numbered buttons that line up with the numbers drawn on the sheet.
+
+        Five to a row: enough to reach across a phone without the digits
+        becoming a puzzle, and it divides 24 into neat rows of five.
+        """
+        rows, row = [], []
+        for i, payload in enumerate(items):
+            row.append((str(start + i), f"{prefix}{self.tokens.put(payload)}"))
+            if len(row) == 5:
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
+        return rows
+
+    def show_wallpapers(self, chat, page: int = 0) -> None:
+        """Everything built here, as one picture you can point at.
 
         The counterpart of 📚 Library and 🔤 Fonts: a collection that lives on
         the server, browsable and re-sendable. Pushing one never removed the
         file, so this is also the answer to "the card got wiped, put them all
-        back".
+        back" — which is exactly when you want to see thirty at once rather
+        than scroll thirty messages.
         """
         walls = suite.local_wallpapers()
         if not walls:
@@ -712,20 +749,50 @@ class Bot:
                 "🖼 No wallpapers built yet.\n\nSend me a picture and it "
                 "becomes one — they collect here afterwards.",
                 [[("📲 On the device", "wl:dev:")], [("🏠 Menu", "m:main")]])
+
+        pages = (len(walls) + self.PAGE - 1) // self.PAGE
+        page = max(0, min(page, pages - 1))
+        shown = walls[page * self.PAGE:(page + 1) * self.PAGE]
+        first = page * self.PAGE + 1
+
+        sheet = self.state_dir / "cache" / f"wallpapers-{page}.png"
+        report = suite.contact_sheet([w["path"] for w in shown], sheet, start=first)
+
         queued = {i["path"] for i in self.queue.items()}
-        rows = []
-        for w in walls[:20]:
-            mark = "📤 " if w["path"] in queued else ""
-            rows.append([(f"{mark}{w['name'][:30]} · {human(w['bytes'])}",
-                          f"wl:one:{self.tokens.put(w)}")])
+        lines = [f"🖼 <b>{len(walls)} wallpaper(s)</b>"
+                 + (f" — page {page + 1} of {pages}" if pages > 1 else "")]
+        for n, w in enumerate(shown, first):
+            mark = " 📤" if w["path"] in queued else ""
+            lines.append(f"{n} {html.escape(w['name'][:34])}{mark}")
+
+        rows = self.sheet_rows(shown, "wl:one:", first)
+        nav = []
+        if page:
+            nav.append(("◀ Back", f"wl:page:{page - 1}"))
+        if page + 1 < pages:
+            nav.append(("More ▶", f"wl:page:{page + 1}"))
+        if nav:
+            rows.append(nav)
         rows.append([("📲 On the device", "wl:dev:")])
         rows.append([("🏠 Menu", "m:main")])
-        self.say(chat, f"🖼 {len(walls)} built here"
-                       + (f", {len(queued & {w['path'] for w in walls})} queued"
-                          if queued else "") + ":", rows)
+        self.send_preview(chat, Path(report["png"]), "\n".join(lines)[:1000], rows)
 
     def on_wallpaper_callback(self, chat, rest: str) -> None:
         action, _, token = rest.partition(":")
+
+        if action == "page":
+            return self.submit(
+                chat, lambda: self.show_wallpapers(chat, int(token or 0)))
+
+        if action == "rn":
+            wall = self.tokens.get(token)
+            if not wall:
+                return self.stale(chat)
+            self.pending = {"kind": "wlrename", "path": wall["path"]}
+            return self.say(chat, f"Send me the new name for\n"
+                                  f"<code>{html.escape(Path(wall['path']).name)}</code>"
+                                  f"\n\n(the <code>.bmp</code> is added if you "
+                                  f"leave it off)")
 
         if action == "dev":
             def work():
@@ -753,7 +820,8 @@ class Bot:
                     f"<b>{html.escape(path.name)}</b>\n{human(wall['bytes'])}"
                     + ("\n📤 already queued" if queued else ""),
                     [[("📤 Queue for the device", f"wl:q:{token}")],
-                     [("🗑 Delete", f"wl:rm:{token}")],
+                     [("✏️ Rename", f"wl:rn:{token}"),
+                      ("🗑 Delete", f"wl:rm:{token}")],
                      [("🖼 Wallpapers", "m:wl")]])
             return self.submit(chat, work)
 
@@ -1020,15 +1088,32 @@ class Bot:
                         and e.get("name", "").lower().endswith(".bmp")]
                 if not bmps:
                     return self.say(chat, "No wallpapers here.")
-                self.say(chat, f"👁 {len(bmps)} wallpaper(s) — one message each, "
-                               f"so you can act on the one you recognise.")
-                for n, entry in enumerate(bmps[:10]):
-                    if n:
-                        # Telegram throttles a burst to one chat, and the
-                        # message *after* the burst is the one that pays.
-                        time.sleep(1)
-                    self.preview_bmp(chat, host, path, entry.get("name", ""),
-                                     entry.get("size", 0))
+                shown = bmps[:self.PAGE]
+                self.say(chat, f"👁 fetching {len(shown)} wallpaper(s) from the "
+                               f"reader…")
+                # Every one has to come across the wire regardless; what the
+                # sheet saves is the upload back, which used to be one message
+                # per wallpaper and a rate-limit at the end of it.
+                cache = self.state_dir / "cache" / "device"
+                local, payloads = [], []
+                for entry in shown:
+                    name = entry.get("name", "")
+                    full = f"{path.rstrip('/')}/{name}"
+                    dest = safe_join(cache, Path(name).name)
+                    suite.device.download(host, full, dest)
+                    local.append(dest)
+                    payloads.append({"parent": path, "name": name, "path": full,
+                                     "size": entry.get("size", 0)})
+                sheet = self.state_dir / "cache" / "device-sheet.png"
+                report = suite.contact_sheet(local, sheet)
+                lines = [f"🖼 <b>{len(shown)} on the reader</b> — "
+                         f"<code>{html.escape(path)}</code>"]
+                lines += [f"{n} {html.escape(e.get('name', '')[:34])}"
+                          for n, e in enumerate(shown, 1)]
+                rows = self.sheet_rows(payloads, "dev:f:")
+                rows.append([("📂 Back", f"dev:ls:{self.tokens.put(path)}")])
+                self.send_preview(chat, Path(report["png"]),
+                                  "\n".join(lines)[:1000], rows)
             return self.submit(chat, work)
 
         payload = self.tokens.get(token)
@@ -1059,10 +1144,15 @@ class Bot:
                 host, _ = self.device_host()
                 self.pending = {"kind": "devrename", "host": host,
                                 "path": full, "parent": parent}
+                warn = ("\n\n⚠️ If you are part-way through this book, the "
+                        "reader will forget your place: it keys reading state "
+                        "by path and does not follow a rename made from here."
+                        if name.lower().endswith((".epub", ".txt", ".xtc"))
+                        else "")
                 self.say(chat, f"Send me the new name for\n"
                                f"<code>{html.escape(name)}</code>\n\n"
                                f"(name only — no folders, and it may not start "
-                               f"with a dot)")
+                               f"with a dot){warn}")
             return self.submit(chat, work)
 
         if action == "rm":

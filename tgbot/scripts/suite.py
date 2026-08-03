@@ -182,6 +182,19 @@ def local_wallpapers() -> list:
     return out
 
 
+def contact_sheet(files: list, dest: Path, start: int = 1) -> dict:
+    """One numbered picture of many wallpapers.
+
+    Replaces a message per wallpaper with a single upload, which is both
+    cheaper and the end of the burst that used to earn a rate-limit. The
+    numbers drawn on the cells are what the buttons underneath refer to.
+    """
+    cmd = [PY_DEPS, "wallpaper-maker/scripts/contact_sheet.py", str(dest),
+           "--start", str(start)] + [str(f) for f in files]
+    rc, out, err = run(cmd, timeout=300)
+    return _json_out(rc, out, err, "contact sheet")
+
+
 def bmp_preview(bmp: Path, png: Path) -> dict:
     """Render a wallpaper as the *panel* would draw it.
 

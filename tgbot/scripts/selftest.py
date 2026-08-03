@@ -467,6 +467,15 @@ def check_wallpaper_collection(tmp: Path) -> None:
         suite.WALLPAPER_OUT = build
         suite.bmp_preview = lambda bmp, png: (Path(png).write_bytes(b"x"),
                                               {"png": str(png)})[-1]
+        # The sheet needs Pillow; this gate must not. Stub it and check the
+        # thing that matters here — that the numbers, the caption and the
+        # buttons all describe the same wallpapers.
+        suite.contact_sheet = lambda files, dest, start=1: (
+            Path(dest).parent.mkdir(parents=True, exist_ok=True),
+            Path(dest).write_bytes(b"x"),
+            {"png": str(dest), "count": len(files), "items": [
+                {"n": start + i, "name": Path(f).name} for i, f in enumerate(files)]}
+        )[-1]
 
         tg.sent.clear()
         bot.handle(cb("m:wl"))
@@ -478,12 +487,20 @@ def check_wallpaper_collection(tmp: Path) -> None:
 
         tg.sent.clear()
         bot.handle(cb("m:wl"))
-        labels = [b[0] for row in (tg.sent[-1]["keyboard"] or []) for b in row]
+        caption = tg.sent[-1]["text"]
         check("a pushed wallpaper is still listed afterwards",
-              any("dawn.bmp" in x for x in labels), str(labels))
+              "dawn.bmp" in caption, caption)
+        check("the overview is one picture, not one per wallpaper",
+              len(tg.sent) == 1 and "photo" in tg.sent[-1], str(len(tg.sent)))
 
+        # The caption numbers the wallpapers; the buttons carry those numbers.
+        order = [line.split(" ", 1) for line in caption.splitlines()[1:]]
+        index = next(n for n, name in order if "dawn.bmp" in name)
+        labels = [b[0] for row in (tg.sent[-1]["keyboard"] or []) for b in row]
+        check("every listed wallpaper has a numbered button",
+              all(n in labels for n, _ in order), f"{labels} vs {order}")
         one = [b[1] for row in (tg.sent[-1]["keyboard"] or []) for b in row
-               if "dawn" in b[0]][0]
+               if b[0] == index][0]
         tg.sent.clear()
         bot.handle(cb(one))
         check("tapping it renders a preview even with no PNG beside it",
@@ -502,9 +519,19 @@ def check_wallpaper_collection(tmp: Path) -> None:
 
         tg.sent.clear()
         bot.handle(cb("m:wl"))
-        check("the listing marks what is already queued",
-              any("📤" in b[0] for row in (tg.sent[-1]["keyboard"] or [])
-                  for b in row), str(tg.sent[-1]["keyboard"]))
+        check("the caption marks what is already queued",
+              "📤" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+
+        # Renaming takes the preview along with it, or the pair comes apart.
+        (build / "harbour.png").write_bytes(b"x")
+        tok = bot.tokens.put({"path": str(build / "harbour.bmp"), "bytes": 2,
+                              "name": "harbour.bmp", "png": None})
+        bot.handle(cb(f"wl:rn:{tok}"))
+        bot.handle(msg("sunrise"))
+        check("renaming adds .bmp and moves the preview too",
+              (build / "sunrise.bmp").exists() and (build / "sunrise.png").exists()
+              and not (build / "harbour.bmp").exists(),
+              str(sorted(p.name for p in build.iterdir())))
 
         # Deleting here removes the server copy only — the card keeps its own.
         rm = one.replace("wl:one:", "wl:rm!:")
@@ -743,6 +770,19 @@ def check_device_menu(tmp: Path) -> None:
     check("... case-insensitively, as the firmware scans",
           "👁 Preview" in menu_for("SHOT.BMP"))
     check("a book does not", "👁 Preview" not in menu_for("book.epub"))
+
+    # Renaming a book on the device costs your reading position — the firmware
+    # keys it by path and the web handlers never repoint it. Say so first.
+    bot.device_host = lambda: ("10.0.0.5", {})
+    for name, expected in (("book.epub", True), ("shot.bmp", False)):
+        token = bot.tokens.put({"parent": "/", "name": name,
+                                "path": f"/{name}", "size": 1})
+        tg.sent.clear()
+        bot.handle(cb(f"dev:rn:{token}"))
+        said = "forget your place" in tg.sent[-1]["text"]
+        check(f"renaming {name} warns about reading position: {expected}",
+              said is expected, tg.sent[-1]["text"][:120])
+    bot.pending = None      # asking for a name leaves one waiting; this is a test
 
     # A folder can only be renamed through WebDAV, and WebDAV refuses every
     # path containing a dot-prefixed segment — so /.sleep must be turned down

@@ -108,16 +108,34 @@ and `MIN_MAT_AREA` are judgement calls that live in `make_wallpaper.py`, and
 
 ### The wallpapers you have built
 
-**🖼 Wallpapers** lists them newest first, marks the ones already queued, and
-opens each as the picture the panel would draw — rendered on demand through
-`crosspoint_bmp` if the `.png` beside it is missing, which it will be for
-anything built before `--preview` or straight from the CLI. From there: queue it
-for the reader, or delete the server copy (which never touches the card).
+**🖼 Wallpapers** shows them as **one contact sheet** — 24 numbered thumbnails
+in a single image, newest first, with the names and queue marks in the caption
+and numbered buttons underneath. Tap a number for the full-size preview, then
+queue, rename or delete it.
+
+The numbers are the whole design. A sheet you cannot point at is decoration, so
+`contact_sheet.py` draws each cell's index onto it and the buttons carry the
+same numbers. Past 24 it pages rather than growing the image, because Telegram
+recompresses anything large and the digits are the first thing to go.
+
+It is also the cheap shape. Showing a folder one message at a time costs an
+upload each, and a burst of them earns a rate-limit — which once swallowed a
+delete confirmation and made the button look broken. One sheet is one upload
+however many wallpapers there are, and the pacing hack that worked around it is
+gone.
+
+Thumbnails are decoded with Pillow rather than through `crosspoint_bmp`, which
+is the opposite of the rule everywhere else in this repo and deliberate: at
+110 px across, what the firmware would do with the dithering is invisible, and
+Pillow is about eight times faster per file. The *single* preview still goes
+through the port, because that is where "what the panel actually draws" is the
+entire question — including rendering one on demand when the `.png` beside the
+BMP is missing, as it will be for anything built before `--preview`.
 
 Queueing the same file twice is refused rather than doubled, since re-sending
-one you already queued is a slip, not an instruction. **📲 On the device** jumps
-to the folder the reader actually reads, so "what do I have" and "what does it
-have" are one tap apart.
+one you already queued is a slip, not an instruction. Renaming takes the
+preview PNG along with it. **📲 On the device** jumps to the folder the reader
+actually reads — and shows *that* as a contact sheet too.
 
 This is what makes a wiped SD card a non-event: everything you ever built is
 still here, and putting it all back is a few taps.
@@ -149,6 +167,14 @@ never answered removes nothing.
 
 **📂 Browse** lists the SD card. Folders navigate; files offer **✏️ Rename**,
 **🗑 Delete** (twice, always), and **⬇️ Pull to server**.
+
+**Renaming a book on the device costs you your place, and the bot says so
+before you do it.** CrossPoint keys reading state by *path* — `RecentBook`
+compares paths — and ships `RecentBooksStore::repointPath(old, new)` written for
+exactly this case. `CrossPointWebServer.cpp` never calls it, so a rename or
+move made from here orphans the entry and clears the parsed cache under
+`/.crosspoint/`. Device-confirmed 2026-08. The warning appears only for
+readable formats, since a wallpaper has no place to lose.
 
 This is the half of the bot with no alternative anywhere else in the repo.
 Everything else is a nicer front end for a script you could run over ssh;
