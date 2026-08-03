@@ -102,8 +102,12 @@ and `MIN_MAT_AREA` are judgement calls that live in `make_wallpaper.py`, and
 ### A push session
 
 **📲 Device → Push queue** tells you to open File Transfer on the X3, then
-waits for **✅ Ready**. Then it runs `push_wallpaper.py --json` and reports a
-line per file. Only the files the push script says landed leave the queue —
+waits for **✅ Ready**. That tap is acknowledged *immediately*, before anything
+slow runs — finding the reader takes seconds and the worker may be busy with
+something else, and a tap that produces silence reads as a tap that missed.
+A second line lands once the reader answers, naming it and saying what is
+about to go across, because between there and the report is the quiet stretch:
+a 4 MB book over WiFi is a minute on its own. Then a line per file. Only the files the push script says landed leave the queue —
 a partial success removes exactly the part that succeeded, and a device that
 never answered removes nothing.
 

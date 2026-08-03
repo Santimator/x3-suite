@@ -256,7 +256,11 @@ def check_push_is_all_or_nothing(tmp: Path) -> None:
                   meta={"author": "Someone", "title": "A Book"})
 
     bot.device_host = no_reader
-    bot.do_push(bot.user_id)
+    tg.sent.clear()
+    bot.handle(cb("push:go"))
+    check("tapping Ready is acknowledged before anything slow happens",
+          tg.sent and "Listening" in tg.sent[0]["text"],
+          tg.sent[0]["text"] if tg.sent else "silence")
     check("nothing is removed — wallpapers or books",
           len(bot.queue) == 2, str(bot.queue.items()))
     check("and it says so out loud",

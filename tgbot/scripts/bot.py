@@ -314,6 +314,14 @@ class Bot:
             if rest == "ask":
                 return self.ask_push(chat)
             if rest == "go":
+                if not len(self.queue):
+                    return self.say(chat, "Nothing queued.",
+                                    [[("🏠 Menu", "m:main")]])
+                # Said here rather than inside do_push, and before anything
+                # slow: finding the reader takes seconds, and the worker may be
+                # busy with something else entirely. A tap that produces
+                # silence reads as a tap that missed.
+                self.say(chat, "📡 Listening for the reader…")
                 return self.submit(chat, lambda: self.do_push(chat))
 
         if head == "dev":
@@ -1030,10 +1038,23 @@ class Bot:
                 f"<pre>{html.escape(str(exc)[:400])}</pre>",
                 [[("Try again", "push:ask")], [("🏠 Menu", "m:main")]])
 
+        walls = [i for i in live if i.get("kind") != "book"]
+        books = [i for i in live if i.get("kind") == "book"]
+        # The reader is there and the work has started. Between here and the
+        # report is the long quiet stretch — a 4 MB book over WiFi is a minute
+        # on its own — so say what is about to happen and in what order.
+        parts = []
+        if walls:
+            parts.append(f"{len(walls)} wallpaper(s)")
+        if books:
+            parts.append(f"{len(books)} book(s)")
+        self.say(chat, f"📲 Found it at <code>{html.escape(host)}</code>.\n"
+                       f"Sending {' and '.join(parts)} — keep the reader on that "
+                       f"screen.")
+
         lines = [f"📲 {host}"]
         done = []
 
-        walls = [i for i in live if i.get("kind") != "book"]
         if walls:
             report = suite.push([i["path"] for i in walls], host=host)
             landed = {r["name"] for r in report.get("items", []) if r.get("ok")}
@@ -1048,7 +1069,6 @@ class Bot:
             if report.get("sleep_mode_set"):
                 lines.append("Sleep screen set to Custom.")
 
-        books = [i for i in live if i.get("kind") == "book"]
         if books:
             lines.append("📕 SD root")
             for item in books:
