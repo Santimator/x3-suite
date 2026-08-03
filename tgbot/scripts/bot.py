@@ -109,7 +109,7 @@ class Bot:
                 fn()
             except Exception as exc:                      # never kill the worker
                 log("job failed:", traceback.format_exc().strip().splitlines()[-1])
-                self.say(chat, f"⚠️ {exc}")
+                self._blame(chat, exc)
             finally:
                 self._jobs.task_done()
 
@@ -120,9 +120,22 @@ class Bot:
             try:
                 fn()
             except Exception as exc:
-                self.say(chat, f"⚠️ {exc}")
+                self._blame(chat, exc)
         else:
             self._jobs.put((fn, chat))
+
+    def _blame(self, chat, exc: Exception) -> None:
+        """Every unhandled failure ends here, and one of them is not a bug.
+
+        A reader that is not on its File Transfer screen is the single most
+        common thing to go wrong, and it reaches this point from browsing,
+        previewing, renaming and pushing alike. Answering all of them with the
+        same offer to name the address costs one branch and saves repeating it
+        at a dozen call sites.
+        """
+        if isinstance(exc, suite.DeviceError):
+            return self.no_reader(chat, str(exc))
+        self.say(chat, f"⚠️ {exc}")
 
     def say(self, chat, text: str, keyboard=None):
         try:
@@ -221,6 +234,24 @@ class Bot:
                 suite.device.rename(job["host"], job["path"], text)
                 self.say(chat, f"✅ renamed to <code>{html.escape(text)}</code>")
                 self.browse(chat, job["parent"])
+            return self.submit(chat, work)
+
+        if job["kind"] == "devaddr":
+            # Whatever the device screen shows, pasted from a phone: an IP, a
+            # name, sometimes with http:// in front of it and a slash after.
+            host = text.strip().split("//")[-1].split("/")[0].split()[0]
+            host = host.strip("<>[] ")
+
+            def work():
+                info = suite.device.status(host)      # raises if it is not there
+                suite.device.remember(host)
+                self.say(chat,
+                         f"📲 Found it at <code>{html.escape(host)}</code> — "
+                         f"{info.get('model', 'reader')}, firmware "
+                         f"{info.get('version', '?')}.\n\n"
+                         f"Remembered, so I will try this one first from now on.",
+                         [[("📤 Push queue", "push:ask"), ("📂 Browse", "dev:ls0:")],
+                          [("🏠 Menu", "m:main")]])
             return self.submit(chat, work)
 
         if job["kind"] == "devdirrename":
@@ -333,6 +364,34 @@ class Bot:
             if not path:
                 return self.stale(chat)
             return self.submit(chat, lambda: self.route_local(chat, Path(path)))
+
+    def no_reader(self, chat, detail: str = "", retry: str | None = None) -> None:
+        """The one failure that happens to everybody, answered usefully.
+
+        The underlying error is `push_wallpaper.py`'s, and it ends by
+        suggesting `--ip 192.168.x.x` — sound advice at a terminal and useless
+        in a chat window. So the bot says it its own way, and offers the thing
+        the flag would have done.
+        """
+        rows = []
+        if retry:
+            rows.append([("🔁 Try again", retry)])
+        rows.append([("📍 Enter its address", "dev:addr:")])
+        rows.append([("🏠 Menu", "m:main")])
+        self.say(chat,
+                 "📵 <b>No reader found.</b>\n\n"
+                 "Tried the address that worked last time, "
+                 "<code>crosspoint.local</code>, and a discovery ping on this "
+                 "network.\n\n"
+                 "On the X3: <b>Home → File Transfer → Join a Network</b>. It "
+                 "prints an address on that screen — send it to me and I will "
+                 "remember it."
+                 # Only the first line of the underlying error. It names the
+                 # addresses actually tried, which is worth having; the rest is
+                 # the command-line advice this button replaces.
+                 + (f"\n\n<i>{html.escape(detail.splitlines()[0][:200])}</i>"
+                    if detail.strip() else ""),
+                 rows)
 
     def stale(self, chat) -> None:
         self.say(chat, "That menu is from before a restart — open it again.",
@@ -742,6 +801,7 @@ class Bot:
                        "<b>Home → File Transfer → Join a Network</b>.",
                  [[("🔎 Find it", "dev:st:"), ("📂 Browse", "dev:ls0:")],
                   [("🖼 Wallpapers", "dev:wp:"), ("📤 Push queue", "push:ask")],
+                  [("📍 Set its address", "dev:addr:")],
                   [("🏠 Menu", "m:main")]])
 
     def device_host(self):
@@ -760,6 +820,15 @@ class Bot:
                                f"free heap: {info.get('freeHeap', '?')}",
                          [[("📂 Browse", "dev:ls0:")], [("🏠 Menu", "m:main")]])
             return self.submit(chat, work)
+
+        if action == "addr":
+            self.pending = {"kind": "devaddr"}
+            return self.say(
+                chat,
+                "📍 Send me the address the X3 is showing on its <b>File "
+                "Transfer</b> screen.\n\n"
+                "An IP like <code>192.168.1.42</code> is what you want; a name "
+                "works too. I will check it answers before keeping it.")
 
         if action == "ls0":
             return self.submit(chat, lambda: self.browse(chat, "/"))
@@ -1032,11 +1101,8 @@ class Bot:
         try:
             host, _ = self.device_host()
         except suite.DeviceError as exc:
-            return self.say(
-                chat,
-                "📵 No reader found — the queue is untouched.\n\n"
-                f"<pre>{html.escape(str(exc)[:400])}</pre>",
-                [[("Try again", "push:ask")], [("🏠 Menu", "m:main")]])
+            self.say(chat, "The queue is untouched — nothing was sent.")
+            return self.no_reader(chat, str(exc), retry="push:ask")
 
         walls = [i for i in live if i.get("kind") != "book"]
         books = [i for i in live if i.get("kind") == "book"]

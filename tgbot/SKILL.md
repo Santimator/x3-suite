@@ -101,6 +101,17 @@ and `MIN_MAT_AREA` are judgement calls that live in `make_wallpaper.py`, and
 
 ### A push session
 
+**When it cannot be found** — the commonest thing to go wrong, since the
+reader's web server only runs while that screen is up — every device action
+answers the same way: the queue is untouched, and you are offered **📍 Enter
+its address**. Send whatever the File Transfer screen shows (`192.168.1.42`,
+or with `http://` and a slash still attached, or a name), it is checked and
+then *remembered*, so everything afterwards finds the reader first time. The
+same button sits on the 📲 Device card for a network where mDNS never works.
+The underlying error comes from `push_wallpaper.py` and ends by suggesting
+`--ip 192.168.x.x`; that line is deliberately not repeated into a chat, where
+it is advice you cannot take.
+
 **📲 Device → Push queue** tells you to open File Transfer on the X3, then
 waits for **✅ Ready**. That tap is acknowledged *immediately*, before anything
 slow runs — finding the reader takes seconds and the worker may be busy with

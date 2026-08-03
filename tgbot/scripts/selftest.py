@@ -266,6 +266,32 @@ def check_push_is_all_or_nothing(tmp: Path) -> None:
     check("and it says so out loud",
           any("No reader" in s["text"] for s in tg.sent), str(tg.sent[-1]))
 
+    # The underlying error is push_wallpaper.py's, and it signs off with
+    # "--ip 192.168.x.x" — sound at a terminal, unusable in a chat. The chat
+    # gets a button instead, and must never quote the flag.
+    everything = " ".join(s["text"] for s in tg.sent)
+    check("no command-line advice leaks into the chat", "--ip" not in everything,
+          everything[-200:])
+    check("... and there is a way to give the address instead",
+          any(b[1] == "dev:addr:" for s in tg.sent
+              for row in (s["keyboard"] or []) for b in row), str(tg.sent[-1]))
+
+    # Whatever the File Transfer screen shows, pasted from a phone.
+    seen = {}
+    orig_status, orig_remember = suite.device.status, suite.device.remember
+    try:
+        suite.device.status = lambda h, **k: seen.setdefault("host", h) and {} or {}
+        suite.device.remember = lambda h: seen.__setitem__("kept", h)
+        for typed in ("192.168.1.42", "http://192.168.1.42/", "  crosspoint.local  "):
+            seen.clear()
+            bot.handle(cb("dev:addr:"))
+            bot.handle(msg(typed))
+            check(f"{typed!r} is understood as an address",
+                  seen.get("kept") in ("192.168.1.42", "crosspoint.local"),
+                  str(seen))
+    finally:
+        suite.device.status, suite.device.remember = orig_status, orig_remember
+
     # One lands, one fails: exactly the one that landed leaves.
     print("\na push where one file lands and one does not:")
     bot, tg = make_bot(tmp)
