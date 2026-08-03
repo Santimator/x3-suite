@@ -90,6 +90,12 @@ class Bot:
         self.notes = Notes(self.state_dir / "notes.json")
         self.tokens = Tokens()
         self.pending = None           # what the next plain text message means
+        # A contact sheet stays on screen while you tick things off it, so the
+        # bot has to remember what each sheet message is showing. Keyed by
+        # message id, in memory: a restart makes the buttons stale, which is
+        # answered rather than guessed at.
+        self.sheets = {}
+        self.selected = set()
         self.max_bytes = int(cfg.get("max_download_mb", 20)) * 1024 * 1024
         self._jobs = queuelib.Queue()
         self._worker = None
@@ -340,7 +346,8 @@ class Bot:
         if head == "fo":
             return self.on_font_callback(chat, rest)
         if head == "wl":
-            return self.on_wallpaper_callback(chat, rest)
+            return self.on_wallpaper_callback(
+                chat, rest, (cb.get("message") or {}).get("message_id"))
 
         if head == "wp":                       # wp:<token>:<mat>
             token, _, mat = rest.partition(":")
@@ -518,13 +525,13 @@ class Bot:
                           f"✅ {bmp.name} — queued ({len(self.queue)} waiting).",
                           [[("📲 Push now", "push:ask"), ("🏠 Menu", "m:main")]])
 
-    def send_preview(self, chat, png: Path, caption: str, keyboard) -> None:
+    def send_preview(self, chat, png: Path, caption: str, keyboard):
         try:
             if png.exists():
                 return self.tg.send_photo(chat, png, caption, keyboard)
         except TelegramError as exc:
             log("preview failed:", exc)
-        self.say(chat, caption, keyboard)
+        return self.say(chat, caption, keyboard)
 
     # -- books and PDFs ----------------------------------------------------
 
@@ -765,7 +772,45 @@ class Bot:
             mark = " 📤" if w["path"] in queued else ""
             lines.append(f"{n} {html.escape(w['name'][:34])}{mark}")
 
-        rows = self.sheet_rows(shown, "wl:one:", first)
+        sent = self.send_preview(chat, Path(report["png"]),
+                                 "\n".join(lines)[:1000],
+                                 self.sheet_keyboard(shown, page, pages, first))
+        if sent and sent.get("message_id"):
+            self.sheets[sent["message_id"]] = {"walls": shown, "page": page,
+                                               "pages": pages, "start": first}
+
+    def sheet_keyboard(self, shown: list, page: int, pages: int, first: int,
+                       picking: bool = False) -> list:
+        """The buttons under a sheet, in either of its two moods.
+
+        Browsing: a number opens that wallpaper. Picking: a number ticks it,
+        and the same numbers stay in the same places — the point of ticking off
+        a contact sheet is that your eye stays on the picture while your thumb
+        works down the row.
+        """
+        rows, row = [], []
+        for i, w in enumerate(shown):
+            n = first + i
+            if picking:
+                ticked = w["path"] in self.selected
+                row.append((f"{'☑' if ticked else '☐'}{n}", f"wl:t:{n}"))
+            else:
+                row.append((str(n), f"wl:one:{self.tokens.put(w)}"))
+            if len(row) == 5:
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
+
+        if picking:
+            here = {w["path"] for w in shown}
+            rows.append([(f"🗑 Delete {len(self.selected)}", "wl:del:")]
+                        if self.selected else [("Tap the numbers to pick", "wl:nop:")])
+            rows.append([("All", "wl:all:"), ("None", "wl:none:"),
+                         ("✖ Done", "wl:browse:")]
+                        if here else [("✖ Done", "wl:browse:")])
+            return rows
+
         nav = []
         if page:
             nav.append(("◀ Back", f"wl:page:{page - 1}"))
@@ -773,12 +818,79 @@ class Bot:
             nav.append(("More ▶", f"wl:page:{page + 1}"))
         if nav:
             rows.append(nav)
-        rows.append([("📲 On the device", "wl:dev:")])
+        rows.append([("☑ Pick several", "wl:pick:"),
+                     ("📲 On the device", "wl:dev:")])
         rows.append([("🏠 Menu", "m:main")])
-        self.send_preview(chat, Path(report["png"]), "\n".join(lines)[:1000], rows)
+        return rows
 
-    def on_wallpaper_callback(self, chat, rest: str) -> None:
+    def redraw_sheet(self, chat, msg_id, picking: bool) -> bool:
+        """Swap the keyboard under a sheet that is already on screen."""
+        sheet = self.sheets.get(msg_id)
+        if not sheet:
+            return False
+        self.tg.edit_markup(chat, msg_id,
+                            self.sheet_keyboard(sheet["walls"], sheet["page"],
+                                                sheet["pages"], sheet["start"],
+                                                picking))
+        return True
+
+    def on_wallpaper_callback(self, chat, rest: str, msg_id=None) -> None:
         action, _, token = rest.partition(":")
+
+        # -- picking several off the sheet ---------------------------------
+        if action == "nop":
+            return
+        if action in ("pick", "browse", "all", "none", "t"):
+            sheet = self.sheets.get(msg_id)
+            if not sheet:
+                return self.stale(chat)
+            here = [w["path"] for w in sheet["walls"]]
+            if action == "pick":
+                self.selected.clear()
+            elif action == "browse":
+                self.selected.clear()
+            elif action == "all":
+                self.selected.update(here)
+            elif action == "none":
+                self.selected.difference_update(here)
+            else:                                   # a single number toggled
+                try:
+                    path = sheet["walls"][int(token) - sheet["start"]]["path"]
+                except (ValueError, IndexError):
+                    return self.stale(chat)
+                self.selected.symmetric_difference_update({path})
+            return self.redraw_sheet(chat, msg_id, action != "browse")
+
+        if action == "del":
+            if not self.selected:
+                return self.say(chat, "Nothing picked.")
+            names = sorted(Path(p).name for p in self.selected)
+            listed = "\n".join(f"· {html.escape(n)}" for n in names[:15])
+            more = f"\n… and {len(names) - 15} more" if len(names) > 15 else ""
+            return self.say(
+                chat,
+                f"Delete <b>{len(names)}</b> wallpaper(s) from the server?\n"
+                f"{listed}{more}\n\n"
+                f"Any already on the reader stay there.",
+                [[("Yes, delete them", f"wl:del!:{msg_id or 0}"),
+                  ("No", "wl:browse:")]])
+
+        if action == "del!":
+            gone, kept = 0, []
+            for p in sorted(self.selected):
+                path = Path(p)
+                if not inside(self.workspace, path):
+                    kept.append(path.name)
+                    continue
+                path.unlink(missing_ok=True)
+                path.with_suffix(".png").unlink(missing_ok=True)
+                gone += 1
+            self.selected.clear()
+            self.sheets.pop(int(token) if token.isdigit() else None, None)
+            note = (f"\n⚠️ left alone, outside the workspace: "
+                    f"{html.escape(', '.join(kept))}" if kept else "")
+            self.say(chat, f"🗑 {gone} deleted.{note}")
+            return self.submit(chat, lambda: self.show_wallpapers(chat))
 
         if action == "page":
             return self.submit(

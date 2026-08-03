@@ -155,6 +155,24 @@ class Telegram:
                 return {}
             raise
 
+    def edit_markup(self, chat_id, message_id, keyboard) -> dict:
+        """Replace a message's buttons, leaving the message alone.
+
+        What makes a tick-list feel live: the sheet stays put and only the
+        keyboard under it changes. `editMessageText` cannot be used here at all
+        — the sheet is a photo, and a photo has a caption, not text.
+        """
+        try:
+            return self._post("editMessageReplyMarkup", {
+                "chat_id": chat_id, "message_id": message_id,
+                "reply_markup": _markup(keyboard) or json.dumps(
+                    {"inline_keyboard": []}),
+            })
+        except TelegramError as exc:
+            if "not modified" in str(exc):
+                return {}
+            raise
+
     def send_photo(self, chat_id, photo: Path, caption: str = "",
                    keyboard=None) -> dict:
         return self._post("sendPhoto",

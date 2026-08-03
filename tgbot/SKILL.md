@@ -132,6 +132,18 @@ through the port, because that is where "what the panel actually draws" is the
 entire question — including rendering one on demand when the `.png` beside the
 BMP is missing, as it will be for anything built before `--preview`.
 
+**☑ Pick several** turns the numbers into tick boxes *in the same places*, so
+your eye stays on the picture while your thumb works down the row. Tap the ones
+you don't want, then **🗑 Delete 4** — one confirmation naming them, and they
+are gone. That is the shape a contact sheet earns: deciding by looking, rather
+than open-check-delete-open-check-delete.
+
+The keyboard is swapped with `editMessageReplyMarkup`, so the sheet itself
+never moves — a photo has a caption rather than text, so its buttons are the
+only part that can change. What each sheet is showing is remembered by message
+id, in memory, which means a sheet from before a restart cannot be ticked
+against; it says so instead of acting on the wrong wallpapers.
+
 Queueing the same file twice is refused rather than doubled, since re-sending
 one you already queued is a slip, not an instruction. Renaming takes the
 preview PNG along with it. **📲 On the device** jumps to the folder the reader

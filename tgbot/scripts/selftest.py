@@ -61,7 +61,7 @@ class FakeTelegram:
 
     def send_photo(self, chat_id, photo, caption="", keyboard=None):
         self.sent.append({"chat": chat_id, "text": caption, "photo": str(photo),
-                          "keyboard": keyboard})
+                          "keyboard": keyboard, "message_id": len(self.sent) + 1})
         return {"message_id": len(self.sent)}
 
     def send_document(self, chat_id, doc, caption=""):
@@ -77,6 +77,13 @@ class FakeTelegram:
         return dest
 
     def edit_message(self, *a, **kw):
+        return {}
+
+    def edit_markup(self, chat_id, message_id, keyboard):
+        # Record the swap the way Telegram would show it: same message, new
+        # buttons.
+        self.sent.append({"chat": chat_id, "text": "(markup)",
+                          "keyboard": keyboard, "edited": message_id})
         return {}
 
 
@@ -521,6 +528,54 @@ def check_wallpaper_collection(tmp: Path) -> None:
         bot.handle(cb("m:wl"))
         check("the caption marks what is already queued",
               "📤" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+
+        # Picking several off the sheet, which is the whole point of a sheet:
+        # tap tap tap, one confirmation, gone.
+        tg.sent.clear()
+        bot.handle(cb("m:wl"))
+        mid = tg.sent[-1]["message_id"]
+
+        def press(data):
+            tg.sent.clear()
+            bot.handle({"update_id": 1, "callback_query": {
+                "id": "c", "data": data, "from": {"id": OWNER},
+                "message": {"message_id": mid, "chat": {"id": OWNER}}}})
+            return tg.sent[-1]
+
+        labels = lambda m: [b[0] for r in (m["keyboard"] or []) for b in r]
+        check("the sheet offers a way to pick several",
+              any("Pick" in x for x in labels(tg.sent[-1])), str(labels(tg.sent[-1])))
+
+        picking = press("wl:pick:")
+        check("picking swaps the same numbers for tick boxes, in place",
+              all(x.startswith("☐") for x in labels(picking)[:2])
+              and picking.get("edited") == mid, str(labels(picking)))
+
+        ticked = press("wl:t:1")
+        check("a number ticks", "☑1" in labels(ticked), str(labels(ticked)))
+        check("and the delete button counts what is picked",
+              any("Delete 1" in x for x in labels(ticked)), str(labels(ticked)))
+        check("tapping it again unticks", "☐1" in labels(press("wl:t:1")))
+
+        press("wl:t:1")
+        first_name = Path(bot.sheets[mid]["walls"][0]["path"]).name
+        confirm = press("wl:del:")
+        check("deleting several asks once, and names them",
+              "Delete <b>1</b>" in confirm["text"] and first_name in confirm["text"],
+              confirm["text"][:120])
+        press(f"wl:del!:{mid}")
+        check("... and then they are gone", not (build / first_name).exists(),
+              str(sorted(p.name for p in build.iterdir())))
+        check("the picks are forgotten afterwards", not bot.selected)
+
+        (build / first_name).write_bytes(b"BM")        # put it back for later checks
+
+        # A sheet from before a restart cannot be ticked against.
+        bot.sheets.clear()
+        stale_reply = press("wl:t:1")
+        check("a sheet the bot no longer remembers says so",
+              "stale" in stale_reply["text"] or "restart" in stale_reply["text"],
+              stale_reply["text"][:80])
 
         # Renaming takes the preview along with it, or the pair comes apart.
         (build / "harbour.png").write_bytes(b"x")
