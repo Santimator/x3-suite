@@ -249,11 +249,12 @@ here on a real CPU. The result ships as a 4-bpp file the reader maps straight
 through, so the panel sees exactly what it would have computed from a full-tone
 image, at a sixth of the bytes and none of its own work.
 
-That matters because the firmware's quantiser isn't an even ramp: it thresholds
-at 30/50/140 and treats the four states as 15/30/80/210, which is why a night
-sky comes out solid black instead of stippled. `--dither floyd` substitutes our
-own error diffusion, which aims at an even ramp and gets midtones too dark —
-kept for comparison, not for use.
+One wrinkle worth knowing, because it bit us: that function ships **two** sets
+of constants, and the live one is labelled *"fine-tuned to X4 eink display"*.
+On an X3 it renders visibly too bright. So we run the firmware's algorithm with
+the firmware's *other*, disabled set — the even 0/85/170/255 ramp — which is
+right for this panel. Shipping 4-bpp is what makes that possible: the reader
+maps the file straight through, so its X4 tuning never runs.
 
 An image too small to fill the panel isn't blown up to fit — enlargement stops
 at 1.5x and the rest becomes a **mat**: four sectors mitred from the panel

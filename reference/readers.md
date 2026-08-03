@@ -152,7 +152,7 @@ pushes them.
 | Enabled by | Settings → Display → Sleep Screen = **Custom** (enum index 2; `COVER` draws the open book's cover instead, `COVER_CUSTOM` does both by context) |
 | Bit depths accepted | 1, 2, 4, 8, 24, 32; `BI_RGB` only (`BI_BITFIELDS` for 32) |
 | Palette offset | Read from a **fixed offset after the first 40 DIB bytes** — not from `biSize`, not from `bfOffBits`. A BITMAPV4/V5 header feeds colour-space fields to the palette reader |
-| **The four states are not evenly spaced** | `AtkinsonDitherer::processPixel` thresholds at **30 / 50 / 140** and reconstructs the states as **15 / 30 / 80 / 210** (`lib/GfxRenderer/BitmapHelpers.h`, comment: "fine-tuned to X4 eink display"; no X3 branch). That is the firmware's own model of what the glass shows, and it is strongly non-linear. It is why an undithered file beats a pre-dithered one on dark photographs: anything under 30 goes solid black carrying an error of only `(v-15)/8`, so a night sky stays black instead of being stippled. Anything quantising off-device should aim at these numbers, not at an even ramp |
+| **The dither ships two tunings, and runs the wrong one here** | `AtkinsonDitherer::processPixel` and `FloydSteinbergDitherer::processPixel` each contain an even ramp (thresholds **43/128/213** → **0/85/170/255**) behind `if (false)`, and a live override labelled *"fine-tuned to X4 eink display"* (thresholds **30/50/140** → **15/30/80/210**). There is no X3 branch. **Device-confirmed 2026-08: the live X4 tuning is visibly too bright on an X3** — its reconstruction values sit below what the panel shows, so `error = adjusted - quantizedValue` runs too positive and each pixel pushes its neighbours lighter (at input 128 it charges +48 where the true error is about -42; ~30 levels of lift on a photograph). Quantise off-device against the **even** ramp, and ship 4-bpp so the live branch never runs. Upstream issue candidate |
 | Native palette | If every palette entry's luma is within ±21 of 0/85/170/255, the firmware maps pixels straight through (`lum >> 6`) and **dithers nothing**. Otherwise it re-dithers on-device (Atkinson). `adjustPixel` is identity — shipped with `USE_BRIGHTNESS = false` |
 | Grey vs BW | `hasGreyscale()` is `bpp > 1`: a 1-bpp file gets the plain BW waveform, never the four-level grey pipeline |
 | Size | Panel-exact **528×792**. Larger is scaled down and centred; **smaller is never scaled up** — it is centred in black |
@@ -165,10 +165,9 @@ Two shapes work, and they are a real choice:
   ESP32 redoes the arithmetic on every sleep.
 - **528×792, 4-bpp indexed, 40-byte DIB header, palette on 0/85/170/255,
   pre-quantised** — trips the native-palette test, so the panel shows exactly
-  the pixels computed off-device, at a sixth of the bytes. **Quantise against
-  15/30/80/210, not an even ramp** (see the row above), and the result is
-  identical to what the device would have produced from the full-tone file.
-  This is what `wallpaper-maker/` does.
+  the pixels computed off-device, at a sixth of the bytes, and the firmware's
+  X4-tuned dither never runs. This is what `wallpaper-maker/` does, quantising
+  with the firmware's algorithm against the **even** ramp (see the row above).
 
 Note the third-party guidance that 1-bit and 4-bit are "not recommended" is
 right for a *generic* 4-bit encoder: an even 16-grey ramp fails the ±21 native

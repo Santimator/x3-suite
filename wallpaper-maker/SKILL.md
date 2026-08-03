@@ -56,9 +56,9 @@ on the device, `--replace` to clear it first.
 |---|---|
 | **528x792 exactly** | The panel, portrait. The firmware centres an image that fits and only ever scales *down* — so a smaller image is a stamp in a black field, and a larger one is resampled by an ESP32. |
 | **BMP** | The sleep screen reads nothing else. Not PNG, not JPEG, and **not `.pxc`** — see the note below. |
-| **4 bpp, indexed, palette on the four states** | Quantised here using the reader's *own* algorithm, then mapped straight through by it — same result as handing it full tone, at a sixth of the size. See *Who quantises* below. |
+| **4 bpp, indexed, palette on the four states** | Quantised here with the reader's *own* algorithm, then mapped straight through by it — a sixth of the size of a full-tone file, and it bypasses the firmware's X4-tuned constants, which are too bright on an X3. See *Who quantises* below. |
 | **40-byte DIB header** | The firmware reads the palette from a fixed offset after the first 40 header bytes, not from `biSize` or `bfOffBits`. A BITMAPV4/V5 header feeds it colour-space fields as colours. |
-| **0 / 85 / 170 / 255 in the palette** | Not a choice: the four charge states the panel has, and the palette values that make it map through untouched. What the firmware *believes* they look like is 15/30/80/210 — a different thing, and what the quantiser aims at. |
+| **0 / 85 / 170 / 255** | The palette values that make the reader map the file through untouched (`lum >> 6`), *and* — device-confirmed — a fair model of what the four states actually look like on an X3, which is why the quantiser aims at them too. |
 | **autocontrast → gamma 0.85 → sharpen** | A phone photo uses half the range; on four levels that half becomes two. Stretch, then lift midtones (e-ink reflects less than the screen you chose the image on), then restore the local contrast the downscale cost. All before dithering. |
 | **cover-crop, centred** | A wallpaper should reach all four edges. `--fit contain` if the whole frame matters. |
 | **enlargement stops at 1.5x** | Past about half again, a photo is a smear even after dithering. What is left over gets a mat — a picture in a frame beats a blurred one that fills the screen. |
@@ -91,9 +91,8 @@ the fill matches the pixels it actually meets, not the picture's overall mood.
 is what makes it work here. A mat filled with the raw mean dithers into a large
 field of grain; one landing on a reconstruction point comes out perfectly flat,
 and flat is the only large area this panel draws without noise. Which values
-those are depends on who quantises — 15/30/80/210 for the reader's algorithm,
-0/85/170/255 for ours — so `_band_level` takes them as an argument rather than
-assuming.
+those are depends on the tuning in force, so `_band_level` takes them as an
+argument rather than assuming. Both routes currently land on 0/85/170/255.
 
 If all four bands round to the same level the joins vanish and it degenerates
 into a plain single-colour mat — which is the correct behaviour, not a bug, and
@@ -141,43 +140,61 @@ rather than like it is hung. `--mat none` is a plain white surround.
 The mat also replaces the old white letterbox in `--fit contain`, so a
 panorama gets framed rather than barred.
 
-## Who quantises: we do, with the reader's own algorithm
+## Who quantises: we do, with CrossPoint's algorithm — and its *other* constants
 
 The panel has four states and a photograph has 256 tones, so something has to
-choose. Handing the reader an undithered image and letting it choose gives a
-markedly better picture than our own error diffusion did — but it costs six
-times the bytes and makes the ESP32 redo the arithmetic every time it sleeps.
+choose. `crosspoint_bmp.firmware_quantise` is a port of the firmware's
+`AtkinsonDitherer::processPixel` — 1/8 of the error to each of six neighbours,
+no serpentine — run here on a real CPU. The result ships as a 4-bpp file whose
+palette sits on the panel's four states, so the reader maps it straight through
+and quantises nothing. **Same algorithm, a sixth of the bytes of a full-tone
+file, and none of the device's work.**
 
-So we do neither. `crosspoint_bmp.firmware_quantise` is a byte-for-byte port of
-the firmware's `AtkinsonDitherer::processPixel`, run here on a real CPU. The
-result ships as a 4-bpp file whose palette sits on the panel's four states, so
-the reader maps it straight through and quantises nothing. **Same pixels on the
-glass, a sixth of the bytes, and none of the device's work.**
+### The two sets of numbers, and why we use the disabled ones
 
-The part that makes this worth doing, and that we had wrong for a while: the
-firmware's quantiser is **not an even ramp**. It thresholds at **30 / 50 / 140**
-and reconstructs the four states as **15 / 30 / 80 / 210** — its model of what
-the glass actually shows, and the panel is strongly non-linear. Two things
-follow:
+CrossPoint has **two** constant sets in that one function, and only one is live:
 
-- Anything under **30** is black, charged an error of only `(value − 15) / 8`.
-  A night sky at 24.5 therefore goes solid black and stays there. Our own
-  Floyd–Steinberg thresholded at 42.5 and called black 0, so the same sky
-  carried an error of 24 into its neighbours and stippled the lot. Through this
-  quantiser it comes out **69% solid black with the stars intact**.
-- The values that dither to a perfectly *flat* field are those reconstruction
-  points, not 0/85/170/255. That is what the mat snaps to (see `_band_level`) —
-  feed the reader 170 and it drifts, because 170 is not a value it reconstructs.
+```cpp
+if (false) {  // original thresholds
+    43 / 128 / 213   ->   0,  85, 170, 255
+} else {      // fine-tuned to X4 eink display
+    30 /  50 / 140   ->  15,  30,  80, 210
+}
+```
 
-Atkinson also discards 1/4 of the error, which helps, but the thresholds do the
-work.
+They do different jobs and are easy to confuse, so, plainly:
 
-`--dither floyd` (or `atkinson`, or `none`) substitutes our own error diffusion
-and still ships 4-bpp. **It aims at an even 0/85/170/255**, which by the numbers
-above is the wrong target: it puts a defensible pattern on the panel while
-placing level 1 as though it reads 85 where the firmware believes it reads 30,
-so midtones come out too dark. Kept for comparison and because the gate can
-grade it, not because you should use it.
+- The **thresholds** decide which of the four states a tone becomes.
+- The **reconstruction values** are the ditherer's belief about what each state
+  *looks like*, used only to compute `error = adjusted − quantizedValue`, which
+  is then handed to the neighbouring pixels.
+
+A third number set, **0/85/170/255**, also appears in `Bitmap.cpp` as
+`lum >> 6` — but that is the *input* side, deciding which state a palette entry
+in a file means. It is not a claim about appearance. That is why two sets can
+coexist without either being wrong.
+
+The live branch is labelled for the **X4**. On an **X3** it renders visibly too
+bright, and the reason is mechanical: its reconstruction values sit below what
+the panel really shows, so `adjusted − quantizedValue` comes out too positive
+and every pixel pushes its neighbours lighter. At an input of 128 it charges
+**+48** where the true error is about **−42**. On a real photograph that lifts
+the panel mean about **30 levels** above the tone we asked for.
+
+So we run the firmware's algorithm with the firmware's *own* disabled constants,
+which are right for this panel. Measured against the toned image, the X4 branch
+overshoots by +30.9 and the even branch lands within −4.8.
+
+**This means our output is deliberately not what the device would make of a
+full-tone file** — it is what the device would make of one if it were tuned for
+the X3. Shipping 4-bpp on a native palette is exactly what buys us that: the
+file is mapped straight through, so the X4 tuning never gets to run. Hand the
+reader an undithered image instead and you get the X4 tuning and the bright
+picture, which is what the earlier default did.
+
+`--dither floyd` (or `atkinson`, `none`) substitutes our own error diffusion
+against the same even ramp. Kept for comparison and because the gate can grade
+it, not because you should reach for it.
 
 ## The grid on flat areas (the `--dither floyd` route)
 
@@ -363,11 +380,12 @@ CrossPoint firmware (tag 1.5.0 and master @ 2026-08, byte-identical for all of
 it) and is enforced by the gate; the end-to-end claim is now evidence rather
 than inference.
 
-That run predates the current quantiser. The file *shape* is unchanged — same
-528x792 4-bpp native-palette BMP the device drew then — but which levels go into
-it now comes from the port of the firmware's own algorithm, and **that output
-has not been photographed on the panel yet.** The gate proves the file decodes
-to the levels chosen; it cannot prove the port matches the silicon.
+**The tuning is device-confirmed too (2026-08):** a wallpaper quantised with
+the firmware's live X4 constants was drawn on an X3 and was plainly too bright,
+which is what sent us to the disabled even branch. So the choice of constants
+rests on the panel, not on reading. What has *not* been photographed yet is the
+even-branch output itself — expected to be right, since it is what the too-bright
+run was measured against, but not yet seen on the glass.
 
 **The mat is the other exception, and stays inferred.** Every source in that
 run filled the panel, so nothing was framed — no `--mat waves`, `edges`, `blur`

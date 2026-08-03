@@ -194,21 +194,48 @@ def decode_levels(data: bytes, hdr: ParsedBmp) -> list:
     return out
 
 
-# The firmware's own quantiser, from `AtkinsonDitherer::processPixel`
-# (lib/GfxRenderer/BitmapHelpers.h). These are NOT an even ramp: the panel is
-# strongly non-linear and these are the firmware's model of what its four states
-# actually show. The comment beside them reads "fine-tuned to X4 eink display";
-# there is no X3 branch, so the X3 gets the same numbers.
-FIRMWARE_THRESHOLDS = (30, 50, 140)
-FIRMWARE_RECONSTRUCT = (15, 30, 80, 210)
+# The firmware's quantiser constants, from `AtkinsonDitherer::processPixel`
+# (lib/GfxRenderer/BitmapHelpers.h). There are TWO sets in that function and
+# only one is live:
+#
+#     if (false) {  // original thresholds      43 / 128 / 213 -> 0,85,170,255
+#     } else {      // fine-tuned to X4 eink display
+#                                               30 /  50 / 140 -> 15,30,80,210
+#
+# The live one is labelled for the **X4**. On an X3 it renders visibly too
+# bright, device-confirmed 2026-08: its reconstruction values sit below what the
+# panel actually shows, so `error = adjusted - quantizedValue` comes out too
+# positive and each pixel pushes its neighbours lighter. At an input of 128 it
+# charges +48 where the true error is about -42.
+#
+# So we run the firmware's *algorithm* with the firmware's *other* constants —
+# the ones it disabled — because those match this panel. Note what this means:
+# our output is deliberately NOT what the device would make of a full-tone file.
+# It is what the device would make of one if it were tuned for the X3. Handing
+# it 4-bpp on a native palette is what lets us have that: the file is mapped
+# straight through, so the X4 tuning never runs.
+EVEN_THRESHOLDS = (43, 128, 213)
+EVEN_RECONSTRUCT = (0, 85, 170, 255)      # the disabled branch; right for the X3
+
+X4_THRESHOLDS = (30, 50, 140)
+X4_RECONSTRUCT = (15, 30, 80, 210)        # the live branch; too bright on an X3
+
+# What `firmware_quantise` uses unless told otherwise.
+FIRMWARE_THRESHOLDS = EVEN_THRESHOLDS
+FIRMWARE_RECONSTRUCT = EVEN_RECONSTRUCT
 
 
-def firmware_quantise(img_bytes: bytes, w: int, h: int, bottom_up: bool = True) -> bytearray:
+def firmware_quantise(img_bytes: bytes, w: int, h: int, bottom_up: bool = True,
+                      tuning: str = "even") -> bytearray:
     """Exactly what the reader would do to an undithered greyscale image.
 
     A byte-for-byte port of `AtkinsonDitherer::processPixel` plus the loop that
-    drives it: 1/8 of the error to each of six neighbours, no serpentine, and
-    the skewed thresholds above rather than an even 0/85/170/255.
+    drives it: 1/8 of the error to each of six neighbours, no serpentine.
+
+    `tuning` picks which of the two constant sets in that function to use.
+    "even" is the firmware's own disabled branch and the default, because it is
+    the one that matches an X3; "x4" is the branch the firmware actually runs,
+    kept so the gate can demonstrate what it does.
 
     Running it here means we can hand the panel the *result* as a 4-bpp file it
     maps straight through, instead of the full-tone image it would have had to
@@ -220,6 +247,9 @@ def firmware_quantise(img_bytes: bytes, w: int, h: int, bottom_up: bool = True) 
     where the error starts travelling. Getting this backwards still looks fine
     but is not the same image.
     """
+    thresholds = X4_THRESHOLDS if tuning == "x4" else EVEN_THRESHOLDS
+    reconstruct = X4_RECONSTRUCT if tuning == "x4" else EVEN_RECONSTRUCT
+
     e0 = [0] * (w + 4)
     e1 = [0] * (w + 4)
     e2 = [0] * (w + 4)
@@ -237,17 +267,17 @@ def firmware_quantise(img_bytes: bytes, w: int, h: int, bottom_up: bool = True) 
             elif adjusted > 255:
                 adjusted = 255
 
-            if adjusted < FIRMWARE_THRESHOLDS[0]:
+            if adjusted < thresholds[0]:
                 level = 0
-            elif adjusted < FIRMWARE_THRESHOLDS[1]:
+            elif adjusted < thresholds[1]:
                 level = 1
-            elif adjusted < FIRMWARE_THRESHOLDS[2]:
+            elif adjusted < thresholds[2]:
                 level = 2
             else:
                 level = 3
             out[base + x] = level
 
-            err = (adjusted - FIRMWARE_RECONSTRUCT[level]) >> 3   # error / 8
+            err = (adjusted - reconstruct[level]) >> 3            # error / 8
             e0[x + 3] += err
             e0[x + 4] += err
             e1[x + 1] += err

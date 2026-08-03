@@ -439,6 +439,36 @@ def check_flat_tones() -> None:
             break
 
 
+def check_tuning() -> None:
+    """The firmware ships two constant sets and runs the wrong one for an X3.
+
+    `AtkinsonDitherer::processPixel` carries an even ramp behind `if (false)`
+    and an override labelled "fine-tuned to X4 eink display". We run the even
+    one, and this is the check that says why: on a real photograph the X4
+    branch pushes the panel mean far above the tone we asked for, because its
+    reconstruction values sit below what an X3 actually shows, so every pixel
+    charges its neighbours too positive an error.
+
+    Device-confirmed 2026-08: the X4 branch is visibly too bright on an X3.
+    """
+    panel = Image.new("L", (cp.PANEL_W, cp.PANEL_H))
+    px = []
+    for y in range(cp.PANEL_H):                 # a full-range vertical ramp
+        px += [min(255, y * 255 // cp.PANEL_H)] * cp.PANEL_W
+    panel.putdata(px)
+    asked = sum(px) / len(px)
+
+    def panel_mean(tuning):
+        lv = cp.firmware_quantise(panel.tobytes(), cp.PANEL_W, cp.PANEL_H, tuning=tuning)
+        return sum(cp.NATIVE_LEVELS[v] for v in lv) / len(lv)
+
+    even, x4 = panel_mean("even"), panel_mean("x4")
+    check("the tuning we use tracks the tone asked for",
+          abs(even - asked) < 12, f"asked {asked:.0f}, got {even:.0f}")
+    check("the firmware's live 'X4' branch would run much brighter",
+          x4 - even > 20, f"x4 {x4:.0f} vs even {even:.0f}")
+
+
 def check_designed_failures() -> None:
     """The two traps the encoder is shaped around. If these ever stop failing,
     the reasoning in make_wallpaper.py has gone stale and should be re-read."""
@@ -589,6 +619,9 @@ def main() -> int:
 
         print("\nflat areas, where error diffusion locks into a pattern:")
         check_flat_tones()
+
+        print("\nwhich of the firmware's two tunings we run:")
+        check_tuning()
 
         print("\nthe failure modes we design around:")
         check_designed_failures()
