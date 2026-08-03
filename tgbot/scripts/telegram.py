@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -58,23 +59,38 @@ class Telegram:
         else:
             body = json.dumps(payload).encode()
             content_type = "application/json"
-        req = urllib.request.Request(self._url(method), data=body, method="POST")
-        req.add_header("Content-Type", content_type)
-        try:
-            with urllib.request.urlopen(req, timeout=timeout or self.timeout) as resp:
-                data = json.loads(resp.read())
-        except urllib.error.HTTPError as exc:
-            detail = ""
+        for attempt in range(3):
+            req = urllib.request.Request(self._url(method), data=body, method="POST")
+            req.add_header("Content-Type", content_type)
             try:
-                detail = json.loads(exc.read()).get("description", "")
-            except Exception:
-                pass
-            raise TelegramError(f"{method}: HTTP {exc.code} {detail}") from None
-        except urllib.error.URLError as exc:
-            raise TelegramError(f"{method}: {exc.reason}") from None
-        if not data.get("ok"):
-            raise TelegramError(f"{method}: {data.get('description')}")
-        return data.get("result")
+                with urllib.request.urlopen(req,
+                                            timeout=timeout or self.timeout) as resp:
+                    data = json.loads(resp.read())
+            except urllib.error.HTTPError as exc:
+                detail, wait = "", 0
+                try:
+                    payload = json.loads(exc.read())
+                    detail = payload.get("description", "")
+                    wait = (payload.get("parameters") or {}).get("retry_after", 0)
+                except Exception:
+                    pass
+                # 429 is not an error, it is a queue. Sending several photos in
+                # a row — a preview of every wallpaper in a folder — is exactly
+                # the burst that earns one, and the reply that follows would
+                # otherwise be the message that vanishes.
+                if exc.code == 429 and attempt < 2:
+                    time.sleep(min(float(wait or 1) + 0.5, 30))
+                    continue
+                raise TelegramError(f"{method}: HTTP {exc.code} {detail}") from None
+            except urllib.error.URLError as exc:
+                if attempt < 2:
+                    time.sleep(1 + attempt)
+                    continue
+                raise TelegramError(f"{method}: {exc.reason}") from None
+            if not data.get("ok"):
+                raise TelegramError(f"{method}: {data.get('description')}")
+            return data.get("result")
+        raise TelegramError(f"{method}: gave up after 3 attempts")
 
     # -- receiving ---------------------------------------------------------
 

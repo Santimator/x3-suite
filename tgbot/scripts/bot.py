@@ -138,10 +138,23 @@ class Bot:
         self.say(chat, f"⚠️ {exc}")
 
     def say(self, chat, text: str, keyboard=None):
+        """Say it, and if that fails say it plainly rather than not at all.
+
+        A swallowed send is the worst failure this bot has, because it is
+        indistinguishable from a button that did nothing: the delete
+        confirmation that never arrives looks like a delete that ignored you.
+        So a formatting rejection costs the formatting, not the message, and
+        anything worse is logged loudly enough to find in the journal.
+        """
         try:
             return self.tg.send_message(chat, text, keyboard)
         except TelegramError as exc:
-            log("send failed:", exc)
+            log("send failed:", exc, "— retrying without formatting")
+        try:
+            plain = html.unescape(re.sub(r"<[^>]+>", "", text))
+            return self.tg.send_message(chat, plain, keyboard, parse_mode=None)
+        except TelegramError as exc:
+            log("SEND LOST:", exc, "|", text[:120].replace("\n", " "))
             return None
 
     # -- the gate ----------------------------------------------------------
@@ -913,7 +926,11 @@ class Bot:
                     return self.say(chat, "No wallpapers here.")
                 self.say(chat, f"👁 {len(bmps)} wallpaper(s) — one message each, "
                                f"so you can act on the one you recognise.")
-                for entry in bmps[:10]:
+                for n, entry in enumerate(bmps[:10]):
+                    if n:
+                        # Telegram throttles a burst to one chat, and the
+                        # message *after* the burst is the one that pays.
+                        time.sleep(1)
                     self.preview_bmp(chat, host, path, entry.get("name", ""),
                                      entry.get("size", 0))
             return self.submit(chat, work)
@@ -964,6 +981,12 @@ class Bot:
                 self.say(chat, "🗑 gone." if ok else "⚠️ the reader refused.")
                 self.browse(chat, parent)
             return self.submit(chat, work)
+
+        if action not in ("get",):
+            log("unhandled device callback:", action, token)
+            return self.say(chat, f"That button did nothing — I don't know "
+                                  f"<code>{html.escape(action)}</code>. "
+                                  f"Please tell Claude.")
 
         if action == "get":
             def work():

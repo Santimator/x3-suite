@@ -545,6 +545,61 @@ def check_fonts(tmp: Path) -> None:
     check("/sleep is not", bot.font_family_of("/sleep") is None)
 
 
+# -- 5a. a message must never simply vanish --------------------------------
+
+
+def check_never_silent(tmp: Path) -> None:
+    """The worst failure this bot has is saying nothing.
+
+    A delete confirmation that never arrives is indistinguishable from a delete
+    button that ignored you — which is exactly how it was reported. Formatting
+    rejections and rate limits both used to end that way.
+    """
+    print("\nnothing said is worse than something ugly:")
+    from telegram import TelegramError
+
+    bot, tg = make_bot(tmp)
+    real_send = tg.send_message
+
+    calls = []
+
+    def picky(chat_id, text, keyboard=None, **kw):
+        calls.append(kw.get("parse_mode", "HTML"))
+        if kw.get("parse_mode", "HTML") == "HTML":
+            raise TelegramError("sendMessage: HTTP 400 can't parse entities")
+        return real_send(chat_id, text, keyboard, **kw)
+
+    tg.send_message = picky
+    bot.say(bot.user_id, "Delete <code>x.bmp</code> from the reader?")
+    check("a formatting rejection costs the formatting, not the message",
+          tg.sent and "x.bmp" in tg.sent[-1]["text"], str(tg.sent))
+    check("... and the retry drops the markup", "<code>" not in tg.sent[-1]["text"],
+          tg.sent[-1]["text"] if tg.sent else "")
+
+    tg.send_message = lambda *a, **k: (_ for _ in ()).throw(
+        TelegramError("sendMessage: HTTP 429 Too Many Requests"))
+    check("a send that cannot be made returns None rather than raising",
+          bot.say(bot.user_id, "anything") is None)
+
+    # And a button the router does not know must say so, not do nothing.
+    bot, tg = make_bot(tmp)
+    token = bot.tokens.put({"parent": "/sleep", "name": "x.bmp",
+                            "path": "/sleep/x.bmp", "size": 1})
+    tg.sent.clear()
+    bot.handle(cb(f"dev:nonsense:{token}"))
+    check("an unknown device button reports itself",
+          tg.sent and "did nothing" in tg.sent[-1]["text"], str(tg.sent))
+
+    # The delete path from a preview, which is where this was noticed.
+    tg.sent.clear()
+    bot.handle(cb(f"dev:rm:{token}"))
+    check("delete asks for confirmation",
+          tg.sent and "Delete" in tg.sent[-1]["text"], str(tg.sent))
+    yes = [b[1] for row in (tg.sent[-1]["keyboard"] or []) for b in row
+           if "Yes" in b[0]]
+    check("... and the confirm button carries the same file", bool(yes), str(tg.sent[-1]))
+
+
 # -- 5b. the real entry point actually starts ------------------------------
 
 
@@ -699,6 +754,7 @@ def main() -> int:
         check_fonts(tmp)
         check_tokens(tmp)
         check_device_menu(tmp)
+        check_never_silent(tmp)
         check_entry_point()
         check_secrets_outside(tmp)
         check_optional()
