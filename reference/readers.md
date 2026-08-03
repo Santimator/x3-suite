@@ -157,9 +157,23 @@ pushes them.
 | Size | Panel-exact **528×792**. Larger is scaled down and centred; **smaller is never scaled up** — it is centred in black |
 | Refresh | A single HALF refresh (stock parity), plus two extra passes for the grey planes |
 
-So the file to emit is a **528×792, 4-bpp indexed BMP, 40-byte DIB header,
-palette on 0/85/170/255, pre-dithered** — the one shape where the panel shows
-exactly the pixels that were computed off-device.
+Two shapes work, and they are a real choice:
+
+- **528×792, 24-bpp greyscale, undithered** — the firmware quantises it with
+  Atkinson. Better on photographs, because Atkinson carries only 3/4 of the
+  error and lets a near-black sky fall to solid black. This is what
+  [wallpaperconverter.jakegreen.dev](https://wallpaperconverter.jakegreen.dev/)
+  emits and what `wallpaper-maker/` now defaults to.
+- **528×792, 4-bpp indexed, 40-byte DIB header, palette on 0/85/170/255,
+  pre-dithered** — trips the native-palette test, so the panel shows exactly the
+  pixels computed off-device, at a sixth of the bytes. Exact, and on a dark
+  photograph worse to look at.
+
+Note the third-party guidance that 1-bit and 4-bit are "not recommended" is
+right for a *generic* 4-bit encoder: an even 16-grey ramp fails the ±21 native
+test, so the device re-dithers it anyway and 24-bit is the better of those two.
+The 4-bit route above is a third case, and 1-bit really is bad — `hasGreyscale()`
+is `bpp > 1`, so it never gets the four-level pipeline at all.
 
 ## Getting files onto the device over WiFi
 

@@ -237,11 +237,19 @@ the reader can draw. Run the second and they're on it.
 python3 wallpaper-maker/scripts/push_wallpaper.py            # -> the device
 ```
 
-Nothing to configure and nothing to answer: 528×792, four grey levels,
-Floyd–Steinberg, cover-cropped, tone-stretched for e-ink. Each of those has a
-right answer on this panel, so it's already chosen — the table in the SKILL
-says why each one and not the alternative. Add `--preview` to get a PNG of the
-result you can look at before it goes anywhere near the device.
+Nothing to configure and nothing to answer: 528×792, greyscale BMP,
+cover-cropped, tone-stretched for e-ink. Each of those has a right answer on
+this panel, so it's already chosen — the table in the SKILL says why each one
+and not the alternative. Add `--preview` to get a PNG you can look at before it
+goes anywhere near the device.
+
+We deliberately **don't** dither: the file ships continuous tone and the
+reader's own Atkinson does the quantising, which on photographs beats anything
+we did here. That's the approach taken by
+[wallpaperconverter.jakegreen.dev](https://wallpaperconverter.jakegreen.dev/),
+Jake Green's in-browser converter — worth using directly if you'd rather not
+run any of this. `--dither floyd` takes the job back and ships a 4-bpp file the
+panel maps through untouched: exact, and worse to look at.
 
 An image too small to fill the panel isn't blown up to fit — enlargement stops
 at 1.5x and the rest becomes a **mat**: four sectors mitred from the panel

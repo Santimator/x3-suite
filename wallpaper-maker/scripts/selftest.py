@@ -229,7 +229,14 @@ def serve(root: Path):
 
 # ------------------------------------------------------------------ checks ---
 
-def grade_output(src: Path, bmp: Path) -> None:
+def grade_output(src: Path, bmp: Path, algorithm: str = "device") -> None:
+    """Grade a written wallpaper through the firmware's own reader.
+
+    Two routes to grade. The default ships continuous tone and lets the reader
+    dither, so the check is that the reader *accepts* it and runs the four-level
+    grey pipeline over it. The 4-bpp route ships pixels already chosen, so the
+    check is far stronger: the file must decode back to exactly those.
+    """
     data = bmp.read_bytes()
     label = bmp.name
 
@@ -243,10 +250,6 @@ def grade_output(src: Path, bmp: Path) -> None:
         return
     check(f"{label}: the device's BMP parser accepts it", True)
 
-    check(f"{label}: 4 bpp, greyscale pipeline", hdr.bpp == 4 and hdr.has_greyscale,
-          f"bpp={hdr.bpp}")
-    check(f"{label}: palette is native — the device re-dithers nothing",
-          hdr.native_palette)
     check(f"{label}: exactly the panel, so nothing is resampled",
           (hdr.width, hdr.height) == (cp.PANEL_W, cp.PANEL_H),
           f"{hdr.width}x{hdr.height}")
@@ -255,9 +258,22 @@ def grade_output(src: Path, bmp: Path) -> None:
     check(f"{label}: lands at 0,0 unscaled", (x, y, scaled) == (0, 0, False),
           f"x={x} y={y} scaled={scaled}")
 
-    # The one that matters: recompute the pipeline, then read the file back the
-    # way the firmware reads it. Equal means the panel gets our pixels.
-    intended = mw.render(src)
+    if algorithm == "device":
+        check(f"{label}: 24 bpp, and the grey pipeline runs on it",
+              hdr.bpp == 24 and hdr.has_greyscale, f"bpp={hdr.bpp}")
+        # Not native, deliberately: that is what makes the firmware dither it.
+        check(f"{label}: left for the reader to dither", not hdr.native_palette)
+        return
+
+    check(f"{label}: 4 bpp, greyscale pipeline", hdr.bpp == 4 and hdr.has_greyscale,
+          f"bpp={hdr.bpp}")
+    check(f"{label}: palette is native — the device re-dithers nothing",
+          hdr.native_palette)
+
+    # The one that matters on this route: recompute the pipeline, then read the
+    # file back the way the firmware reads it. Equal means the panel gets our
+    # pixels and nothing else.
+    intended = mw.render(src, algorithm=algorithm)
     try:
         got = cp.decode_levels(data, hdr)
     except cp.BmpReaderError as exc:
@@ -452,7 +468,7 @@ def check_designed_failures() -> None:
     buf = io.BytesIO()
     grey.save(buf, "BMP")
     hdr24 = cp.parse_headers(buf.getvalue())
-    check("a 24-bpp file would be re-dithered on-device (why we emit 4-bpp)",
+    check("a 24-bpp file is re-dithered on-device (the default route relies on it)",
           hdr24.bpp == 24 and not hdr24.native_palette)
 
 
@@ -553,9 +569,16 @@ def main() -> int:
             except Exception as exc:
                 check(f"{src.name}: converts", False, str(exc))
 
-        print("\nthrough the device's own reader:")
+        print("\nthrough the device's own reader — the default route:")
         for src, bmp in outputs:
             grade_output(src, bmp)
+
+        # The 4-bpp route is still supported and still has to hold its much
+        # stronger contract: the panel gets exactly the pixels we chose.
+        print("\n... and the route that dithers here (--dither floyd):")
+        for src in sources[:3]:
+            bmp = mw.convert(src, build / "floyd", algorithm="floyd")
+            grade_output(src, bmp, algorithm="floyd")
 
         print("\nthe mat, on sources too small to fill the panel:")
         check_mat(sources)

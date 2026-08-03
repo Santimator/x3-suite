@@ -45,10 +45,13 @@ a right answer on this device, so it is already chosen.
 Flags exist for the things that are genuinely taste — `--fit contain` to keep
 the whole frame instead of cropping, `--mat edges|blur|none` for a different
 surround on an image too small to fill the panel, `--preview` to also write a
-PNG of the dithered result you can look at on a computer — plus `--dither
-atkinson|none`, which you should not need. For the push: `--ip` when the reader
-cannot be found by name, `--list` to see what is on the device, `--replace` to
-clear it first.
+PNG of what went into the BMP — plus `--dither floyd`, which hands the
+quantising back to us instead of the reader (*Who dithers*, below). For the
+push: `--ip` when the reader cannot be found by name, `--list` to see what is
+on the device, `--replace` to clear it first.
+
+If you would rather not run any of this, **[wallpaperconverter.jakegreen.dev](https://wallpaperconverter.jakegreen.dev/)**
+does the conversion in a browser, and the default route here is its approach.
 
 ## What comes out, and why
 
@@ -56,11 +59,9 @@ clear it first.
 |---|---|
 | **528x792 exactly** | The panel, portrait. The firmware centres an image that fits and only ever scales *down* — so a smaller image is a stamp in a black field, and a larger one is resampled by an ESP32. |
 | **BMP** | The sleep screen reads nothing else. Not PNG, not JPEG, and **not `.pxc`** — see the note below. |
-| **4 bpp, indexed, 4-grey palette** | A palette on the panel's own levels passes the firmware's *native palette* test, and then it maps our pixels straight through. Hand it 24 bpp and the ESP32 re-dithers the image itself, discarding full-precision work and redoing it with an integer approximation. |
-| **40-byte DIB header** | The firmware reads the palette from a fixed offset after the first 40 header bytes, not from `biSize` or `bfOffBits`. A BITMAPV4/V5 header feeds it colour-space fields as colours. |
-| **0 / 85 / 170 / 255** | Not a choice: the four charge states the panel has. |
-| **Floyd–Steinberg, serpentine** | Error diffusion is what makes four levels read as a photograph. Serpentine because straight raster order walks the residual error one way and leaves diagonal worms in skies. Atkinson (the firmware's own pick, for covers) is crisper and will clip a gradient sky flat. |
-| **a blue-noise nudge on the threshold** | Diffusion is deterministic, so a large flat area does *not* come out as grain — it locks into a regular lattice that reads as a grid laid over the picture. See below; this one was found by a real wallpaper, not by reasoning. |
+| **24 bpp, continuous tone** | We do **not** dither. The reader does, with its own Atkinson, and on photographs that beats anything we do here — see *Who dithers* below. |
+| **40-byte DIB header** | The firmware reads a palette from a fixed offset after the first 40 header bytes, not from `biSize` or `bfOffBits`. Matters on the `--dither floyd` route, which ships a palette. |
+| **0 / 85 / 170 / 255** | Not a choice: the four charge states the panel has. Whoever quantises is aiming at these. |
 | **autocontrast → gamma 0.85 → sharpen** | A phone photo uses half the range; on four levels that half becomes two. Stretch, then lift midtones (e-ink reflects less than the screen you chose the image on), then restore the local contrast the downscale cost. All before dithering. |
 | **cover-crop, centred** | A wallpaper should reach all four edges. `--fit contain` if the whole frame matters. |
 | **enlargement stops at 1.5x** | Past about half again, a photo is a smear even after dithering. What is left over gets a mat — a picture in a frame beats a blurred one that fills the screen. |
@@ -140,9 +141,35 @@ rather than like it is hung. `--mat none` is a plain white surround.
 The mat also replaces the old white letterbox in `--fit contain`, so a
 panorama gets framed rather than barred.
 
-## The grid on flat areas, and why the threshold is nudged
+## Who dithers: the reader, not us
 
-Error diffusion has no randomness in it. Hand it a large area of near-constant
+The default ships **continuous-tone greyscale** and lets the firmware quantise
+it. That is the approach taken by
+[**wallpaperconverter.jakegreen.dev**](https://wallpaperconverter.jakegreen.dev/)
+— Jake Green's in-browser converter, well worth using directly if you do not
+want to run any of this — and it is better than what this tool did before.
+
+It is worth being precise about *why*, because the obvious guesses are wrong.
+It is not the tone curve: that converter's output and ours land a night sky at
+the same mean value, 24.5 of the 85 between black and the next level. It is
+that the firmware's dither is **Atkinson**, which carries only 3/4 of the
+error and therefore lets shadows fall to solid black. Ours was Floyd–Steinberg,
+which conserves all of it and so keeps trying to *represent* a near-black sky —
+lifting roughly one pixel in 3.5 and stippling the whole thing. On a
+photograph, the honest answer is that giving up the error is the better picture.
+
+`--dither floyd` (or `atkinson`, or `none`) goes back to dithering here and
+shipping a **4-bpp indexed** file whose palette sits exactly on the panel's four
+levels. That trips the firmware's *native palette* test, so it maps the pixels
+straight through and quantises nothing — the panel gets precisely what was
+computed, at a sixth of the bytes. Exact, cheap, and on a dark photograph worse
+to look at. It is kept because "the panel receives exactly these pixels" is
+occasionally the property you want, and because the gate can assert it.
+
+## The grid on flat areas (the `--dither floyd` route)
+
+This applies to the route where *we* dither. Error diffusion has no randomness
+in it: hand it a large area of near-constant
 tone and it does not produce grain — it produces a **regular lattice** of
 minority pixels, evenly spaced, which the eye reads as a grid laid over the
 picture. It is the classic weakness of Floyd–Steinberg and it is invisible
@@ -177,6 +204,9 @@ that both matter:
 Cost, measured: local tone accuracy drops from 1.01 to 1.13 RMS — negligible —
 while the lattice score on a flat tone falls from 0.90 to 0.05. `DITHER_NOISE`
 is the amplitude; below about 0.3 the lattice starts showing again.
+
+Worth knowing that this fix is *not* why the default changed. It made our
+dither much better and still lost to letting the reader do it.
 
 ### `.pxc` is not a wallpaper format
 
@@ -320,12 +350,17 @@ CrossPoint firmware (tag 1.5.0 and master @ 2026-08, byte-identical for all of
 it) and is enforced by the gate; the end-to-end claim is now evidence rather
 than inference.
 
-**The mat is the exception, and stays inferred.** Every source in that first
+That run used the 4-bpp route, which was the default at the time. **The 24-bpp
+default has not been on the panel from this tool yet** — but the same encoding
+from `wallpaperconverter.jakegreen.dev` has, which is where the change came
+from, so what is unconfirmed is our bytes rather than the approach.
+
+**The mat is the other exception, and stays inferred.** Every source in that
 run filled the panel, so nothing was framed — no `--mat waves`, `edges`, `blur`
 or `none` border has been seen on the panel yet. The gate covers it (flat
 sectors decode flat, no hole goes unpainted), and there is no reason to expect
-trouble, since a matted wallpaper is the same 528x792 4-bpp file as any other
-as far as the firmware is concerned. It simply has not been photographed.
+trouble, since a matted wallpaper is the same 528x792 file as any other as far
+as the firmware is concerned. It simply has not been photographed.
 Feeding it something under ~350px wide is all it would take.
 
 ## Files

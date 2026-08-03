@@ -746,7 +746,8 @@ class Bot:
         without looking. Rendering goes through `crosspoint_bmp`, the port of
         the firmware's own reader, so the picture in the chat is the picture on
         the panel — including the black field around an under-size one, and
-        including a warning when the file is one the device would re-dither.
+        saying so when the file is one the reader dithers itself, where the
+        preview can only approximate what lands.
         """
         full = f"{parent.rstrip('/')}/{name}"
         cache = self.state_dir / "cache"
@@ -760,8 +761,12 @@ class Bot:
         if not report.get("drawn_by_sleep_scan"):
             bits.append("⚠️ the sleep-screen scan skips this name")
         if not report.get("exact"):
-            bits.append("⚠️ approximate — the palette is not native, so the "
-                        "device would re-dither this one itself")
+            # Not a warning any more: shipping continuous tone and letting the
+            # reader's Atkinson quantise it is what wallpaper-maker now does by
+            # default, because it looks better. The preview just cannot show the
+            # dither the device will apply, so say that plainly.
+            bits.append("preview is approximate — the reader does its own "
+                        "dithering on this one")
         elif report.get("scaled_down"):
             bits.append("scaled down to fit the panel")
         elif report.get("x") or report.get("y"):
