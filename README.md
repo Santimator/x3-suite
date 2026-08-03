@@ -40,7 +40,7 @@ This is a suite of tools. You'll find:
   to **WenKai**, the Chinese font that makes CrossPoint render hanzi properly,
   plus whatever else I end up adding.
 - **`workspace/`** — one folder per book, inputs and `build/` outputs. **Yours:**
-  gitignored apart from two committed samples, so your books stay your books.
+  gitignored apart from a few committed samples, so your books stay your books.
 
 Each directory has a **`SKILL.md`** that is its real documentation. This guide
 tells you what a thing is for and how to run it; `SKILL.md` tells you how it
@@ -223,10 +223,12 @@ Docs: [`opds-server/SKILL.md`](opds-server/SKILL.md)
 
 ## 7. The sleep screen
 
-**Tested:** device-confirmed, 2026-08 — an X3 took wallpapers built here over
-WiFi and drew them as its sleep screen, reader found by name with no address
-given. The one part still unseen on the panel is the *mat*, since every image
-in that run was big enough to fill the screen and never got framed.
+**Tested:** device-confirmed, 2026-08 — an X3 drew a wallpaper built here as
+its sleep screen, converted and pushed from the Telegram bot without a terminal
+in the loop. Two earlier versions were wrong in ways only the panel revealed (a
+dither lattice, then an over-bright render), so the current one is confirmed
+rather than reasoned. The part still unseen is the *mat*: every image
+photographed so far filled the screen and never got framed.
 
 Drop pictures in `workspace/wallpapers/`, run one command, and they're files
 the reader can draw. Run the second and they're on it. One sample ships with

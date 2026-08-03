@@ -373,29 +373,26 @@ own edge), an alpha image (must flatten onto white, not multiply to black), a
 phone-style EXIF rotation (must rotate before cropping), and a flat gradient
 (where dithering either works or bands visibly).
 
-**Status: device-confirmed (2026-08).** An X3 on WiFi took wallpapers built
-here, over the file-transfer web server, and drew them as its sleep screen. The
-whole delivery path went with it: the reader was found at `crosspoint.local`
-with no `--ip` needed, `/.sleep` was created and filled, and the sleep-screen
-mode switched to Custom on its own. Every rule above was read from the
-CrossPoint firmware (tag 1.5.0 and master @ 2026-08, byte-identical for all of
-it) and is enforced by the gate; the end-to-end claim is now evidence rather
-than inference.
+**Status: device-confirmed (2026-08), end to end.** An X3 drew a wallpaper built
+here as its sleep screen, quantised with the tuning below, converted and pushed
+from `tgbot/` over WiFi without a terminal touching it. The reader was found by
+name, `/.sleep` created and filled, the mode switched to Custom.
 
-**The tuning is device-confirmed too (2026-08):** a wallpaper quantised with
-the firmware's live X4 constants was drawn on an X3 and was plainly too bright,
-which is what sent us to the disabled even branch. So the choice of constants
-rests on the panel, not on reading. What has *not* been photographed yet is the
-even-branch output itself — expected to be right, since it is what the too-bright
-run was measured against, but not yet seen on the glass.
+The route there is worth keeping, because two of the three steps were wrong at
+some point and only the panel said so:
 
-**The mat is the other exception, and stays inferred.** Every source in that
-run filled the panel, so nothing was framed — no `--mat waves`, `edges`, `blur`
-or `none` border has been seen on the panel yet. The gate covers it (flat
-sectors decode flat, no hole goes unpainted), and there is no reason to expect
-trouble, since a matted wallpaper is the same 528x792 file as any other as far
-as the firmware is concerned. It simply has not been photographed.
-Feeding it something under ~350px wide is all it would take.
+- the first version dithered here with plain Floyd-Steinberg and laid a visible
+  **lattice** over any large flat area — a night sky found it;
+- the second let the reader quantise and came back **too bright**, which turned
+  out to be the firmware running its X4-tuned constants on an X3;
+- the third — quantising here with the firmware's algorithm and its own
+  disabled even constants — is the one in the photograph, and it is right.
+
+**Still inferred: the mat.** Every source photographed so far filled the panel,
+so no `--mat waves`, `edges`, `blur` or `none` border has been on the glass.
+The gate covers it and a matted wallpaper is the same file shape as any other,
+so there is no reason to expect trouble — it simply has not been seen. Anything
+under about 350px wide would settle it.
 
 ## Files
 

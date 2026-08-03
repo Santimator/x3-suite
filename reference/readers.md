@@ -136,11 +136,12 @@ rule at 480px width (`prepare.py`).
 `lib/GfxRenderer/Bitmap.cpp`, `lib/GfxRenderer/BitmapHelpers.cpp`,
 `lib/FsHelpers/FsHelpers.cpp`), tags 1.5.0 and master @ 2026-08 — byte-identical
 for all of it apart from the quick-resume refresh mode, which does not touch
-this path. **Device-confirmed 2026-08:** an X3 drew wallpapers built by
-`wallpaper-maker/` as its sleep screen, from `/.sleep`, with the mode set to
-Custom. Panel-sized 4-bpp files only so far — an image small enough to be
-matted has not been put on the panel yet, so the placement rules for an
-under-size image remain read-from-source.* `wallpaper-maker/` builds these and
+this path. **Device-confirmed 2026-08:** an X3 drew a wallpaper built by
+`wallpaper-maker/` as its sleep screen, from `/.sleep`, mode Custom, quantised
+off-device against the even ramp — the render is correct on the glass, which is
+also what settled the tuning question below. Panel-sized files only so far: an
+image small enough to be matted has not been put on the panel, so the placement
+rules for an under-size image remain read-from-source.* `wallpaper-maker/` builds these and
 pushes them.
 
 | What | Requirement |
