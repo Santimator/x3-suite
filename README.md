@@ -307,7 +307,9 @@ render.
 
 Copy a family folder from `reference/fonts/` to the SD card under `/fonts/`,
 power-cycle (fonts are scanned once at boot), then pick it under Settings →
-Reader → Font Family.
+Reader → Font Family. Or send it over WiFi from the Telegram bot (chapter 9),
+which also checks afterwards that the device really has every byte — the one
+failure the reader cannot tell you about.
 
 - **`WenZilla/`** — the recommended Chinese font. LXGW WenKai kaiti for hanzi,
   NV Zilla Slab for Latin and pinyin, so mixed text reads well.

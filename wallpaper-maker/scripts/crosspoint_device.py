@@ -58,6 +58,9 @@ DISCOVERY_PAYLOAD = b"hello"
 
 TIMEOUT = 20
 PROBE_TIMEOUT = 3       # just asking "are you there?" — do not stall on a dead address
+# A font family is ~24 MB in six files, the largest of them 6.8 MB, going into
+# an ESP32 over WiFi. Minutes, not seconds.
+FONT_TIMEOUT = 600
 
 
 class DeviceError(Exception):
@@ -227,9 +230,22 @@ def delete(host: str, path: str) -> bool:
     return code == 200
 
 
+def delete_many(host: str, paths: list) -> tuple:
+    """Delete several things in one call. Returns (ok, detail).
+
+    `/delete` takes a `paths` JSON array as well as a single `path`, and
+    reports the ones it refused in the body rather than failing the lot —
+    handy, because a folder is only removed when it is already **empty**, so
+    clearing one means the files first and the directory after.
+    """
+    code, body = request(host, "/delete", method="POST",
+                         query={"paths": json.dumps(paths)})
+    return code == 200, body.decode(errors="replace").strip()
+
+
 def upload(host: str, directory: str, file: Path,
            content_type: str = "application/octet-stream",
-           name: str | None = None) -> None:
+           name: str | None = None, timeout: float | None = None) -> None:
     """POST /upload?path=DIR with the file as multipart form data.
 
     The destination is a query parameter, not a form field, because the
@@ -252,10 +268,82 @@ def upload(host: str, directory: str, file: Path,
 
     code, resp = request(host, "/upload", method="POST", query={"path": directory},
                          body=body,
-                         content_type=f"multipart/form-data; boundary={boundary}")
+                         content_type=f"multipart/form-data; boundary={boundary}",
+                         timeout=timeout or TIMEOUT)
     if code == 200:
         return
     raise DeviceError(f"upload {file.name}: {code} {resp.decode(errors='replace')}")
+
+
+# --------------------------------------------------------------------------
+# fonts, which have their own endpoints and their own rules
+
+
+def fonts(host: str) -> dict:
+    """`GET /api/fonts` — what families the reader has scanned.
+
+    Returns {"families": [{"name", "sizes": [...], "files": [{"name","size"}]}],
+    "maxFamilies": n}. The sizes list is the useful one: 1.5.0's CJK fallback
+    for interface text looks for **exactly** 8, 10 and 12 pt, so a family
+    without them leaves the chapter list blank however good it looks in a book.
+    """
+    code, body = request(host, "/api/fonts")
+    if code != 200:
+        raise DeviceError(f"/api/fonts returned {code}")
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise DeviceError("the font list came back unreadable") from exc
+
+
+def upload_font(host: str, family: str, file: Path,
+                timeout: float = FONT_TIMEOUT) -> None:
+    """`POST /api/fonts/upload` — one `.cpfont`, into `/fonts/<family>/`.
+
+    The family is a form field rather than a path: the firmware creates the
+    directory itself and refuses a name it does not like, so we never build
+    that path by hand.
+
+    It checks the `CPFONT\\0\\0` magic on the first chunk, which catches the
+    classic "save link as" HTML masquerading as a font. It cannot catch a
+    *truncated* one — the magic is fine and the file is short — so verify byte
+    counts against CHECKSUMS.tsv afterwards. A short font lists in the picker
+    and silently reverts to built-in Noto when selected.
+
+    These files are large (a single size can be 6.8 MB), so the timeout is
+    minutes rather than the usual twenty seconds.
+    """
+    boundary = f"----x3suite{uuid.uuid4().hex}"
+    parts = [
+        f"--{boundary}\r\n"
+        f'Content-Disposition: form-data; name="family"\r\n\r\n{family}\r\n'.encode(),
+        (f"--{boundary}\r\n"
+         f'Content-Disposition: form-data; name="file"; filename="{file.name}"\r\n'
+         f"Content-Type: application/octet-stream\r\n\r\n").encode(),
+        file.read_bytes(),
+        f"\r\n--{boundary}--\r\n".encode(),
+    ]
+    code, resp = request(host, "/api/fonts/upload", method="POST",
+                         body=b"".join(parts),
+                         content_type=f"multipart/form-data; boundary={boundary}",
+                         timeout=timeout)
+    if code != 200:
+        raise DeviceError(f"{file.name}: {code} {resp.decode(errors='replace')}")
+
+
+def delete_font_family(host: str, family: str) -> None:
+    """`POST /api/fonts/delete` — the whole family, in one call.
+
+    Worth using rather than deleting the files by hand: it goes through the
+    firmware's own FontInstaller and marks the font registry dirty, so the
+    device notices the change instead of listing a family that is no longer
+    there.
+    """
+    code, body = request(host, "/api/fonts/delete", method="POST",
+                         body=json.dumps({"family": family}).encode(),
+                         content_type="application/json")
+    if code != 200:
+        raise DeviceError(f"delete {family}: {code} {body.decode(errors='replace')}")
 
 
 def download(host: str, path: str, dest: Path) -> Path:

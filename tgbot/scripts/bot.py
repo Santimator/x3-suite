@@ -251,7 +251,7 @@ class Bot:
         self.say(chat, text, [
             [("📚 Library", "m:lib"), ("🖼 Queue", "m:q")],
             [("📥 Inbox", "m:in"), ("📲 Device", "m:dev")],
-            [("⚙️ Status", "m:st")],
+            [("🔤 Fonts", "m:fo"), ("⚙️ Status", "m:st")],
         ])
 
     def on_callback(self, cb: dict) -> None:
@@ -265,8 +265,12 @@ class Bot:
                     "q": lambda: self.show_queue(chat),
                     "in": lambda: self.show_inbox(chat),
                     "dev": lambda: self.show_device(chat),
+                    "fo": lambda: self.show_fonts(chat),
                     "st": lambda: self.submit(chat, lambda: self.show_status(chat)),
                     "main": lambda: self.menu(chat)}.get(rest, lambda: None)()
+
+        if head == "fo":
+            return self.on_font_callback(chat, rest)
 
         if head == "wp":                       # wp:<token>:<mat>
             token, _, mat = rest.partition(":")
@@ -603,6 +607,115 @@ class Bot:
             lines.append(f"\n{html.escape(why)}")
         self.say(chat, "\n".join(lines), [[("🏠 Menu", "m:main")]])
 
+    # -- fonts -------------------------------------------------------------
+
+    def show_fonts(self, chat) -> None:
+        families = suite.local_font_families()
+        if not families:
+            return self.say(chat, "No families in <code>reference/fonts/</code>.",
+                            [[("🏠 Menu", "m:main")]])
+        rows = [[(f"{f['name']} · {human(f['bytes'])}",
+                  f"fo:one:{self.tokens.put(f)}")] for f in families]
+        rows.append([("📲 On the device", "fo:dev:")])
+        rows.append([("🏠 Menu", "m:main")])
+        self.say(chat, "🔤 Families in this repo:", rows)
+
+    def on_font_callback(self, chat, rest: str) -> None:
+        action, _, token = rest.partition(":")
+
+        if action == "dev":
+            def work():
+                host, _ = self.device_host()
+                data = suite.device.fonts(host)
+                families = data.get("families", [])
+                if not families:
+                    return self.say(chat, "🔤 The reader has no SD fonts installed.",
+                                    [[("🔤 Fonts", "m:fo")]])
+                lines = ["🔤 <b>On the reader</b>"]
+                for f in families:
+                    sizes = f.get("sizes", [])
+                    total = sum(x.get("size", 0) for x in f.get("files", []))
+                    ui = "" if suite.UI_FALLBACK_SIZES.issubset(set(sizes)) \
+                        else "  ⚠️ no 8/10/12 — blank chapter list"
+                    lines.append(f"· <b>{html.escape(f.get('name', '?'))}</b> — "
+                                 f"{', '.join(str(s) for s in sizes)} pt, "
+                                 f"{human(total)}{ui}")
+                lines.append("\nDelete one by browsing to it: "
+                             "📲 Device → 📂 Browse → fonts")
+                self.say(chat, "\n".join(lines), [[("🔤 Fonts", "m:fo")]])
+            return self.submit(chat, work)
+
+        family = self.tokens.get(token)
+        if not family:
+            return self.stale(chat)
+
+        if action == "one":
+            warn = ("" if family["ui_ready"] else
+                    "\n\n⚠️ No 8/10/12 pt — books will render, but the chapter "
+                    "list and library will draw <b>blank</b> for CJK titles.")
+            return self.say(
+                chat,
+                f"🔤 <b>{html.escape(family['name'])}</b>\n"
+                f"{', '.join(str(s) for s in family['sizes'])} pt · "
+                f"{len(family['files'])} files · {human(family['bytes'])}"
+                f"{warn}\n\n"
+                f"Sending this takes a few minutes — it is {human(family['bytes'])} "
+                f"over WiFi, and the reader must stay on the File Transfer screen "
+                f"throughout.",
+                [[("📤 Send to device", f"fo:send:{token}")],
+                 [("🔤 Fonts", "m:fo")]])
+
+        if action == "send":
+            return self.submit(chat, lambda: self.send_font(chat, family))
+
+    def send_font(self, chat, family: dict) -> None:
+        """Push a family file by file, then check the device really has it.
+
+        The verify is the point. The reader lists fonts by filename and never
+        opens them, so a short write shows up in the picker and only fails when
+        selected — at which point the family quietly reverts to built-in Noto
+        and looks like a bad font. Comparing byte counts against CHECKSUMS.tsv
+        turns that into a line in a chat message.
+        """
+        host, _ = self.device_host()
+        files = [Path(f) for f in family["files"]]
+        name = family["name"]
+        self.say(chat, f"📤 {name} → {host}\n{len(files)} files, "
+                       f"{human(family['bytes'])}. Starting…")
+
+        failed = []
+        for n, path in enumerate(files, 1):
+            try:
+                suite.device.upload_font(host, name, path)
+                self.say(chat, f"  {n}/{len(files)} ✅ {html.escape(path.name)} "
+                               f"({human(path.stat().st_size)})")
+            except suite.DeviceError as exc:
+                failed.append(path.name)
+                self.say(chat, f"  {n}/{len(files)} ❌ {html.escape(path.name)} — "
+                               f"{html.escape(str(exc)[:120])}")
+
+        report = suite.verify_font_family(host, name)
+        bad = [r for r in report if not r["ok"]]
+        lines = ["", "<b>Verified against CHECKSUMS.tsv</b>"]
+        if not report:
+            lines.append("⚠️ the reader lists no files for this family at all.")
+        elif bad:
+            for r in bad:
+                lines.append(f"❌ {html.escape(r['name'])} — expected "
+                             f"{r['expected']}, device has {r['actual']}")
+            lines.append("\nA short file lists in the picker and reverts to Noto "
+                         "when selected. Send it again.")
+        else:
+            lines.append(f"✅ all {len(report)} files, byte for byte.")
+
+        if not bad and not failed:
+            lines += ["", "<b>Now power-cycle the reader.</b>",
+                      "Fonts are scanned once at boot, so this family does not "
+                      "exist for the reader until it restarts.",
+                      "Then: Settings → Reader → Font Family."]
+        self.say(chat, "\n".join(lines), [[("🔤 Fonts", "m:fo")],
+                                          [("🏠 Menu", "m:main")]])
+
     # -- the device --------------------------------------------------------
 
     def show_device(self, chat) -> None:
@@ -660,6 +773,42 @@ class Bot:
                 self.say(chat, f"Send me the new name for the folder\n"
                                f"<code>{html.escape(path)}</code>\n\n"
                                f"(name only — it stays where it is)")
+            return self.submit(chat, work)
+
+        if action in ("dirrm", "dirrm!"):
+            path = self.tokens.get(token)
+            if path is None:
+                return self.stale(chat)
+            family = self.font_family_of(path)
+            what = (f"the font family <b>{html.escape(family)}</b>" if family
+                    else f"<code>{html.escape(path)}</code> and everything in it")
+            if action == "dirrm":
+                return self.say(chat, f"Delete {what} from the reader?",
+                                [[("Yes, delete", f"dev:dirrm!:{token}"),
+                                  ("No", f"dev:ls:{self.tokens.put(path)}")]])
+
+            def work():
+                host, _ = self.device_host()
+                if family:
+                    # The firmware's own route: it goes through FontInstaller
+                    # and marks the registry dirty, so the reader stops listing
+                    # a family that is no longer there.
+                    suite.device.delete_font_family(host, family)
+                    self.say(chat, f"🗑 {html.escape(family)} removed.")
+                    return self.browse(chat, path.rstrip("/").rpartition("/")[0] or "/")
+                # Everything else: /delete only removes an *empty* directory,
+                # so the contents go first and the folder after.
+                entries = suite.device.list_dir(host, path)
+                if any(e.get("isDirectory") for e in entries):
+                    return self.say(chat, "⚠️ there are folders inside this one — "
+                                          "empty those first.")
+                if entries:
+                    suite.device.delete_many(
+                        host, [f"{path.rstrip('/')}/{e['name']}" for e in entries])
+                ok, detail = suite.device.delete_many(host, [path])
+                self.say(chat, f"🗑 {html.escape(path)} removed." if ok
+                         else f"⚠️ {html.escape(detail[:200])}")
+                self.browse(chat, path.rstrip("/").rpartition("/")[0] or "/")
             return self.submit(chat, work)
 
         if action == "wpall":                      # preview every BMP here
@@ -779,6 +928,17 @@ class Bot:
                             ("🗑 Delete", f"dev:rm:{token}")],
                            [("📂 Back", f"dev:ls:{self.tokens.put(parent)}")]])
 
+    @staticmethod
+    def font_family_of(path: str) -> str | None:
+        """`/fonts/WenZilla` -> `WenZilla`, anything else -> None.
+
+        Fonts get deleted through their own endpoint rather than as a folder of
+        files, so the browse view has to recognise one when it is standing in
+        it. `/fonts` itself is not a family and must not be removable this way.
+        """
+        parts = [p for p in path.strip("/").split("/") if p]
+        return parts[1] if len(parts) == 2 and parts[0].lower() == "fonts" else None
+
     def browse(self, chat, path: str) -> None:
         """List a folder on the SD card.
 
@@ -808,8 +968,10 @@ class Bot:
             rows.append([(f"👁 Preview all {bmps}", f"dev:wpall:{self.tokens.put(path)}")])
         if path != "/":
             up = path.rstrip("/").rpartition("/")[0] or "/"
+            here = self.tokens.put(path)
             rows.append([("⬆️ Up", f"dev:ls:{self.tokens.put(up)}"),
-                         ("✏️ Rename folder", f"dev:dirrn:{self.tokens.put(path)}")])
+                         ("✏️ Rename folder", f"dev:dirrn:{here}")])
+            rows.append([("🗑 Delete this folder", f"dev:dirrm:{here}")])
         rows.append([("🏠 Menu", "m:main")])
         self.say(chat, f"📂 <code>{html.escape(path)}</code> — "
                        f"{len(entries)} item(s)", rows)

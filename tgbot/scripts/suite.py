@@ -176,6 +176,82 @@ def bmp_preview(bmp: Path, png: Path) -> dict:
     return _json_out(rc, out, err, "preview")
 
 
+# -- fonts -----------------------------------------------------------------
+
+FONTS_DIR = REPO_ROOT / "reference" / "fonts"
+UI_FALLBACK_SIZES = {8, 10, 12}
+
+
+def checksums() -> dict:
+    """`reference/fonts/CHECKSUMS.tsv` as {relative path: (bytes, md5)}."""
+    out = {}
+    path = FONTS_DIR / "CHECKSUMS.tsv"
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("#") or not line.strip():
+                continue
+            rel, size, md5 = (line.split("\t") + ["", ""])[:3]
+            out[rel] = (int(size), md5)
+    except (OSError, ValueError):
+        pass
+    return out
+
+
+def local_font_families() -> list:
+    """The families in `reference/fonts/`, with what each one ships.
+
+    `sizes` is worth showing before anyone pushes 24 MB over WiFi: 1.5.0's
+    interface fallback looks for exactly 8, 10 and 12 pt, so a family without
+    them renders books beautifully and leaves the chapter list blank.
+    """
+    families = []
+    if not FONTS_DIR.is_dir():
+        return families
+    for d in sorted(p for p in FONTS_DIR.iterdir() if p.is_dir()):
+        files = sorted(d.glob("*.cpfont"))
+        if not files:
+            continue
+        sizes = sorted({int(m) for f in files
+                        for m in [f.stem.rpartition("_")[2]] if m.isdigit()})
+        families.append({
+            "name": d.name,
+            "path": str(d),
+            "files": [str(f) for f in files],
+            "sizes": sizes,
+            "bytes": sum(f.stat().st_size for f in files),
+            "ui_ready": UI_FALLBACK_SIZES.issubset(set(sizes)),
+        })
+    return families
+
+
+def verify_font_family(host: str, family: str) -> list:
+    """Compare what the device holds against CHECKSUMS.tsv, byte for byte.
+
+    The check that matters. The reader lists fonts by *filename only* — it
+    never opens them — so a truncated copy shows up in the picker and only
+    fails when selected, at which point the family silently reverts to
+    built-in Noto. The upload validates the CPFONT magic, which catches a
+    downloaded HTML page; it cannot catch a short write. Sizes can.
+
+    Returns one record per expected file: name, expected, actual, ok.
+    """
+    expected = {rel.split("/", 1)[1]: size
+                for rel, (size, _) in checksums().items()
+                if rel.startswith(f"{family}/")}
+    on_device = {}
+    for entry in device.fonts(host).get("families", []):
+        if entry.get("name") == family:
+            on_device = {f["name"]: f.get("size", 0) for f in entry.get("files", [])}
+            break
+
+    if not expected:      # a family of your own, with nothing to compare to
+        return [{"name": name, "expected": None, "actual": size, "ok": size > 0}
+                for name, size in sorted(on_device.items())]
+    return [{"name": name, "expected": size, "actual": on_device.get(name),
+             "ok": on_device.get(name) == size}
+            for name, size in sorted(expected.items())]
+
+
 def sleep_dir(host: str) -> str:
     """Which folder the device is actually reading wallpapers from.
 

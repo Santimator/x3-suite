@@ -78,6 +78,7 @@ and pull converge on one file rather than racing to make two.
 🖼 Queue      what is waiting for the reader; push or clear it
 📥 Inbox      files you dropped in workspace/inbox/ by hand
 📲 Device     find it, browse the SD card, push the queue
+🔤 Fonts      families in this repo; send one and verify it landed
 ⚙️ Status     catalog up? queue depth? AI configured? last push?
 ```
 
@@ -152,6 +153,41 @@ carries it in a token, and sends it back untouched. You only ever type the
 
 That token is also how a 200-character filename fits in a button at all —
 Telegram caps `callback_data` at 64 bytes.
+
+### A font
+
+**🔤 Fonts** lists the families in `reference/fonts/` with their sizes and
+weight, and flags any that lacks 8/10/12 pt — those render books perfectly and
+leave the chapter list **blank** for CJK, which is the least obvious failure
+this device has.
+
+Sending one is not like sending a wallpaper: a family is ~24 MB in six files,
+the largest 6.8 MB, so it takes minutes and the reader has to stay on the File
+Transfer screen throughout. Files go one at a time with a tick each, through
+`POST /api/fonts/upload` — the firmware creates the family directory itself and
+checks the `CPFONT\0\0` magic, so it refuses a "save link as" HTML page
+outright.
+
+**Then it verifies, and that is the point of the whole feature.** The reader
+lists fonts by *filename only* — it never opens them — so a truncated copy
+appears in the picker and only fails when selected, at which moment the family
+silently reverts to built-in Noto and looks for all the world like a bad font.
+The magic-byte check cannot catch it: the magic is fine and the file is short.
+So after the push, `GET /api/fonts` byte counts are compared against
+`reference/fonts/CHECKSUMS.tsv`, file by file, and you get either "all six,
+byte for byte" or exactly which one is wrong.
+
+Then it tells you to **power-cycle the reader**, because fonts are scanned once
+at boot and the family does not exist until it restarts. The bot deliberately
+does not offer to select it for you: `fontFamily` is an enum index built at
+boot from the scanned registry, so before the reboot there is no index to set,
+and after the reboot it is one tap on the device.
+
+Deleting a family is in the browse view — walk to `/fonts/<Family>` and the
+folder's own **🗑 Delete this folder** becomes a family delete, routed through
+`POST /api/fonts/delete` so the firmware's `FontInstaller` does it and marks the
+registry dirty. For any other folder the same button empties it and removes it,
+because `/delete` only takes a directory that is already empty.
 
 ### A book
 

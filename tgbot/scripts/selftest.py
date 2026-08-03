@@ -400,6 +400,67 @@ def check_tokens(tmp: Path) -> None:
           str(tg.sent))
 
 
+# -- 4c. fonts -------------------------------------------------------------
+
+
+def check_fonts(tmp: Path) -> None:
+    print("\nfonts:")
+    families = suite.local_font_families()
+    check("the repo's families are found", len(families) >= 2,
+          str([f["name"] for f in families]))
+    if families:
+        by_name = {f["name"]: f for f in families}
+        wz = by_name.get("WenZilla")
+        check("a shipped family reports 8/10/12 as present",
+              bool(wz) and wz["ui_ready"],
+              str(wz["sizes"]) if wz else "WenZilla missing")
+        check("... and its sizes come from the filenames",
+              bool(wz) and wz["sizes"] == [8, 10, 12, 14, 16, 18],
+              str(wz["sizes"]) if wz else "")
+
+    sums = suite.checksums()
+    check("CHECKSUMS.tsv parses", len(sums) >= 12, f"{len(sums)} rows")
+
+    # The verify is the whole point of pushing a font from a phone, so grade it
+    # against a device that reports a short file — the failure the reader
+    # itself cannot tell you about.
+    family = "WenZilla"
+    expected = {rel.split("/", 1)[1]: size for rel, (size, _) in sums.items()
+                if rel.startswith(f"{family}/")}
+    good = {"families": [{"name": family, "sizes": [8, 10, 12, 14, 16, 18],
+                          "files": [{"name": n, "size": s}
+                                    for n, s in expected.items()]}]}
+    short = json.loads(json.dumps(good))
+    short["families"][0]["files"][0]["size"] -= 1
+
+    original = suite.device.fonts
+    try:
+        suite.device.fonts = lambda host: good
+        check("a complete family verifies clean",
+              all(r["ok"] for r in suite.verify_font_family("h", family)))
+
+        suite.device.fonts = lambda host: short
+        report = suite.verify_font_family("h", family)
+        bad = [r for r in report if not r["ok"]]
+        check("one byte short is caught", len(bad) == 1, str(bad))
+        check("... and it names expected vs actual",
+              bad and bad[0]["expected"] == bad[0]["actual"] + 1, str(bad))
+
+        suite.device.fonts = lambda host: {"families": []}
+        check("a family the device never received is all failures",
+              all(not r["ok"] for r in suite.verify_font_family("h", family)))
+    finally:
+        suite.device.fonts = original
+
+    # Deleting a font family goes through the firmware's own endpoint; a plain
+    # folder does not. Recognising which is which is the whole of that branch.
+    bot, _ = make_bot(tmp)
+    check("/fonts/WenZilla is a family", bot.font_family_of("/fonts/WenZilla") == "WenZilla")
+    check("/fonts itself is not", bot.font_family_of("/fonts") is None)
+    check("/fonts/X/Y is not", bot.font_family_of("/fonts/X/Y") is None)
+    check("/sleep is not", bot.font_family_of("/sleep") is None)
+
+
 # -- 5b. the real entry point actually starts ------------------------------
 
 
@@ -551,6 +612,7 @@ def main() -> int:
         check_queue(tmp)
         check_push_is_all_or_nothing(tmp)
         check_book_delivery(tmp)
+        check_fonts(tmp)
         check_tokens(tmp)
         check_device_menu(tmp)
         check_entry_point()

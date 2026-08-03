@@ -215,7 +215,11 @@ only while that screen is up.
 | Protected names | `rename`, `move`, `delete` and `download` all guard on the **final path segment** only. So a file *inside* `/.sleep` is fair game — which is why wallpapers can be replaced — while `/.sleep` itself cannot be renamed or deleted |
 | Names on the card | Whatever is there, byte for byte, and `Storage.exists()` compares bytes. Books from other catalogs arrive **NFD-decomposed** (`é` as `e` + U+0301); normalizing a name before sending it back yields `Item not found` against a file plainly present. Round-trip listings verbatim |
 | Settings | `GET`/`POST /api/settings`, partial JSON by key (`{"sleepScreen": 2}`); keys are in `src/SettingsList.h` |
-| Fonts | `POST /api/fonts/upload` with `family` + `file` — the network route for `reference/fonts/` |
+| Delete | `POST /delete?path=...`, or `paths=` with a **JSON array** to batch. A directory is removed only when already **empty**, so clearing one means the files first and the folder after |
+| Fonts | `GET /api/fonts` → `{families:[{name, sizes:[…], files:[{name,size}]}], maxFamilies}` (128). `POST /api/fonts/upload` with `family` + `file` — the firmware creates the family directory itself, and checks the `CPFONT\0\0` magic on the first chunk, so a "save link as" HTML page is refused. It cannot catch a **truncated** upload: the magic is fine and the file is short. Verify sizes against `reference/fonts/CHECKSUMS.tsv` |
+| Font delete | `POST /api/fonts/delete`, JSON body `{"family":"WenZilla"}` — removes the whole family through the firmware's own `FontInstaller` and marks the registry dirty. Prefer it to deleting the files by hand |
+| Font size | A family is ~24 MB in six files, the largest 6.8 MB. Minutes over WiFi; the twenty-second timeout used everywhere else is far too short |
+| Selecting a font | `fontFamily` in `/api/settings` is an **enum index built at boot** from the scanned registry (built-ins, then SD families). A family uploaded just now is not in it — the device must power-cycle before it can be selected at all, so there is no "install and set" in one step |
 | WebDAV | Port 80, PUT overwrites atomically. **Refuses any path segment beginning with `.`** — `isProtectedPath` walks every segment, not just the last — so `/.sleep` and everything in it is unreachable this way, and `/sleep` is not |
 | Folders | `/rename` and `/move` both end in "Only files can be…"; a **directory can only be renamed through WebDAV `MOVE`**, which has no directory check and calls the filesystem's own rename. So a visible folder like `/sleep` can be renamed and `/.sleep` cannot, by either route. *Source-confirmed 1.5.0, not yet device-confirmed.* |
 | Also | WebSocket fast upload on **81** (`START:<name>:<size>:<path>` → `READY` → binary → `DONE`) |
@@ -258,6 +262,37 @@ CrossPoint's converter is `lib/EpdFont/scripts/fontconvert_sdcard.py`
 (same script the https://crosspointreader.com/fonts web builder wraps — note
 the builder requires you to *upload* a base TTF/OTF; it ships no fonts, and
 the official catalog contains zero CJK families).
+
+**Building one, without losing an evening to it.** There is no font tool in
+this suite and there should not be: the upstream builder is maintained, and
+duplicating it would mean maintaining a copy. What this repo has instead is
+the list of ways it goes wrong. If you are building a family — by hand or with
+the web builder — this is the whole of it:
+
+1. **Intervals: a broad preset** (`latin-ext,cjk`). Never the book's exact
+   charset. A subset font passes every check the firmware makes, lists in the
+   picker, and then silently reverts to built-in Noto when a book is opened.
+   Glyphs stream from SD, so the big font costs no RAM — there is nothing to
+   gain by subsetting and an evening to lose.
+2. **Sizes `8,10,12,14,16,18`.** The last three are for reading; the first
+   three are what 1.5.0's interface fallback looks for by **exact** size. Omit
+   them and books render perfectly while the chapter list, library and file
+   browser draw *blank* for CJK — no error, no tofu, nothing.
+3. **Regular only.** Bold and italic duplicate 22k CJK bitmaps per style for no
+   CJK gain, since WenKai has no bold or italic.
+4. **Layout `/fonts/<Family>/<Family>_<size>.cpfont`.** Loose files are ignored,
+   and the scan happens at boot only — a file copied to a running device does
+   not exist as far as the reader is concerned.
+5. **Verify the bytes afterwards.** Discovery parses filenames and never opens
+   a file, so a truncated copy is indistinguishable from a good one until you
+   select it. `GET /api/fonts` reports byte counts; compare them against
+   `reference/fonts/CHECKSUMS.tsv` (the Telegram bot does this automatically
+   after a push).
+
+Reading the symptom backwards: *lists but reverts to Noto* → sparse intervals,
+or a truncated file, in that order. *Chapter list blank* → no 8/10/12. *Tofu at
+8 pt but nothing at 10/12* → that is the U+FFFD tell described above, and it
+means the glyph is genuinely missing rather than the font being broken.
 
 1. **Use broad preset intervals — never sparse custom ranges.** This is the
    hard-won one: fonts subset to a book's exact charset (hundreds of tiny
