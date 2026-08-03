@@ -229,7 +229,9 @@ given. The one part still unseen on the panel is the *mat*, since every image
 in that run was big enough to fill the screen and never got framed.
 
 Drop pictures in `workspace/wallpapers/`, run one command, and they're files
-the reader can draw. Run the second and they're on it.
+the reader can draw. Run the second and they're on it. One sample ships with
+the repo — `finally-some-peace.png` — so a fresh clone has something to convert
+before you've dropped anything in.
 
 ```bash
 .venv/bin/pip install -r wallpaper-maker/requirements.txt

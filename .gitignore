@@ -55,3 +55,9 @@ workspace/*
 !workspace/being-earnest/
 # pdf2epub
 !workspace/alcaldes-encontrados/
+# wallpaper-maker — the one sample, not the folder. workspace/wallpapers/ is
+# your drop zone, so it is un-ignored just far enough to reach that file and
+# re-ignored immediately; anything else you put there stays yours.
+!workspace/wallpapers/
+workspace/wallpapers/*
+!workspace/wallpapers/finally-some-peace.png

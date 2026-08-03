@@ -34,6 +34,8 @@ a port of the **device's own BMP reader** — see *The gate* below.
 # 1. drop images in workspace/wallpapers/, then:
 .venv/bin/python wallpaper-maker/scripts/make_wallpaper.py
 #    -> workspace/wallpapers/build/*.bmp
+#    (workspace/wallpapers/finally-some-peace.png ships with the repo, so this
+#     produces something on a fresh clone with nothing dropped in yet)
 
 # 2. on the device: Home -> File Transfer -> Join a Network, then:
 python3 wallpaper-maker/scripts/push_wallpaper.py
