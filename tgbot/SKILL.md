@@ -74,13 +74,20 @@ and pull converge on one file rather than racing to make two.
 ## What the buttons do
 
 ```
-📚 Library    what the catalog would serve — rename or delete, server-side
-🖼 Queue      what is waiting for the reader; push or clear it
+📚 Library    books the catalog would serve  ┐
+🖼 Wallpapers sleep screens built here       ├ three collections on the server
+🔤 Fonts      families in this repo          ┘
 📥 Inbox      files you dropped in workspace/inbox/ by hand
 📲 Device     find it, browse the SD card, push the queue
-🔤 Fonts      families in this repo; send one and verify it landed
+📤 Queue      what is waiting for the reader; push or clear it
 ⚙️ Status     catalog up? queue depth? AI configured? last push?
 ```
+
+The first three are deliberately the same shape: a list of what this server
+holds, each item openable, each sendable to the reader. Wallpapers were the odd
+one out for a while — you built one, pushed it, and it vanished from view even
+though the BMP was still sitting in `workspace/wallpapers/build/`. Nothing ever
+cleaned that folder, so the collection already existed; it just had no door.
 
 ### A photo becomes a sleep screen
 
@@ -98,6 +105,22 @@ test and would misfire on real photos: a 500×750 image is smaller in both
 dimensions and still fills, because it only has to grow 1.06×. `MAX_UPSCALE`
 and `MIN_MAT_AREA` are judgement calls that live in `make_wallpaper.py`, and
 `probe()` exists so this bot can ask rather than re-derive them.
+
+### The wallpapers you have built
+
+**🖼 Wallpapers** lists them newest first, marks the ones already queued, and
+opens each as the picture the panel would draw — rendered on demand through
+`crosspoint_bmp` if the `.png` beside it is missing, which it will be for
+anything built before `--preview` or straight from the CLI. From there: queue it
+for the reader, or delete the server copy (which never touches the card).
+
+Queueing the same file twice is refused rather than doubled, since re-sending
+one you already queued is a slip, not an instruction. **📲 On the device** jumps
+to the folder the reader actually reads, so "what do I have" and "what does it
+have" are one tap apart.
+
+This is what makes a wiped SD card a non-event: everything you ever built is
+still here, and putting it all back is a few taps.
 
 ### A push session
 

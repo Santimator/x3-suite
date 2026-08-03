@@ -222,6 +222,8 @@ class Bot:
             self.show_queue(chat)
         elif cmd == "library":
             self.submit(chat, lambda: self.show_library(chat))
+        elif cmd == "wallpapers":
+            self.submit(chat, lambda: self.show_wallpapers(chat))
         elif cmd == "device":
             self.show_device(chat)
         elif cmd == "inbox":
@@ -292,10 +294,13 @@ class Bot:
     # -- menus -------------------------------------------------------------
 
     def menu(self, chat, text: str = "Menu") -> None:
+        # Three collections on the server, then the ways in and out of it.
+        # The queue is an outbox, so it is 📤 rather than a second 🖼.
         self.say(chat, text, [
-            [("📚 Library", "m:lib"), ("🖼 Queue", "m:q")],
-            [("📥 Inbox", "m:in"), ("📲 Device", "m:dev")],
-            [("🔤 Fonts", "m:fo"), ("⚙️ Status", "m:st")],
+            [("📚 Library", "m:lib"), ("🖼 Wallpapers", "m:wl")],
+            [("🔤 Fonts", "m:fo"), ("📥 Inbox", "m:in")],
+            [("📲 Device", "m:dev"), ("📤 Queue", "m:q")],
+            [("⚙️ Status", "m:st")],
         ])
 
     def on_callback(self, cb: dict) -> None:
@@ -310,11 +315,14 @@ class Bot:
                     "in": lambda: self.show_inbox(chat),
                     "dev": lambda: self.show_device(chat),
                     "fo": lambda: self.show_fonts(chat),
+                    "wl": lambda: self.show_wallpapers(chat),
                     "st": lambda: self.submit(chat, lambda: self.show_status(chat)),
                     "main": lambda: self.menu(chat)}.get(rest, lambda: None)()
 
         if head == "fo":
             return self.on_font_callback(chat, rest)
+        if head == "wl":
+            return self.on_wallpaper_callback(chat, rest)
 
         if head == "wp":                       # wp:<token>:<mat>
             token, _, mat = rest.partition(":")
@@ -686,6 +694,94 @@ class Bot:
         if not ready:
             lines.append(f"\n{html.escape(why)}")
         self.say(chat, "\n".join(lines), [[("🏠 Menu", "m:main")]])
+
+    # -- the wallpaper collection ------------------------------------------
+
+    def show_wallpapers(self, chat) -> None:
+        """Everything built here, ready to go back on the card.
+
+        The counterpart of 📚 Library and 🔤 Fonts: a collection that lives on
+        the server, browsable and re-sendable. Pushing one never removed the
+        file, so this is also the answer to "the card got wiped, put them all
+        back".
+        """
+        walls = suite.local_wallpapers()
+        if not walls:
+            return self.say(
+                chat,
+                "🖼 No wallpapers built yet.\n\nSend me a picture and it "
+                "becomes one — they collect here afterwards.",
+                [[("📲 On the device", "wl:dev:")], [("🏠 Menu", "m:main")]])
+        queued = {i["path"] for i in self.queue.items()}
+        rows = []
+        for w in walls[:20]:
+            mark = "📤 " if w["path"] in queued else ""
+            rows.append([(f"{mark}{w['name'][:30]} · {human(w['bytes'])}",
+                          f"wl:one:{self.tokens.put(w)}")])
+        rows.append([("📲 On the device", "wl:dev:")])
+        rows.append([("🏠 Menu", "m:main")])
+        self.say(chat, f"🖼 {len(walls)} built here"
+                       + (f", {len(queued & {w['path'] for w in walls})} queued"
+                          if queued else "") + ":", rows)
+
+    def on_wallpaper_callback(self, chat, rest: str) -> None:
+        action, _, token = rest.partition(":")
+
+        if action == "dev":
+            def work():
+                host, _ = self.device_host()
+                self.browse(chat, suite.sleep_dir(host))
+            return self.submit(chat, work)
+
+        wall = self.tokens.get(token)
+        if not wall:
+            return self.stale(chat)
+        path = Path(wall["path"])
+
+        if action == "one":
+            def work():
+                # A wallpaper built before --preview existed, or by the CLI, has
+                # no PNG beside it. Render one the way the panel would draw it
+                # rather than showing nothing.
+                png = Path(wall["png"]) if wall.get("png") else \
+                    path.with_suffix(".png")
+                if not png.exists():
+                    suite.bmp_preview(path, png)
+                queued = any(i["path"] == str(path) for i in self.queue.items())
+                self.send_preview(
+                    chat, png,
+                    f"<b>{html.escape(path.name)}</b>\n{human(wall['bytes'])}"
+                    + ("\n📤 already queued" if queued else ""),
+                    [[("📤 Queue for the device", f"wl:q:{token}")],
+                     [("🗑 Delete", f"wl:rm:{token}")],
+                     [("🖼 Wallpapers", "m:wl")]])
+            return self.submit(chat, work)
+
+        if action == "q":
+            if any(i["path"] == str(path) for i in self.queue.items()):
+                return self.say(chat, "Already in the queue.",
+                                [[("📲 Push now", "push:ask"),
+                                  ("🖼 Wallpapers", "m:wl")]])
+            self.queue.add("wallpaper", str(path))
+            return self.say(chat, f"📤 queued — {len(self.queue)} waiting.",
+                            [[("📲 Push now", "push:ask"),
+                              ("🖼 Wallpapers", "m:wl")]])
+
+        if action == "rm":
+            return self.say(chat, f"Delete <code>{html.escape(path.name)}</code> "
+                                  f"from the server? It stays on the reader if "
+                                  f"you already sent it.",
+                            [[("Yes, delete", f"wl:rm!:{token}"),
+                              ("No", f"wl:one:{token}")]])
+        if action == "rm!":
+            if not inside(self.workspace, path):
+                return self.say(chat, "⚠️ that is outside the workspace.")
+            path.unlink(missing_ok=True)
+            path.with_suffix(".png").unlink(missing_ok=True)
+            return self.say(chat, "🗑 gone.", [[("🖼 Wallpapers", "m:wl")]])
+
+        log("unhandled wallpaper callback:", action, token)
+        self.say(chat, "That button did nothing — please tell Claude.")
 
     # -- fonts -------------------------------------------------------------
 
@@ -1218,6 +1314,7 @@ def main(argv=None) -> int:
             {"command": "queue", "description": "what is waiting for the reader"},
             {"command": "push", "description": "send the queue to the X3"},
             {"command": "library", "description": "books the catalog serves"},
+            {"command": "wallpapers", "description": "sleep screens built here"},
             {"command": "device", "description": "browse the reader"},
             {"command": "inbox", "description": "files dropped on the server"},
         ])

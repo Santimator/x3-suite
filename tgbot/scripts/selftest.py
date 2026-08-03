@@ -453,6 +453,79 @@ def check_tokens(tmp: Path) -> None:
           str(tg.sent))
 
 
+# -- 4d. the wallpaper collection ------------------------------------------
+
+
+def check_wallpaper_collection(tmp: Path) -> None:
+    print("\nwallpapers as a collection, not a one-way trip:")
+    bot, tg = make_bot(tmp)
+    build = bot.workspace / "wallpapers" / "build"
+    build.mkdir(parents=True, exist_ok=True)
+
+    original_out, original_preview = suite.WALLPAPER_OUT, suite.bmp_preview
+    try:
+        suite.WALLPAPER_OUT = build
+        suite.bmp_preview = lambda bmp, png: (Path(png).write_bytes(b"x"),
+                                              {"png": str(png)})[-1]
+
+        tg.sent.clear()
+        bot.handle(cb("m:wl"))
+        check("an empty collection says so rather than nothing",
+              "No wallpapers" in tg.sent[-1]["text"], tg.sent[-1]["text"][:60])
+
+        for name in ("dawn.bmp", "harbour.bmp"):
+            (build / name).write_bytes(b"BM" + b"\0" * 100)
+
+        tg.sent.clear()
+        bot.handle(cb("m:wl"))
+        labels = [b[0] for row in (tg.sent[-1]["keyboard"] or []) for b in row]
+        check("a pushed wallpaper is still listed afterwards",
+              any("dawn.bmp" in x for x in labels), str(labels))
+
+        one = [b[1] for row in (tg.sent[-1]["keyboard"] or []) for b in row
+               if "dawn" in b[0]][0]
+        tg.sent.clear()
+        bot.handle(cb(one))
+        check("tapping it renders a preview even with no PNG beside it",
+              "photo" in tg.sent[-1], str(tg.sent[-1])[:120])
+
+        send = [b[1] for row in (tg.sent[-1]["keyboard"] or []) for b in row
+                if "Queue" in b[0]][0]
+        bot.handle(cb(send))
+        check("it can be queued from here", len(bot.queue) == 1,
+              str(bot.queue.items()))
+        tg.sent.clear()
+        bot.handle(cb(send))
+        check("and queueing it twice is refused, not doubled",
+              len(bot.queue) == 1 and "Already" in tg.sent[-1]["text"],
+              tg.sent[-1]["text"])
+
+        tg.sent.clear()
+        bot.handle(cb("m:wl"))
+        check("the listing marks what is already queued",
+              any("📤" in b[0] for row in (tg.sent[-1]["keyboard"] or [])
+                  for b in row), str(tg.sent[-1]["keyboard"]))
+
+        # Deleting here removes the server copy only — the card keeps its own.
+        rm = one.replace("wl:one:", "wl:rm!:")
+        bot.handle(cb(rm))
+        check("deleting removes the BMP and its preview",
+              not (build / "dawn.bmp").exists()
+              and not (build / "dawn.png").exists())
+
+        outsider = tmp / "elsewhere.bmp"
+        outsider.write_bytes(b"BM")
+        token = bot.tokens.put({"path": str(outsider), "bytes": 2,
+                                "name": "elsewhere.bmp", "png": None})
+        tg.sent.clear()
+        bot.handle(cb(f"wl:rm!:{token}"))
+        check("and it will not reach outside the workspace",
+              outsider.exists() and "outside" in tg.sent[-1]["text"],
+              tg.sent[-1]["text"])
+    finally:
+        suite.WALLPAPER_OUT, suite.bmp_preview = original_out, original_preview
+
+
 # -- 4c. fonts -------------------------------------------------------------
 
 
@@ -751,6 +824,7 @@ def main() -> int:
         check_queue(tmp)
         check_push_is_all_or_nothing(tmp)
         check_book_delivery(tmp)
+        check_wallpaper_collection(tmp)
         check_fonts(tmp)
         check_tokens(tmp)
         check_device_menu(tmp)

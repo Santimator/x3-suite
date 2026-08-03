@@ -162,6 +162,26 @@ def build_wallpaper(src: Path, mat: str = "waves") -> tuple:
     return bmp, bmp.with_suffix(".png")
 
 
+def local_wallpapers() -> list:
+    """Every wallpaper this server has built, newest first.
+
+    `workspace/wallpapers/build/` was always the collection — the converter
+    writes there and nothing ever cleans it — but until now the only way to see
+    it was over ssh. Pushing a wallpaper leaves the file behind by design, so
+    the folder accumulates exactly the set worth re-sending after a card wipe.
+    """
+    out = []
+    if not WALLPAPER_OUT.is_dir():
+        return out
+    for bmp in sorted(WALLPAPER_OUT.glob("*.bmp"),
+                      key=lambda p: p.stat().st_mtime, reverse=True):
+        png = bmp.with_suffix(".png")
+        out.append({"name": bmp.name, "path": str(bmp),
+                    "bytes": bmp.stat().st_size, "mtime": bmp.stat().st_mtime,
+                    "png": str(png) if png.exists() else None})
+    return out
+
+
 def bmp_preview(bmp: Path, png: Path) -> dict:
     """Render a wallpaper as the *panel* would draw it.
 
