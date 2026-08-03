@@ -280,7 +280,7 @@ def device_book_name(author: str, title: str, host: str | None = None) -> str:
     fmt = opds_client.FILENAME_AUTHOR_TITLE
     if host:
         try:
-            fmt = int(device.settings(host).get("opdsFilenameFormat", fmt))
+            fmt = int(device.setting_value(host, "opdsFilenameFormat", fmt))
         except (DeviceError, TypeError, ValueError):
             pass            # the default is also the pre-1.5.0 behaviour
     return opds_client.opds_book_filename(author or "", title or "", fmt)

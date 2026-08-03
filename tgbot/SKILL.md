@@ -177,11 +177,20 @@ So after the push, `GET /api/fonts` byte counts are compared against
 `reference/fonts/CHECKSUMS.tsv`, file by file, and you get either "all six,
 byte for byte" or exactly which one is wrong.
 
-Then it tells you to **power-cycle the reader**, because fonts are scanned once
-at boot and the family does not exist until it restarts. The bot deliberately
-does not offer to select it for you: `fontFamily` is an enum index built at
-boot from the scanned registry, so before the reboot there is no index to set,
-and after the reboot it is one tap on the device.
+Then it **selects the family for you** and says it takes effect at the next
+power-cycle. Not asked, done: nobody spends four minutes uploading a font they
+did not intend to read with, and it is two taps to change on the device.
+
+That this works at all is a nicety of the firmware. `fontFamily` looks like an
+enum index over the scanned registry, which a family uploaded seconds ago is
+not reliably part of — but the *setter stores the name*
+(`SETTINGS.sdFontFamilyName`) and the getter resolves it back each time. So the
+choice can be made before the reboot that makes the font usable: it persists,
+and the next boot's scan makes it real. The bot finds the index by looking the
+family up in the enum's own `options` list rather than adding to a built-in
+count, so a firmware that ships another built-in face cannot silently move the
+selection onto the wrong family — and it reads the value back, so a family the
+registry has not picked up is reported rather than assumed.
 
 Deleting a family is in the browse view — walk to `/fonts/<Family>` and the
 folder's own **🗑 Delete this folder** becomes a family delete, routed through

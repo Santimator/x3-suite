@@ -709,10 +709,21 @@ class Bot:
             lines.append(f"✅ all {len(report)} files, byte for byte.")
 
         if not bad and not failed:
-            lines += ["", "<b>Now power-cycle the reader.</b>",
-                      "Fonts are scanned once at boot, so this family does not "
-                      "exist for the reader until it restarts.",
-                      "Then: Settings → Reader → Font Family."]
+            # Nobody spends four minutes uploading a font they did not intend to
+            # read with, so this is done rather than asked. It is two taps to
+            # change on the device, and the message says what happened.
+            ok, detail = suite.device.select_font_family(host, name)
+            if ok:
+                lines += ["", f"✅ <b>{html.escape(name)} is now the reading font.</b>",
+                          "It takes effect when you <b>power-cycle the reader</b> — "
+                          "fonts are scanned at boot, so the choice is saved now "
+                          "and becomes real on the next start.",
+                          "To pick a different one: Settings → Reader → Font Family."]
+            else:
+                lines += ["", "<b>Now power-cycle the reader</b>, then choose it "
+                          "under Settings → Reader → Font Family.",
+                          f"<i>(couldn't select it from here: "
+                          f"{html.escape(str(detail)[:120])})</i>"]
         self.say(chat, "\n".join(lines), [[("🔤 Fonts", "m:fo")],
                                           [("🏠 Menu", "m:main")]])
 

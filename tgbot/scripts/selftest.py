@@ -452,6 +452,37 @@ def check_fonts(tmp: Path) -> None:
     finally:
         suite.device.fonts = original
 
+    # Selecting the family it just sent. The index is looked up by label, never
+    # computed from a built-in count, so a firmware that adds a built-in font
+    # cannot silently shift the selection onto the wrong family.
+    posted = {}
+    entry = {"key": "fontFamily", "type": "enum", "value": 0,
+             "options": ["Noto Serif", "Noto Sans", "WenKaiFull", "WenZilla"]}
+    orig_req = suite.device.request
+
+    def fake_request(host, path, *, method="GET", query=None, body=None, **kw):
+        if path == "/api/settings" and method == "GET":
+            return 200, json.dumps([entry]).encode()
+        if path == "/api/settings" and method == "POST":
+            posted.update(json.loads(body))
+            entry["value"] = posted["fontFamily"]      # the reader read back
+            return 200, b"{}"
+        return orig_req(host, path, method=method, query=query, body=body, **kw)
+
+    try:
+        suite.device.request = fake_request
+        ok, detail = suite.device.select_font_family("h", "WenZilla")
+        check("selecting a family posts the label's own index",
+              ok and posted.get("fontFamily") == 3, f"{ok} {detail} {posted}")
+
+        entry["options"] = ["Noto Serif", "Noto Sans"]
+        entry["value"] = 0
+        ok, detail = suite.device.select_font_family("h", "WenZilla")
+        check("a family the reader has not scanned is declined, not guessed",
+              not ok and "does not list" in detail, detail)
+    finally:
+        suite.device.request = orig_req
+
     # Deleting a font family goes through the firmware's own endpoint; a plain
     # folder does not. Recognising which is which is the whole of that branch.
     bot, _ = make_bot(tmp)

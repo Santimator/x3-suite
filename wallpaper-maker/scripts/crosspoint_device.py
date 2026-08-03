@@ -420,13 +420,63 @@ def dav_move(host: str, path: str, dest: str) -> None:
 
 
 def settings(host: str) -> dict:
+    """`GET /api/settings`, normalised to {key: entry}.
+
+    The firmware emits a *list* of setting objects — `{key, name, category,
+    type, value}`, plus an `options` array of labels for an enum. Keying it
+    here means callers never have to care, and never accidentally treat the
+    list as a mapping.
+    """
     code, body = request(host, "/api/settings")
     if code != 200:
         raise DeviceError(f"/api/settings returned {code}")
     try:
-        return json.loads(body)
+        data = json.loads(body)
     except json.JSONDecodeError as exc:
         raise DeviceError("settings came back unreadable") from exc
+    if isinstance(data, dict):
+        data = data.get("settings", data)
+    if isinstance(data, list):
+        return {e.get("key"): e for e in data if isinstance(e, dict) and e.get("key")}
+    return {k: {"value": v} for k, v in data.items()}
+
+
+def setting_value(host: str, key: str, default=None):
+    entry = settings(host).get(key)
+    return default if entry is None else entry.get("value", default)
+
+
+def select_font_family(host: str, family: str) -> tuple:
+    """Make `family` the reading font. Returns (ok, detail).
+
+    Selection is stored by **name**, not by index: the setter writes
+    `SETTINGS.sdFontFamilyName`, and the getter resolves that name back to a
+    position each time the setting is built. That is why this works before a
+    reboot even though the font itself is not usable yet — the choice persists,
+    and the next boot's scan makes it real.
+
+    The index to post is found by *looking up the label*, never by adding to a
+    built-in count: `GET /api/settings` hands back the enum's own `options`
+    array, and `POST` rebuilds that list from the live registry, which the
+    upload already marked dirty. So the arithmetic that would rot is replaced
+    by a lookup that cannot.
+
+    It is checked by reading the value back, because a family the registry has
+    not picked up would leave the setting silently unchanged.
+    """
+    entry = settings(host).get("fontFamily")
+    if not entry:
+        return False, "this firmware exposes no fontFamily setting"
+    options = entry.get("options") or []
+    if family not in options:
+        return False, (f"the reader does not list {family} yet "
+                       f"(it has: {', '.join(options) or 'nothing'})")
+    index = options.index(family)
+    if not set_settings(host, {"fontFamily": index}):
+        return False, "the reader refused the setting"
+    if setting_value(host, "fontFamily") != index:
+        return False, "the setting did not stick"
+    return True, family
 
 
 def set_settings(host: str, values: dict) -> bool:
