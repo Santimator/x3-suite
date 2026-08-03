@@ -23,19 +23,22 @@ What comes out, and why each part of it:
                          path (--mat waves), so the picture appears to carry on
                          in all four directions through rippled glass; --mat
                          edges is the quiet version, a flat level per sector.
-  24-bpp greyscale BMP   BMP because the sleep screen reads nothing else — not
+  4-bpp indexed BMP      BMP because the sleep screen reads nothing else — not
                          PNG, not JPEG, and not .pxc, which is the EPUB reader's
                          internal pixel cache and has never been a wallpaper
-                         format. Continuous tone because the *reader* then does
-                         the quantising, with its own Atkinson dither, and on
-                         photographs that beats anything we do here. Credit for
-                         the approach: wallpaperconverter.jakegreen.dev.
-  the reader dithers,    Its Atkinson carries only 3/4 of the error, so it
-  not us                 crushes a near-black sky to solid black. Ours kept
-                         trying to represent that sky and stippled the whole
-                         thing. --dither floyd goes back to dithering here and
-                         shipping 4-bpp, which the panel maps through untouched:
-                         exact, and worse to look at.
+                         format. Indexed on the panel's own four states, so the
+                         firmware maps it straight through and quantises nothing.
+  CrossPoint's own       We reproduce the reader's quantiser rather than invent
+  quantiser, run here    one: crosspoint_bmp.firmware_quantise is a port of its
+                         AtkinsonDitherer. The panel therefore gets exactly the
+                         picture it would have computed from a full-tone file,
+                         without six times the bytes or the ESP32 doing the
+                         arithmetic every sleep. Its thresholds are 30/50/140
+                         and it reconstructs the states as 15/30/80/210 — not an
+                         even ramp, which is why a night sky lands solid black
+                         instead of stippled. --dither floyd substitutes our own
+                         error diffusion, which aims at an even ramp and gets
+                         midtones too dark; kept for comparison.
   autocontrast, then     A phone photo uses maybe half the range; on four levels
   gamma 0.85, then       that half becomes two. Stretch first, lift the midtones
   unsharp mask           (e-ink reads darker than the screen you chose the image
@@ -67,6 +70,9 @@ import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageOps, ImageStat
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import crosspoint_bmp as cp                                  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -176,15 +182,22 @@ def scale_to_panel(img: Image.Image, mode: str = "cover") -> Image.Image:
     return img.resize(size, Image.LANCZOS)
 
 
-def _band_level(img: Image.Image, box) -> int:
-    """The native level a strip of the image sits closest to.
+def _band_level(img: Image.Image, box, flat) -> int:
+    """The value a strip of the image sits closest to that will dither flat.
 
     Snapping matters more than it looks: a mat filled with the raw mean dithers
-    into a large field of visible grain, while one sitting exactly on 0/85/170/
-    255 comes out perfectly flat. Flat is the only large area this panel draws
-    without noise.
+    into a large field of visible grain, while one landing on a value the
+    quantiser reconstructs exactly comes out perfectly flat — the only large
+    area this panel draws without noise.
+
+    Which values those are depends on who quantises, and they are *not* the
+    same. Our own dither reconstructs 0/85/170/255, so those are flat for it.
+    The reader's reconstructs 15/30/80/210, so feeding it 170 leaves a residual
+    error of -5 per pixel that accumulates until the level drops — a mat that
+    slowly drifts. Hence `flat` rather than a constant.
     """
-    return LEVELS[_nearest(ImageStat.Stat(img.crop(box)).mean[0])]
+    mean = ImageStat.Stat(img.crop(box)).mean[0]
+    return min(flat, key=lambda v: abs(v - mean))
 
 
 def _mitres(ox: int, oy: int, iw: int, ih: int) -> dict:
@@ -199,7 +212,7 @@ def _mitres(ox: int, oy: int, iw: int, ih: int) -> dict:
     }
 
 
-def _edge_mat(img: Image.Image, ox: int, oy: int) -> Image.Image:
+def _edge_mat(img: Image.Image, ox: int, oy: int, flat) -> Image.Image:
     """A passe-partout: four sectors, each continuing the edge it touches.
 
     Every side takes its level from a band of the image along that edge, so a
@@ -219,10 +232,10 @@ def _edge_mat(img: Image.Image, ox: int, oy: int) -> Image.Image:
     band_h = max(1, min(round(ih * EDGE_BAND), ih))
 
     levels = {
-        "top": _band_level(img, (0, 0, iw, band_h)),
-        "bottom": _band_level(img, (0, ih - band_h, iw, ih)),
-        "left": _band_level(img, (0, 0, band_w, ih)),
-        "right": _band_level(img, (iw - band_w, 0, iw, ih)),
+        "top": _band_level(img, (0, 0, iw, band_h), flat),
+        "bottom": _band_level(img, (0, ih - band_h, iw, ih), flat),
+        "left": _band_level(img, (0, 0, band_w, ih), flat),
+        "right": _band_level(img, (iw - band_w, 0, iw, ih), flat),
     }
 
     canvas = Image.new("L", (PANEL_W, PANEL_H), levels["top"])
@@ -366,7 +379,8 @@ def _waves_mat(img: Image.Image, ox: int, oy: int) -> Image.Image:
     return canvas
 
 
-def mat(img: Image.Image, style: str = "waves") -> Image.Image:
+def mat(img: Image.Image, style: str = "waves",
+        flat=cp.FIRMWARE_RECONSTRUCT) -> Image.Image:
     """Centre a smaller image on the panel and fill what is left around it.
 
     Nothing is drawn between the picture and its border. Every style here works
@@ -387,7 +401,7 @@ def mat(img: Image.Image, style: str = "waves") -> Image.Image:
     elif style == "waves":
         canvas = _waves_mat(img, ox, oy)
     else:
-        canvas = _edge_mat(img, ox, oy)
+        canvas = _edge_mat(img, ox, oy, flat)
 
     canvas.paste(img, (ox, oy))
     return canvas
@@ -577,18 +591,13 @@ def encode_bmp4(levels: bytearray, w: int, h: int) -> bytes:
 
 
 def encode_bmp24(img: Image.Image) -> bytes:
-    """A plain 24-bit greyscale BMP: continuous tone, no dithering by us.
+    """A plain 24-bit greyscale BMP: continuous tone, for the reader to quantise.
 
-    This is the route `wallpaperconverter.jakegreen.dev` takes, and on a dark
-    photograph it beats ours. The reason is not the tone curve — that lands in
-    the same place — it is that the firmware's own Atkinson dither only carries
-    3/4 of the error, so it crushes a near-black sky to solid black where our
-    Floyd-Steinberg keeps trying to represent it and stipples the whole thing.
-    Handing the reader the tones and letting it decide plays to that.
-
-    Costs six times the bytes of the 4-bpp file and makes the ESP32 dither on
-    every sleep. Worth it when the result looks better, which on real photographs
-    it does.
+    Not what the converter ships — `encode_bmp4` is — but kept because it is the
+    other legitimate shape, it is what the gate uses to demonstrate that an
+    undithered file really is re-dithered on-device, and it is the fallback if
+    the port in `crosspoint_bmp` ever drifts from the firmware. Six times the
+    bytes, and the ESP32 does the arithmetic on every sleep.
     """
     w, h = img.size
     row_bytes = (w * 3 + 3) // 4 * 4
@@ -620,7 +629,8 @@ def levels_to_image(levels: bytearray, w: int, h: int) -> Image.Image:
     return img
 
 
-def compose(src: Path, *, fit: str = "cover", mat_style: str = "waves") -> Image.Image:
+def compose(src: Path, *, fit: str = "cover", mat_style: str = "waves",
+            flat=cp.FIRMWARE_RECONSTRUCT) -> Image.Image:
     """Source file -> the finished 528x792 greyscale panel, before any dithering.
 
     Tone comes *before* the mat on purpose: autocontrast measures the picture,
@@ -628,18 +638,28 @@ def compose(src: Path, *, fit: str = "cover", mat_style: str = "waves") -> Image
     The mat is then computed from the toned image, so its levels match the
     pixels it is about to sit against.
     """
-    return mat(tone(scale_to_panel(load_grayscale(src), fit)), mat_style)
+    return mat(tone(scale_to_panel(load_grayscale(src), fit)), mat_style, flat)
+
+
+def quantise(img: Image.Image, algorithm: str = "device") -> bytearray:
+    """Greyscale panel -> one 2-bit level per pixel.
+
+    'device' runs the reader's own quantiser (`crosspoint_bmp.firmware_quantise`)
+    rather than ours, so the result is what it would have arrived at itself —
+    then we ship that, and it maps it straight through. Anything else is our own
+    error diffusion; see `dither`.
+    """
+    if algorithm == "device":
+        return cp.firmware_quantise(img.tobytes(), PANEL_W, PANEL_H)
+    return dither(img, algorithm)
 
 
 def render(src: Path, *, fit: str = "cover", mat_style: str = "waves",
-           algorithm: str = "floyd") -> bytearray:
-    """Source file -> one 2-bit level per panel pixel, dithered here.
-
-    The whole pipeline in one place, so the self-test grades what the converter
-    writes. Not used by the default route, which leaves the dithering to the
-    reader — see `convert`.
-    """
-    return dither(compose(src, fit=fit, mat_style=mat_style), algorithm)
+           algorithm: str = "device") -> bytearray:
+    """Source file -> one 2-bit level per panel pixel. The whole pipeline in one
+    place, so the self-test grades exactly what the converter writes."""
+    flat = cp.FIRMWARE_RECONSTRUCT if algorithm == "device" else LEVELS
+    return quantise(compose(src, fit=fit, mat_style=mat_style, flat=flat), algorithm)
 
 
 def probe(src: Path, *, fit: str = "cover") -> dict:
@@ -663,26 +683,20 @@ def probe(src: Path, *, fit: str = "cover") -> dict:
 def convert(src: Path, out_dir: Path, *, fit: str = "cover",
             mat_style: str = "waves", algorithm: str = "device",
             preview: bool = False) -> Path:
-    """Write the wallpaper. Two routes, and the default hands off the dithering.
+    """Write the wallpaper: always a 4-bpp file the panel maps straight through.
 
-    'device' emits continuous tone and lets the reader's own Atkinson quantise
-    it — better on photographs, because that dither crushes near-black to solid
-    where ours keeps stippling it. Anything else dithers here and ships the
-    4-bpp file the panel maps straight through, which is exact but ours.
+    Only the choice of *who quantises* varies. The default reproduces the
+    reader's own algorithm, so the panel gets the picture it would have computed
+    from a full-tone file — without being handed six times the bytes or having
+    to do the arithmetic on a 240 MHz core every time it sleeps.
     """
+    levels = render(src, fit=fit, mat_style=mat_style, algorithm=algorithm)
+
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / (sanitize_stem(src.stem) + ".bmp")
-
-    if algorithm == "device":
-        panel = compose(src, fit=fit, mat_style=mat_style)
-        dest.write_bytes(encode_bmp24(panel))
-        if preview:
-            panel.save(dest.with_suffix(".png"))
-    else:
-        levels = render(src, fit=fit, mat_style=mat_style, algorithm=algorithm)
-        dest.write_bytes(encode_bmp4(levels, PANEL_W, PANEL_H))
-        if preview:
-            levels_to_image(levels, PANEL_W, PANEL_H).save(dest.with_suffix(".png"))
+    dest.write_bytes(encode_bmp4(levels, PANEL_W, PANEL_H))
+    if preview:
+        levels_to_image(levels, PANEL_W, PANEL_H).save(dest.with_suffix(".png"))
     return dest
 
 
@@ -722,11 +736,10 @@ def main() -> int:
                     dest="mat_style", help="the default; spelled out")
     ap.add_argument("--dither", choices=("device", "floyd", "atkinson", "none"),
                     default="device",
-                    help="who quantises to the panel's four levels. device: "
-                         "nobody here — ship continuous tone and let the reader "
-                         "do it (default, and better on photographs). floyd / "
-                         "atkinson / none: dither here and ship a 4-bpp file "
-                         "the panel maps straight through")
+                    help="who chooses the four levels. device: run the "
+                         "reader's own quantiser here, so the panel gets what "
+                         "it would have computed (default). floyd / atkinson / "
+                         "none: our own error diffusion instead")
     ap.add_argument("--preview", action="store_true",
                     help="also write a PNG of what is in the BMP, to look at")
     ap.add_argument("--probe", action="store_true",
@@ -769,8 +782,8 @@ def main() -> int:
         except Exception as exc:                      # unreadable / truncated / odd
             print(f"  {src.name}: FAILED — {exc}", file=sys.stderr)
             continue
-        how = ("continuous tone, the reader dithers" if args.dither == "device"
-               else f"4 levels, dithered here ({args.dither})")
+        how = ("4 levels, the reader's own quantiser" if args.dither == "device"
+               else f"4 levels, our {args.dither}")
         print(f"  {src.name} -> {dest}  ({PANEL_W}x{PANEL_H}, {how}, "
               f"{dest.stat().st_size // 1024} KB)")
 

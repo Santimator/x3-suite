@@ -232,10 +232,10 @@ def serve(root: Path):
 def grade_output(src: Path, bmp: Path, algorithm: str = "device") -> None:
     """Grade a written wallpaper through the firmware's own reader.
 
-    Two routes to grade. The default ships continuous tone and lets the reader
-    dither, so the check is that the reader *accepts* it and runs the four-level
-    grey pipeline over it. The 4-bpp route ships pixels already chosen, so the
-    check is far stronger: the file must decode back to exactly those.
+    Both routes ship a 4-bpp file with a native palette, so both get the strong
+    contract: the file must decode back to exactly the levels chosen here. Only
+    *who chose them* differs — the reader's own quantiser by default, our error
+    diffusion otherwise.
     """
     data = bmp.read_bytes()
     label = bmp.name
@@ -257,13 +257,6 @@ def grade_output(src: Path, bmp: Path, algorithm: str = "device") -> None:
     x, y, scaled = cp.placement(hdr)
     check(f"{label}: lands at 0,0 unscaled", (x, y, scaled) == (0, 0, False),
           f"x={x} y={y} scaled={scaled}")
-
-    if algorithm == "device":
-        check(f"{label}: 24 bpp, and the grey pipeline runs on it",
-              hdr.bpp == 24 and hdr.has_greyscale, f"bpp={hdr.bpp}")
-        # Not native, deliberately: that is what makes the firmware dither it.
-        check(f"{label}: left for the reader to dither", not hdr.native_palette)
-        return
 
     check(f"{label}: 4 bpp, greyscale pipeline", hdr.bpp == 4 and hdr.has_greyscale,
           f"bpp={hdr.bpp}")
@@ -319,8 +312,13 @@ def check_mat(sources: list) -> None:
     plain = mw.render(tiny, mat_style="none")
     check("mat: --mat none is plain white", _block(plain, 8, 8) == {3})
 
-    blurred = mw.render(tiny, mat_style="blur")
-    check("mat: --mat blur is a wash, not a flat fill", blurred != edges)
+    # Graded on `split`, not `tiny`: a blur of a uniform source is uniform, so
+    # it would land on the same flat level as the edge mat and prove nothing.
+    blurred = mw.render(split, mat_style="blur")
+    varied = any(len(_block(blurred, x, y)) > 1
+                 for x, y in ((8, 8), (cp.PANEL_W - 24, cp.PANEL_H - 24)))
+    check("mat: --mat blur is a wash, not a flat fill",
+          varied and blurred != mw.render(split, mat_style="edges"))
 
 
 def check_waves(sources: list) -> None:
@@ -363,13 +361,16 @@ def check_waves(sources: list) -> None:
 
     # Through the whole pipeline: still a wave, still the same one every time,
     # and still what you get without asking, since waves is the default.
-    tiny = next(s for s in sources if s.stem == "tiny")
-    rippled = mw.render(tiny, mat_style="waves")
+    # `split`, not `tiny`: waves only show where the edge varies along its
+    # length, so a uniform source ripples to a uniform field by design and would
+    # make this check pass or fail for the wrong reason.
+    split = next(s for s in sources if s.stem == "split")
+    rippled = mw.render(split, mat_style="waves")
     check("waves: rippled, not flat like the edge mat",
-          rippled != mw.render(tiny, mat_style="edges"))
+          rippled != mw.render(split, mat_style="edges"))
     check("waves: the same source ripples the same way twice",
-          rippled == mw.render(tiny, mat_style="waves"))
-    check("waves: it is what a plain run produces", rippled == mw.render(tiny))
+          rippled == mw.render(split, mat_style="waves"))
+    check("waves: it is what a plain run produces", rippled == mw.render(split))
 
 
 def repeat_score(levels, w: int, h: int, reach: int = 6) -> float:
@@ -468,7 +469,7 @@ def check_designed_failures() -> None:
     buf = io.BytesIO()
     grey.save(buf, "BMP")
     hdr24 = cp.parse_headers(buf.getvalue())
-    check("a 24-bpp file is re-dithered on-device (the default route relies on it)",
+    check("a 24-bpp file would be re-dithered on-device (why we emit 4-bpp)",
           hdr24.bpp == 24 and not hdr24.native_palette)
 
 
@@ -575,7 +576,7 @@ def main() -> int:
 
         # The 4-bpp route is still supported and still has to hold its much
         # stronger contract: the panel gets exactly the pixels we chose.
-        print("\n... and the route that dithers here (--dither floyd):")
+        print("\n... and the route that quantises with our own dither (--dither floyd):")
         for src in sources[:3]:
             bmp = mw.convert(src, build / "floyd", algorithm="floyd")
             grade_output(src, bmp, algorithm="floyd")

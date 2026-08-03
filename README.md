@@ -243,13 +243,17 @@ this panel, so it's already chosen — the table in the SKILL says why each one
 and not the alternative. Add `--preview` to get a PNG you can look at before it
 goes anywhere near the device.
 
-We deliberately **don't** dither: the file ships continuous tone and the
-reader's own Atkinson does the quantising, which on photographs beats anything
-we did here. That's the approach taken by
-[wallpaperconverter.jakegreen.dev](https://wallpaperconverter.jakegreen.dev/),
-Jake Green's in-browser converter — worth using directly if you'd rather not
-run any of this. `--dither floyd` takes the job back and ships a 4-bpp file the
-panel maps through untouched: exact, and worse to look at.
+The dithering — choosing which of the panel's four shades each pixel gets —
+**reproduces CrossPoint's own algorithm**, ported from the firmware and run
+here on a real CPU. The result ships as a 4-bpp file the reader maps straight
+through, so the panel sees exactly what it would have computed from a full-tone
+image, at a sixth of the bytes and none of its own work.
+
+That matters because the firmware's quantiser isn't an even ramp: it thresholds
+at 30/50/140 and treats the four states as 15/30/80/210, which is why a night
+sky comes out solid black instead of stippled. `--dither floyd` substitutes our
+own error diffusion, which aims at an even ramp and gets midtones too dark —
+kept for comparison, not for use.
 
 An image too small to fill the panel isn't blown up to fit — enlargement stops
 at 1.5x and the rest becomes a **mat**: four sectors mitred from the panel

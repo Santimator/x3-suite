@@ -194,6 +194,72 @@ def decode_levels(data: bytes, hdr: ParsedBmp) -> list:
     return out
 
 
+# The firmware's own quantiser, from `AtkinsonDitherer::processPixel`
+# (lib/GfxRenderer/BitmapHelpers.h). These are NOT an even ramp: the panel is
+# strongly non-linear and these are the firmware's model of what its four states
+# actually show. The comment beside them reads "fine-tuned to X4 eink display";
+# there is no X3 branch, so the X3 gets the same numbers.
+FIRMWARE_THRESHOLDS = (30, 50, 140)
+FIRMWARE_RECONSTRUCT = (15, 30, 80, 210)
+
+
+def firmware_quantise(img_bytes: bytes, w: int, h: int, bottom_up: bool = True) -> bytearray:
+    """Exactly what the reader would do to an undithered greyscale image.
+
+    A byte-for-byte port of `AtkinsonDitherer::processPixel` plus the loop that
+    drives it: 1/8 of the error to each of six neighbours, no serpentine, and
+    the skewed thresholds above rather than an even 0/85/170/255.
+
+    Running it here means we can hand the panel the *result* as a 4-bpp file it
+    maps straight through, instead of the full-tone image it would have had to
+    chew on — same pixels, a sixth of the bytes, and none of the ESP32's work.
+
+    `bottom_up` matters and is not cosmetic. Error diffusion is stateful down
+    the rows, and the firmware diffuses in the order it reads them: a positive
+    height means the file starts at the *bottom* of the picture, so that is
+    where the error starts travelling. Getting this backwards still looks fine
+    but is not the same image.
+    """
+    e0 = [0] * (w + 4)
+    e1 = [0] * (w + 4)
+    e2 = [0] * (w + 4)
+    out = bytearray(w * h)
+
+    rows = range(h - 1, -1, -1) if bottom_up else range(h)
+    for y in rows:
+        base = y * w
+        for x in range(w):
+            # adjustPixel() is identity in shipped firmware, and for a grey
+            # pixel the integer luma returns the value unchanged.
+            adjusted = img_bytes[base + x] + e0[x + 2]
+            if adjusted < 0:
+                adjusted = 0
+            elif adjusted > 255:
+                adjusted = 255
+
+            if adjusted < FIRMWARE_THRESHOLDS[0]:
+                level = 0
+            elif adjusted < FIRMWARE_THRESHOLDS[1]:
+                level = 1
+            elif adjusted < FIRMWARE_THRESHOLDS[2]:
+                level = 2
+            else:
+                level = 3
+            out[base + x] = level
+
+            err = (adjusted - FIRMWARE_RECONSTRUCT[level]) >> 3   # error / 8
+            e0[x + 3] += err
+            e0[x + 4] += err
+            e1[x + 1] += err
+            e1[x + 2] += err
+            e1[x + 3] += err
+            e2[x + 2] += err
+
+        e0, e1, e2 = e1, e2, [0] * (w + 4)
+
+    return out
+
+
 def sleep_scan_accepts(filename: str) -> bool:
     """Port of the filter in `SleepActivity::renderCustomSleepScreen`: which
     names in /.sleep or /sleep are even opened. A dotfile is skipped whatever

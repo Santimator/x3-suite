@@ -45,13 +45,10 @@ a right answer on this device, so it is already chosen.
 Flags exist for the things that are genuinely taste — `--fit contain` to keep
 the whole frame instead of cropping, `--mat edges|blur|none` for a different
 surround on an image too small to fill the panel, `--preview` to also write a
-PNG of what went into the BMP — plus `--dither floyd`, which hands the
-quantising back to us instead of the reader (*Who dithers*, below). For the
+PNG of what went into the BMP — plus `--dither floyd`, which substitutes our
+own error diffusion for the reader's (*Who quantises*, below). For the
 push: `--ip` when the reader cannot be found by name, `--list` to see what is
 on the device, `--replace` to clear it first.
-
-If you would rather not run any of this, **[wallpaperconverter.jakegreen.dev](https://wallpaperconverter.jakegreen.dev/)**
-does the conversion in a browser, and the default route here is its approach.
 
 ## What comes out, and why
 
@@ -59,9 +56,9 @@ does the conversion in a browser, and the default route here is its approach.
 |---|---|
 | **528x792 exactly** | The panel, portrait. The firmware centres an image that fits and only ever scales *down* — so a smaller image is a stamp in a black field, and a larger one is resampled by an ESP32. |
 | **BMP** | The sleep screen reads nothing else. Not PNG, not JPEG, and **not `.pxc`** — see the note below. |
-| **24 bpp, continuous tone** | We do **not** dither. The reader does, with its own Atkinson, and on photographs that beats anything we do here — see *Who dithers* below. |
-| **40-byte DIB header** | The firmware reads a palette from a fixed offset after the first 40 header bytes, not from `biSize` or `bfOffBits`. Matters on the `--dither floyd` route, which ships a palette. |
-| **0 / 85 / 170 / 255** | Not a choice: the four charge states the panel has. Whoever quantises is aiming at these. |
+| **4 bpp, indexed, palette on the four states** | Quantised here using the reader's *own* algorithm, then mapped straight through by it — same result as handing it full tone, at a sixth of the size. See *Who quantises* below. |
+| **40-byte DIB header** | The firmware reads the palette from a fixed offset after the first 40 header bytes, not from `biSize` or `bfOffBits`. A BITMAPV4/V5 header feeds it colour-space fields as colours. |
+| **0 / 85 / 170 / 255 in the palette** | Not a choice: the four charge states the panel has, and the palette values that make it map through untouched. What the firmware *believes* they look like is 15/30/80/210 — a different thing, and what the quantiser aims at. |
 | **autocontrast → gamma 0.85 → sharpen** | A phone photo uses half the range; on four levels that half becomes two. Stretch, then lift midtones (e-ink reflects less than the screen you chose the image on), then restore the local contrast the downscale cost. All before dithering. |
 | **cover-crop, centred** | A wallpaper should reach all four edges. `--fit contain` if the whole frame matters. |
 | **enlargement stops at 1.5x** | Past about half again, a photo is a smear even after dithering. What is left over gets a mat — a picture in a frame beats a blurred one that fills the screen. |
@@ -90,10 +87,13 @@ Each sector takes its level from a band of the image along its edge, so a photo
 with sky above and ground below gets a light mat above and a dark one below:
 the fill matches the pixels it actually meets, not the picture's overall mood.
 
-**Each sector snaps to a native level**, and that is what makes it work here. A
-mat filled with the raw mean dithers into a large field of grain; one sitting
-exactly on 0/85/170/255 comes out perfectly flat, and flat is the only large
-area this panel draws without noise.
+**Each sector snaps to a value the quantiser reconstructs exactly**, and that
+is what makes it work here. A mat filled with the raw mean dithers into a large
+field of grain; one landing on a reconstruction point comes out perfectly flat,
+and flat is the only large area this panel draws without noise. Which values
+those are depends on who quantises — 15/30/80/210 for the reader's algorithm,
+0/85/170/255 for ours — so `_band_level` takes them as an argument rather than
+assuming.
 
 If all four bands round to the same level the joins vanish and it degenerates
 into a plain single-colour mat — which is the correct behaviour, not a bug, and
@@ -141,50 +141,43 @@ rather than like it is hung. `--mat none` is a plain white surround.
 The mat also replaces the old white letterbox in `--fit contain`, so a
 panorama gets framed rather than barred.
 
-## Who dithers: the reader, not us
+## Who quantises: we do, with the reader's own algorithm
 
-The default ships **continuous-tone greyscale** and lets the firmware quantise
-it. That is the approach taken by
-[**wallpaperconverter.jakegreen.dev**](https://wallpaperconverter.jakegreen.dev/)
-— Jake Green's in-browser converter, well worth using directly if you do not
-want to run any of this — and it is better than what this tool did before.
+The panel has four states and a photograph has 256 tones, so something has to
+choose. Handing the reader an undithered image and letting it choose gives a
+markedly better picture than our own error diffusion did — but it costs six
+times the bytes and makes the ESP32 redo the arithmetic every time it sleeps.
 
-It is worth being precise about *why*, because the obvious guesses are wrong.
-It is not the tone curve: that converter's output and ours land a night sky at
-the same mean value, 24.5. It is that **the firmware's quantiser is not evenly
-spaced**, and ours was.
+So we do neither. `crosspoint_bmp.firmware_quantise` is a byte-for-byte port of
+the firmware's `AtkinsonDitherer::processPixel`, run here on a real CPU. The
+result ships as a 4-bpp file whose palette sits on the panel's four states, so
+the reader maps it straight through and quantises nothing. **Same pixels on the
+glass, a sixth of the bytes, and none of the device's work.**
 
-`AtkinsonDitherer::processPixel` does not treat the four states as 0/85/170/255.
-It thresholds at **30 / 50 / 140** and reconstructs them as **15 / 30 / 80 /
-210** — the firmware's own model of what those states actually look like on the
-glass, and the panel is strongly non-linear. Two consequences, and the first is
-the whole story:
+The part that makes this worth doing, and that we had wrong for a while: the
+firmware's quantiser is **not an even ramp**. It thresholds at **30 / 50 / 140**
+and reconstructs the four states as **15 / 30 / 80 / 210** — its model of what
+the glass actually shows, and the panel is strongly non-linear. Two things
+follow:
 
-- Anything under **30** is black, and the error charged for it is only
-  `(value − 15) / 8`. A sky at 24.5 therefore goes to solid black carrying an
-  error of 1, and stays black. Ours thresholded at 42.5 and reconstructed black
-  as 0, so the same sky carried an error of 24 into its neighbours and stippled
-  the lot. Run through a port of the firmware's quantiser, our file comes out
-  **69% solid black with the stars intact**.
-- Atkinson also throws away 1/4 of the error, which helps, but it is the
-  secondary effect. The thresholds do the work.
+- Anything under **30** is black, charged an error of only `(value − 15) / 8`.
+  A night sky at 24.5 therefore goes solid black and stays there. Our own
+  Floyd–Steinberg thresholded at 42.5 and called black 0, so the same sky
+  carried an error of 24 into its neighbours and stippled the lot. Through this
+  quantiser it comes out **69% solid black with the stars intact**.
+- The values that dither to a perfectly *flat* field are those reconstruction
+  points, not 0/85/170/255. That is what the mat snaps to (see `_band_level`) —
+  feed the reader 170 and it drifts, because 170 is not a value it reconstructs.
 
-On a photograph, the honest answer is that the firmware knows its own panel and
-we do not.
+Atkinson also discards 1/4 of the error, which helps, but the thresholds do the
+work.
 
-`--dither floyd` (or `atkinson`, or `none`) goes back to dithering here and
-shipping a **4-bpp indexed** file whose palette sits exactly on the panel's four
-levels. That trips the firmware's *native palette* test, so it maps the pixels
-straight through and quantises nothing — the panel gets precisely what was
-computed, at a sixth of the bytes.
-
-**Known defect on that route:** it aims at 0/85/170/255 as though the four
-states were evenly spaced, and per the firmware's own numbers above they are
-not. So it puts the right *pattern* on the panel while getting the midtones too
-dark — level 1 is placed as though it reads 85 when the firmware believes it
-reads 30. Fixing it means dithering against 15/30/80/210 instead. Until then it
-is exact about pixels and wrong about tone, which is another reason the default
-does not use it.
+`--dither floyd` (or `atkinson`, or `none`) substitutes our own error diffusion
+and still ships 4-bpp. **It aims at an even 0/85/170/255**, which by the numbers
+above is the wrong target: it puts a defensible pattern on the panel while
+placing level 1 as though it reads 85 where the firmware believes it reads 30,
+so midtones come out too dark. Kept for comparison and because the gate can
+grade it, not because you should use it.
 
 ## The grid on flat areas (the `--dither floyd` route)
 
@@ -370,10 +363,11 @@ CrossPoint firmware (tag 1.5.0 and master @ 2026-08, byte-identical for all of
 it) and is enforced by the gate; the end-to-end claim is now evidence rather
 than inference.
 
-That run used the 4-bpp route, which was the default at the time. **The 24-bpp
-default has not been on the panel from this tool yet** — but the same encoding
-from `wallpaperconverter.jakegreen.dev` has, which is where the change came
-from, so what is unconfirmed is our bytes rather than the approach.
+That run predates the current quantiser. The file *shape* is unchanged — same
+528x792 4-bpp native-palette BMP the device drew then — but which levels go into
+it now comes from the port of the firmware's own algorithm, and **that output
+has not been photographed on the panel yet.** The gate proves the file decodes
+to the levels chosen; it cannot prove the port matches the silicon.
 
 **The mat is the other exception, and stays inferred.** Every source in that
 run filled the panel, so nothing was framed — no `--mat waves`, `edges`, `blur`

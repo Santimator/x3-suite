@@ -161,14 +161,14 @@ pushes them.
 Two shapes work, and they are a real choice:
 
 - **528×792, 24-bpp greyscale, undithered** — the firmware quantises it with
-  Atkinson. Better on photographs, because Atkinson carries only 3/4 of the
-  error and lets a near-black sky fall to solid black. This is what
-  [wallpaperconverter.jakegreen.dev](https://wallpaperconverter.jakegreen.dev/)
-  emits and what `wallpaper-maker/` now defaults to.
+  Atkinson. Simple and gives a good picture, but six times the bytes and the
+  ESP32 redoes the arithmetic on every sleep.
 - **528×792, 4-bpp indexed, 40-byte DIB header, palette on 0/85/170/255,
-  pre-dithered** — trips the native-palette test, so the panel shows exactly the
-  pixels computed off-device, at a sixth of the bytes. Exact, and on a dark
-  photograph worse to look at.
+  pre-quantised** — trips the native-palette test, so the panel shows exactly
+  the pixels computed off-device, at a sixth of the bytes. **Quantise against
+  15/30/80/210, not an even ramp** (see the row above), and the result is
+  identical to what the device would have produced from the full-tone file.
+  This is what `wallpaper-maker/` does.
 
 Note the third-party guidance that 1-bit and 4-bit are "not recommended" is
 right for a *generic* 4-bit encoder: an even 16-grey ramp fails the ±21 native
