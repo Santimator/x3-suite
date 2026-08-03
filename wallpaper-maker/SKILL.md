@@ -151,20 +151,40 @@ want to run any of this — and it is better than what this tool did before.
 
 It is worth being precise about *why*, because the obvious guesses are wrong.
 It is not the tone curve: that converter's output and ours land a night sky at
-the same mean value, 24.5 of the 85 between black and the next level. It is
-that the firmware's dither is **Atkinson**, which carries only 3/4 of the
-error and therefore lets shadows fall to solid black. Ours was Floyd–Steinberg,
-which conserves all of it and so keeps trying to *represent* a near-black sky —
-lifting roughly one pixel in 3.5 and stippling the whole thing. On a
-photograph, the honest answer is that giving up the error is the better picture.
+the same mean value, 24.5. It is that **the firmware's quantiser is not evenly
+spaced**, and ours was.
+
+`AtkinsonDitherer::processPixel` does not treat the four states as 0/85/170/255.
+It thresholds at **30 / 50 / 140** and reconstructs them as **15 / 30 / 80 /
+210** — the firmware's own model of what those states actually look like on the
+glass, and the panel is strongly non-linear. Two consequences, and the first is
+the whole story:
+
+- Anything under **30** is black, and the error charged for it is only
+  `(value − 15) / 8`. A sky at 24.5 therefore goes to solid black carrying an
+  error of 1, and stays black. Ours thresholded at 42.5 and reconstructed black
+  as 0, so the same sky carried an error of 24 into its neighbours and stippled
+  the lot. Run through a port of the firmware's quantiser, our file comes out
+  **69% solid black with the stars intact**.
+- Atkinson also throws away 1/4 of the error, which helps, but it is the
+  secondary effect. The thresholds do the work.
+
+On a photograph, the honest answer is that the firmware knows its own panel and
+we do not.
 
 `--dither floyd` (or `atkinson`, or `none`) goes back to dithering here and
 shipping a **4-bpp indexed** file whose palette sits exactly on the panel's four
 levels. That trips the firmware's *native palette* test, so it maps the pixels
 straight through and quantises nothing — the panel gets precisely what was
-computed, at a sixth of the bytes. Exact, cheap, and on a dark photograph worse
-to look at. It is kept because "the panel receives exactly these pixels" is
-occasionally the property you want, and because the gate can assert it.
+computed, at a sixth of the bytes.
+
+**Known defect on that route:** it aims at 0/85/170/255 as though the four
+states were evenly spaced, and per the firmware's own numbers above they are
+not. So it puts the right *pattern* on the panel while getting the midtones too
+dark — level 1 is placed as though it reads 85 when the firmware believes it
+reads 30. Fixing it means dithering against 15/30/80/210 instead. Until then it
+is exact about pixels and wrong about tone, which is another reason the default
+does not use it.
 
 ## The grid on flat areas (the `--dither floyd` route)
 
