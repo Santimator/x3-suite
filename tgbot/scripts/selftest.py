@@ -318,6 +318,29 @@ def check_book_delivery(tmp: Path) -> None:
           == opds.sd_filename(entry),
           suite.device_book_name(entry.author, entry.title))
 
+    # Against a device, the name depends on opdsFilenameFormat — and
+    # /api/settings answers with a *list* of setting objects, not a map.
+    # Reading it as a map raised "'list' object has no attribute 'get'" in the
+    # middle of a push, which is exactly where it costs the most.
+    orig_req = suite.device.request
+    live_shape = [{"key": "sleepScreen", "type": "enum", "value": 2},
+                  {"key": "opdsFilenameFormat", "type": "enum", "value": 1,
+                   "options": ["Author - Title", "Title - Author", "Title"]}]
+    try:
+        suite.device.request = lambda host, path, **kw: (
+            (200, json.dumps(live_shape).encode()) if path == "/api/settings"
+            else orig_req(host, path, **kw))
+        check("the device's own naming format is read from a list response",
+              suite.device_book_name("Tirso de Molina", "Los alcaldes encontrados",
+                                     host="h")
+              == "Los alcaldes encontrados - Tirso de Molina.epub",
+              suite.device_book_name("Tirso de Molina", "Los alcaldes encontrados",
+                                     host="h"))
+        check("... and an unreachable reader falls back to the default layout",
+              suite.device_book_name("A", "B", host=None) == "A - B.epub")
+    finally:
+        suite.device.request = orig_req
+
     long_title = "A" * 200
     name = suite.device_book_name("Author", long_title)
     check("the 100-byte budget is respected, extension intact",

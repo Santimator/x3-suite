@@ -1053,18 +1053,23 @@ class Bot:
             lines.append("📕 SD root")
             for item in books:
                 meta = item.get("meta") or {}
-                # Named the way the OPDS client would name it, so pushing a
-                # book and later downloading it produce one file, not two.
-                name = suite.device_book_name(meta.get("author", ""),
-                                              meta.get("title", item["label"]),
-                                              host=host)
+                name = item["label"]
                 try:
+                    # Named the way the OPDS client would name it, so pushing a
+                    # book and later downloading it produce one file, not two.
+                    name = suite.device_book_name(meta.get("author", ""),
+                                                  meta.get("title", item["label"]),
+                                                  host=host)
                     suite.upload_book(host, Path(item["path"]), name)
                     done.append(item)
                     lines.append(f"✅ {html.escape(name)}")
-                except suite.DeviceError as exc:
+                except Exception as exc:
+                    # Deliberately broad. A surprise in one item must not throw
+                    # away the whole report — including the wallpapers that
+                    # already landed, whose queue entries are only removed at
+                    # the end of this method.
                     lines.append(f"❌ {html.escape(name)} — "
-                                 f"{html.escape(str(exc)[:80])}")
+                                 f"{html.escape(str(exc)[:100])}")
 
         self.queue.remove_many(i["id"] for i in done)
         self.notes.set("last_push", datetime.now().strftime("%Y-%m-%d %H:%M"))
