@@ -31,6 +31,7 @@ tgbot/state/*
 reference/fonts/*/
 !reference/fonts/WenKaiFull/
 !reference/fonts/WenZilla/
+!reference/fonts/CrimKai/
 
 # opds-server: local library paths + Basic-auth password (never commit)
 opds-server/config.json

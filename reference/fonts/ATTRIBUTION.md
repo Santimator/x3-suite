@@ -11,9 +11,9 @@ Per the OFL, the copyright notices and Reserved Font Names are reproduced
 below. The `.cpfont` bitmaps are Modified Versions; the original fonts are
 available from the sources listed.
 
-## WenKaiFull/ and WenZilla/ (CJK)
+## WenKaiFull/, WenZilla/ and CrimKai/ (CJK)
 
-**LXGW WenKai (霞鹜文楷)** — the kaiti hanzi in both families.
+**LXGW WenKai (霞鹜文楷)** — the kaiti hanzi in all three families.
 > Copyright 2021-2026 LXGW (https://github.com/lxgw/LxgwWenKai), with
 > Reserved Font Name '霞鹜', '霞鶩', '落霞孤鹜', '落霞孤鶩' and 'LXGW'.
 
@@ -36,4 +36,18 @@ conversion.
 
 Sources: https://github.com/mozilla/zilla-slab ·
 https://github.com/nicoverbruggen/ebook-fonts (fonts/extra, `NV_Zilla_Slab-*`)
+
+## CrimKai/ (Latin)
+
+**NV Scarlet** — the Latin/pinyin half of `CrimKai`. An e-reader-tuned build
+(nicoverbruggen/ebook-fonts) of **Cochineal**, Michael Sharpe's extension of
+**Crimson** by Sebastian Kosch. Used unmodified: unlike Zilla it already draws
+every pinyin tone vowel, so nothing was composited in.
+> Copyright (c) 2010, Sebastian Kosch (sebastian@aldusleaf.org), Additions and
+> modifications copyright (c) 2015--23, Michael Sharpe (msharpe@ucsd.edu)
+
+No Reserved Font Name is declared by either notice.
+
+Sources: https://github.com/skosch/Crimson · https://ctan.org/pkg/cochineal ·
+https://github.com/nicoverbruggen/ebook-fonts (fonts/extra, `NV_Scarlet-*`)
 

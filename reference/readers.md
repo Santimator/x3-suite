@@ -18,9 +18,11 @@ otherwise.
    `/fonts/`, power-cycle (fonts scan once at boot), select it under Settings →
    Reader → Font Family. **`WenZilla/`** is the recommended Chinese font — LXGW
    WenKai kaiti for hanzi + NV Zilla Slab for Latin/pinyin, so mixed
-   hanzi+pinyin reads nicely. **`WenKaiFull/`** is the pure-kaiti baseline
-   (device-confirmed). Glyphs stream from SD. Both ship sizes **8, 10, 12, 14,
-   16, 18** — the small three exist for the UI fallback, not for reading.
+   hanzi+pinyin reads nicely. **`CrimKai/`** is the same thing with a book
+   serif in place of the slab (Crimson via Cochineal), if you prefer that;
+   **`WenKaiFull/`** is the pure-kaiti baseline (device-confirmed). Glyphs
+   stream from SD. All three ship sizes **8, 10, 12, 14, 16, 18** — the small
+   three exist for the UI fallback, not for reading.
    Install details: `reference/fonts/README.md`.
 3. **Books:** build with `reading_style: after` in book.json (pinyin after each
    glossed word) — see the rendering verdicts below.
@@ -321,7 +323,10 @@ means the glyph is genuinely missing rather than the font being broken.
 pip install freetype-py fonttools
 # Pinned to the 1.5.0 tag, not master: master's converter has since grown
 # ligature extraction, which changes the bytes it emits for Latin faces.
-BASE=https://raw.githubusercontent.com/crosspoint-reader/crosspoint-reader/1.5.0/lib/EpdFont/scripts
+# The tag is `v1.5.0` — upstream's earlier tags have no `v`, and this line
+# said `1.5.0` until 2026-08, which raw.githubusercontent answers with a
+# 404 page that curl -O happily saves as a 14-byte "script".
+BASE=https://raw.githubusercontent.com/crosspoint-reader/crosspoint-reader/v1.5.0/lib/EpdFont/scripts
 curl -sSLO $BASE/fontconvert_sdcard.py
 curl -sSLO $BASE/cpfont_version.py
 
@@ -348,12 +353,26 @@ python3 fontconvert_sdcard.py --intervals latin-ext,cjk \
 # Regular only: bold/italic would duplicate the 22k CJK bitmaps per style (~4x
 # size) for no CJK gain, since WenKai has no bold/italic.
 
+# CrimKai: WenZilla with the Latin half swapped for a book serif — NV Scarlet
+# (Cochineal, Michael Sharpe's extension of Sebastian Kosch's Crimson), CJK
+# still from WenKai. Same repo as Zilla: github.com/nicoverbruggen/ebook-fonts
+# (fonts/extra, NV_Scarlet-Regular.ttf). No synth step: Cochineal draws every
+# pinyin tone vowel itself, so the source font is used as it ships.
+python3 fontconvert_sdcard.py --intervals latin-ext,cjk \
+    --sizes 8,10,12,14,16,18 \
+    --regular NV_Scarlet-Regular.ttf --fallback-regular LXGWWenKai-Regular.ttf \
+    --name CrimKai --output-dir CrimKai/
+
 ```
 
 The recipe is deterministic: re-running it reproduces the committed 12 pt files
-of both families **byte for byte** (checked when the 8 and 10 pt sizes were
-added, 2026-07). That is the cheap way to confirm your sources and script
-version match this repo's before you trust a new size you built.
+**byte for byte** (both families when the 8 and 10 pt sizes were added, 2026-07;
+`WenZilla_12` again when CrimKai was built, 2026-08). That is the cheap way to
+confirm your sources and script version match this repo's before you trust a
+new size you built — and it is worth doing *first*, because it fails loudly
+where a mismatched WenKai or converter would otherwise just quietly hand you a
+family that differs from the committed one. The WenKai in the 2026-08 check was
+Ubuntu noble's `fonts-lxgw-wenkai` 1.315+repack-1.
 
 ## Font style guide
 
@@ -364,6 +383,14 @@ version match this repo's before you trust a new size you built.
   nicoverbruggen) used for the Latin/pinyin half of WenZilla: even weight,
   sturdy at small e-ink sizes, and a friendlier companion to kaiti hanzi than
   WenKai's own Latin. SIL OFL.
+- **NV Scarlet** — an oldstyle garalde (Cochineal, Michael Sharpe's extension
+  of Sebastian Kosch's Crimson, e-reader-tuned by nicoverbruggen) used for the
+  Latin/pinyin half of CrimKai. The book-typography answer to Zilla's slab:
+  measured at 150 dpi it puts the same 2 px stem on the screen at 12 pt and
+  3 px at 16 pt, with a marginally larger x-height and about a tenth less ink
+  overall — so it reads lighter without going spindly, and its pen-written
+  roots echo kaiti's brush-written ones. Carries every pinyin tone vowel
+  itself. SIL OFL.
 - Alternatives if taste differs: Noto Sans/Serif SC (print-style, sturdier
   at tiny sizes), TW-Kai (traditional-oriented), Ma Shan Zheng (true brush
   calligraphy — pretty, tiring as body text).
