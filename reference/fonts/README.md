@@ -9,6 +9,7 @@ Fonts" is the WiFi download store; not needed for these.)
 | Family | Use for | What it is |
 |---|---|---|
 | `WenZilla` | **Chinese books (recommended)** | Hybrid: **NV Zilla Slab** for Latin + **LXGW WenKai** for CJK. Chinese in kaiti (like HSK textbooks); Latin and pinyin in a warm slab serif instead of WenKai's plainer Latin — so mixed hanzi+pinyin (`gloss-pinyin`) and any Latin in the text read nicely. Full CJK, 22.4k glyphs, streamed from SD. Regular only. |
+| `CrimKai` | Chinese books, if you prefer a book serif | Same idea as WenZilla with the Latin half swapped: **NV Scarlet** (Cochineal — Michael Sharpe's extension of Sebastian Kosch's **Crimson**) for Latin + **LXGW WenKai** for CJK. An oldstyle garalde instead of a slab: lighter colour on the page, a slightly larger x-height, and pen-written roots that sit naturally next to brush-written kaiti. Full CJK, 22.4k glyphs. Regular only. |
 | `WenKaiFull` | Chinese books (pure kaiti) | LXGW WenKai 霞鹜文楷 (kaiti / brush style) + Noto fallback, Latin included from WenKai itself. Full CJK — 22.5k glyphs. **Device-confirmed working**; the baseline WenZilla is built on. |
 
 All SIL OFL licensed. Built with CrossPoint's own `fontconvert_sdcard.py`; the
@@ -44,6 +45,12 @@ but lacks eight — `ǎ ǐ ǒ Ǎ` and the ü-tones `ǖ ǘ ǚ ǜ`. `synth_pinyin.
 (here) draws them into Zilla's own style as composites (base vowel + the font's
 existing spacing caron / diaeresis / macron), so **all** pinyin renders in
 Zilla, not in a fallback face. Run it before the font build.
+
+**CrimKai needs none of that.** Cochineal carries all 40-odd pinyin vowels as
+drawn glyphs, tone marks included, so the family is built from the source font
+untouched — every tone mark is designed rather than composited. If you are
+choosing between the two on pinyin alone, that is the difference; on anything
+else it is slab versus oldstyle, and taste decides.
 
 **Hard-won rule: build CJK fonts with broad preset intervals
 (`latin-ext,cjk`), never with sparse custom ranges.** Sparse-interval

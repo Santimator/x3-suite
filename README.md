@@ -317,6 +317,9 @@ failure the reader cannot tell you about.
 
 - **`WenZilla/`** — the recommended Chinese font. LXGW WenKai kaiti for hanzi,
   NV Zilla Slab for Latin and pinyin, so mixed text reads well.
+- **`CrimKai/`** — the same, with Crimson in place of the slab. NV Scarlet
+  (Cochineal, the extended Crimson) for Latin and pinyin: an oldstyle book
+  serif, lighter on the page, at the same stem width on e-ink.
 - **`WenKaiFull/`** — pure kaiti baseline.
 
 Glyphs stream from the SD card, so a big font costs no RAM. Build rules for
