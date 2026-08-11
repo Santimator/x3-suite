@@ -677,12 +677,14 @@ class Bot:
     def show_queue(self, chat) -> None:
         items = self.queue.items()
         if not items:
-            return self.say(chat, "🖼 Queue empty. Nothing is waiting for the reader.",
+            return self.say(chat, "📤 Queue empty. Nothing is waiting for the reader.",
                             [[("🏠 Menu", "m:main")]])
-        rows = [[(f"✗ {i['label'][:30]}", f"qdel:{i['id']}")] for i in items]
+        icons = {"book": "📕", "font": "🔤"}
+        rows = [[(f"✗ {icons.get(i.get('kind'), '🖼')} {i['label'][:28]}",
+                  f"qdel:{i['id']}")] for i in items]
         rows.append([("📲 Push now", "push:ask"), ("Clear all", "qclr:")])
         rows.append([("🏠 Menu", "m:main")])
-        self.say(chat, f"🖼 {len(items)} waiting to go to the reader:", rows)
+        self.say(chat, f"📤 {len(items)} waiting to go to the reader:", rows)
 
     def show_inbox(self, chat) -> None:
         inbox = self.workspace / "inbox"
@@ -970,7 +972,9 @@ class Bot:
         if not families:
             return self.say(chat, "No families in <code>reference/fonts/</code>.",
                             [[("🏠 Menu", "m:main")]])
-        rows = [[(f"{f['name']} · {human(f['bytes'])}",
+        queued = {i["path"] for i in self.queue.items() if i.get("kind") == "font"}
+        rows = [[(f"{f['name']} · {human(f['bytes'])}"
+                  + (" 📤" if f["path"] in queued else ""),
                   f"fo:one:{self.tokens.put(f)}")] for f in families]
         rows.append([("📲 On the device", "fo:dev:")])
         rows.append([("🏠 Menu", "m:main")])
@@ -1006,25 +1010,65 @@ class Bot:
             return self.stale(chat)
 
         if action == "one":
-            warn = ("" if family["ui_ready"] else
-                    "\n\n⚠️ No 8/10/12 pt — books will render, but the chapter "
-                    "list and library will draw <b>blank</b> for CJK titles.")
+            if family["ui_ready"]:
+                warn = ""
+            elif family["cjk"]:
+                warn = ("\n\n⚠️ No 8/10/12 pt — books will render, but the "
+                        "chapter list and library will draw <b>blank</b> for "
+                        "CJK titles.")
+            else:
+                # The interface fallback probes 一/あ/ア/가 and skips a family
+                # that has none of them, so this one would never be asked for
+                # those sizes. Saying nothing would leave the sizes line
+                # looking short; saying "missing" would be wrong.
+                warn = ("\n\nNo 8/10/12 pt, and none needed — those are for the "
+                        "CJK interface fallback, which this family does not "
+                        "trigger. The built-in menu fonts draw the rest.")
+            queued = any(i["path"] == family["path"] and i.get("kind") == "font"
+                         for i in self.queue.items())
+            minutes = ("\n\nSending this takes a few minutes — it is "
+                       f"{human(family['bytes'])} over WiFi, and the reader "
+                       "must stay on the File Transfer screen throughout."
+                       if family["bytes"] > 4_000_000 else "")
+            send_row = [("📤 Send now", f"fo:send:{token}")]
+            if not queued:
+                send_row.insert(0, ("✓ Queue it", f"fo:q:{token}"))
             return self.say(
                 chat,
                 f"🔤 <b>{html.escape(family['name'])}</b>\n"
                 f"{', '.join(str(s) for s in family['sizes'])} pt · "
                 f"{len(family['files'])} files · {human(family['bytes'])}"
-                f"{warn}\n\n"
-                f"Sending this takes a few minutes — it is {human(family['bytes'])} "
-                f"over WiFi, and the reader must stay on the File Transfer screen "
-                f"throughout.",
-                [[("📤 Send to device", f"fo:send:{token}")],
-                 [("🔤 Fonts", "m:fo")]])
+                f"{warn}{minutes}"
+                + ("\n\n📤 Already in the queue." if queued else ""),
+                [send_row, [("📤 Queue", "m:q"), ("🔤 Fonts", "m:fo")]])
+
+        if action == "q":
+            # Same promise as a wallpaper: queued now, sent when you are next
+            # in front of the reader. Twice is a slip, not an instruction.
+            if any(i["path"] == family["path"] and i.get("kind") == "font"
+                   for i in self.queue.items()):
+                return self.say(chat, "Already in the queue.",
+                                [[("📤 Queue", "m:q"), ("🔤 Fonts", "m:fo")]])
+            self.queue.add("font", family["path"], label=family["name"],
+                           meta={"family": family["name"]})
+            return self.say(
+                chat,
+                f"🔤 queued — {len(self.queue)} waiting.\n"
+                f"{family['name']} goes across on the next push, and is "
+                f"verified and selected there.",
+                [[("📲 Push now", "push:ask"), ("🏠 Menu", "m:main")]])
 
         if action == "send":
             return self.submit(chat, lambda: self.send_font(chat, family))
 
     def send_font(self, chat, family: dict) -> None:
+        """The immediate path: the reader is in front of you, send it now."""
+        host, _ = self.device_host()
+        _, lines = self.push_font_family(chat, host, family)
+        self.say(chat, "\n".join(lines), [[("🔤 Fonts", "m:fo")],
+                                          [("🏠 Menu", "m:main")]])
+
+    def push_font_family(self, chat, host, family: dict):
         """Push a family file by file, then check the device really has it.
 
         The verify is the point. The reader lists fonts by filename and never
@@ -1032,8 +1076,12 @@ class Bot:
         selected — at which point the family quietly reverts to built-in Noto
         and looks like a bad font. Comparing byte counts against CHECKSUMS.tsv
         turns that into a line in a chat message.
+
+        Shared by the two ways a font travels — sent now, or drained from the
+        queue later — so "sending a font" means one thing, verify and select
+        included, whichever button you pressed. Returns (landed, report lines);
+        the queue reads the flag, the chat gets the lines.
         """
-        host, _ = self.device_host()
         files = [Path(f) for f in family["files"]]
         name = family["name"]
         self.say(chat, f"📤 {name} → {host}\n{len(files)} files, "
@@ -1080,8 +1128,7 @@ class Bot:
                           "under Settings → Reader → Font Family.",
                           f"<i>(couldn't select it from here: "
                           f"{html.escape(str(detail)[:120])})</i>"]
-        self.say(chat, "\n".join(lines), [[("🔤 Fonts", "m:fo")],
-                                          [("🏠 Menu", "m:main")]])
+        return (not bad and not failed), lines
 
     # -- the device --------------------------------------------------------
 
@@ -1425,8 +1472,12 @@ class Bot:
             self.say(chat, "The queue is untouched — nothing was sent.")
             return self.no_reader(chat, str(exc), retry="push:ask")
 
-        walls = [i for i in live if i.get("kind") != "book"]
         books = [i for i in live if i.get("kind") == "book"]
+        fonts = [i for i in live if i.get("kind") == "font"]
+        # Anything else is a wallpaper. Kept as the default rather than an
+        # explicit "wallpaper" test because queues written before fonts and
+        # books existed carry entries with no kind at all.
+        walls = [i for i in live if i.get("kind") not in ("book", "font")]
         # The reader is there and the work has started. Between here and the
         # report is the long quiet stretch — a 4 MB book over WiFi is a minute
         # on its own — so say what is about to happen and in what order.
@@ -1435,6 +1486,8 @@ class Bot:
             parts.append(f"{len(walls)} wallpaper(s)")
         if books:
             parts.append(f"{len(books)} book(s)")
+        if fonts:
+            parts.append(f"{len(fonts)} font family(ies)")
         self.say(chat, f"📲 Found it at <code>{html.escape(host)}</code>.\n"
                        f"Sending {' and '.join(parts)} — keep the reader on that "
                        f"screen.")
@@ -1477,6 +1530,30 @@ class Bot:
                     # the end of this method.
                     lines.append(f"❌ {html.escape(name)} — "
                                  f"{html.escape(str(exc)[:100])}")
+
+        # Fonts last: a family is the slow item, and the quick things should
+        # already be on the card by the time it starts. What a family *is* is
+        # read from disk now rather than trusted from the queue entry — rebuild
+        # it between queueing and pushing and the new bytes are what travel.
+        for item in fonts:
+            name = (item.get("meta") or {}).get("family") or item["label"]
+            family = next((f for f in suite.local_font_families()
+                           if f["name"] == name), None)
+            if not family:
+                lines.append(f"❌ {html.escape(name)} — no longer in "
+                             f"reference/fonts/")
+                continue
+            try:
+                landed, report = self.push_font_family(chat, host, family)
+                lines += report
+                if landed:
+                    done.append(item)
+            except Exception as exc:
+                # As broad as the book loop above, and for the same reason: one
+                # surprising family must not throw away a report that other
+                # items are still counting on.
+                lines.append(f"❌ {html.escape(name)} — "
+                             f"{html.escape(str(exc)[:100])}")
 
         self.queue.remove_many(i["id"] for i in done)
         self.notes.set("last_push", datetime.now().strftime("%Y-%m-%d %H:%M"))

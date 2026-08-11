@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import struct
 import subprocess
 import sys
 import urllib.error
@@ -214,6 +215,57 @@ def bmp_preview(bmp: Path, png: Path) -> dict:
 FONTS_DIR = REPO_ROOT / "reference" / "fonts"
 UI_FALLBACK_SIZES = {8, 10, 12}
 
+# 一 あ ア 가 — Han, Hiragana, Katakana, Hangul. Not a selection of our own:
+# it is `kCjkProbes` from the firmware's SdCardFontSystem.cpp, the exact test
+# 1.5.0 applies before it will use an SD family for interface text.
+CJK_PROBES = (0x4E00, 0x3042, 0x30A2, 0xAC00)
+
+
+def cpfont_intervals(path) -> list:
+    """The codepoint ranges one `.cpfont` carries, read out of the file.
+
+    Header (32 bytes) → first style's TOC entry (32) → the interval table it
+    points at, three uint32s per entry. Asking the file is the only honest way
+    to know what a family covers: the filename says the point size and nothing
+    else, and a family's script is not something to infer from its name.
+    """
+    try:
+        with open(path, "rb") as fh:
+            head = fh.read(64)
+            if len(head) < 64 or head[:8] != b"CPFONT\x00\x00":
+                return []
+            if head[12] < 1:                       # styleCount
+                return []
+            # Style TOC entry "<B3xIIBhhHHBBBI4x" at 32: intervalCount is its
+            # second field (+4), dataOffset its last (+24).
+            n_int = struct.unpack_from("<I", head, 36)[0]
+            data_offset = struct.unpack_from("<I", head, 56)[0]
+            if not 0 < n_int <= 4096:              # a corrupt count, not a font
+                return []
+            fh.seek(data_offset)
+            table = fh.read(12 * n_int)
+    except OSError:
+        return []
+    if len(table) < 12 * n_int:
+        return []
+    return [struct.unpack_from("<III", table, 12 * i)[:2] for i in range(n_int)]
+
+
+def font_covers_cjk(files) -> bool:
+    """Would 1.5.0 use this family to draw CJK in the interface?
+
+    Only families that pass this get asked for their 8/10/12 pt files, so it
+    is also the answer to "does this family *need* them". Unreadable files say
+    yes: the three CJK families this repo ships are the norm, and a warning
+    that fires when we cannot tell is the safe way round.
+    """
+    for path in files:
+        intervals = cpfont_intervals(path)
+        if intervals:
+            return any(start <= cp <= end
+                       for cp in CJK_PROBES for start, end in intervals)
+    return True
+
 
 def checksums() -> dict:
     """`reference/fonts/CHECKSUMS.tsv` as {relative path: (bytes, md5)}."""
@@ -253,6 +305,10 @@ def local_font_families() -> list:
             "sizes": sizes,
             "bytes": sum(f.stat().st_size for f in files),
             "ui_ready": UI_FALLBACK_SIZES.issubset(set(sizes)),
+            # Whether the missing sizes would matter. The interface fallback
+            # only ever asks a family that draws CJK, so an Arabic or Latin
+            # family shipping 12-18 is complete, not short of three files.
+            "cjk": font_covers_cjk(str(f) for f in files),
         })
     return families
 

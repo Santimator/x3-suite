@@ -51,7 +51,7 @@ This is the whole design, and everything else follows from it.
 **Manipulate** is available any time and never touches the reader. Build a
 wallpaper, file a book where the catalog will find it, stage a PDF, rename or
 delete inside `workspace/`. Work that is *bound for the device* is **queued**,
-not sent.
+not sent — a wallpaper, a book you asked to copy onto the card, a font family.
 
 **Push** happens only when you ask, and only while the X3 sits on **Home →
 File Transfer → Join a Network** — the firmware runs its web server only on
@@ -237,12 +237,36 @@ weight, and flags any that lacks 8/10/12 pt — those render books perfectly and
 leave the chapter list **blank** for CJK, which is the least obvious failure
 this device has.
 
-Sending one is not like sending a wallpaper: a family is ~24 MB in six files,
-the largest 6.8 MB, so it takes minutes and the reader has to stay on the File
-Transfer screen throughout. Files go one at a time with a tick each, through
-`POST /api/fonts/upload` — the firmware creates the family directory itself and
-checks the `CPFONT\0\0` magic, so it refuses a "save link as" HTML page
-outright.
+**That flag asks the font, rather than assuming.** The interface fallback is
+CJK-gated: 1.5.0 probes 一/あ/ア/가 and skips a family that draws none of them,
+so an Arabic or Latin family shipping 12–18 is *complete*, not three files
+short. The bot reads the `.cpfont` interval table itself
+(`suite.cpfont_intervals`, header → style TOC → the table it points at) and
+applies the firmware's own probe list, so `NaskhFull` is told it needs nothing
+and `WenZilla` is still warned if a size is missing. Reading the file is the
+only honest answer: a filename carries the point size and nothing else.
+
+Sending one is not like sending a wallpaper: a CJK family is ~24 MB in six
+files, the largest 6.8 MB, so it takes minutes and the reader has to stay on
+the File Transfer screen throughout. Files go one at a time with a tick each,
+through `POST /api/fonts/upload` — the firmware creates the family directory
+itself and checks the `CPFONT\0\0` magic, so it refuses a "save link as" HTML
+page outright.
+
+**✓ Queue it** puts the family in the same outbox as a wallpaper, for the
+same reason: the font is here now and the reader is not. It is **one entry per
+family, never one per file** — half a family on the card is precisely the
+font that lists in the picker and reverts to Noto, so "landed" has to mean all
+of it. The entry stores the family *name*, not its file list, so rebuilding a
+family between queueing and pushing sends the new bytes rather than a stale
+manifest. Fonts drain last, after the wallpapers and books, since they are the
+slow item and there is no reason to make the quick ones wait behind one.
+Queueing the same family twice is refused rather than doubled.
+
+A queued push does exactly what **📤 Send now** does, verify and select
+included — one description of what sending a font means, whichever button you
+pressed (`Bot.push_font_family`). If the verify comes back short, the family
+stays in the queue and is not selected on the reader.
 
 **Then it verifies, and that is the point of the whole feature.** The reader
 lists fonts by *filename only* — it never opens them — so a truncated copy
@@ -438,9 +462,13 @@ temporary workspace. It grades the four things that would actually hurt:
    root — refused by resolution, not by string matching.
 3. **The queue survives a restart**, keeps its order, leaves no temporary
    files, and never takes a book without being asked.
-4. **A failed push changes nothing** — wallpapers or books — a partial push
-   removes exactly what landed, and a queued file that vanished from disk is
-   dropped by name rather than pushed.
+4. **A failed push changes nothing** — wallpapers, books or fonts — a partial
+   push removes exactly what landed, and a queued file that vanished from disk
+   is dropped by name rather than pushed.
+   For a font family that means all-or-nothing per *family*: a queued family is
+   sent through the font endpoint rather than the wallpaper one, is re-read
+   from disk at push time, and a single short file leaves it queued and
+   unselected.
 5. **A pushed book gets the name the OPDS client would give it**, checked
    against that port directly, including the 100-byte budget and a title of
    nothing but dots.

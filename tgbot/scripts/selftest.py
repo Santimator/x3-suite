@@ -699,6 +699,127 @@ def check_fonts(tmp: Path) -> None:
     check("/fonts/X/Y is not", bot.font_family_of("/fonts/X/Y") is None)
     check("/sleep is not", bot.font_family_of("/sleep") is None)
 
+    # What a family covers is read out of the .cpfont, never guessed from the
+    # name — it decides whether "no 8/10/12 pt" is a warning or a non-event.
+    families = {f["name"]: f for f in suite.local_font_families()}
+    if "WenZilla" in families:
+        check("a CJK family is recognised from its own interval table",
+              families["WenZilla"]["cjk"],
+              str(len(suite.cpfont_intervals(families["WenZilla"]["files"][0]))))
+    if "NaskhFull" in families:
+        check("... and a non-CJK one is not", not families["NaskhFull"]["cjk"])
+    check("a file that is not a font reads as no intervals at all",
+          suite.cpfont_intervals(FONTS := (tmp / "notafont")) == []
+          and not FONTS.exists())
+
+
+# -- 4d. a font family through the queue -----------------------------------
+
+
+def check_font_queue(tmp: Path) -> None:
+    """Fonts queue like everything else bound for the device.
+
+    A family is one queue entry, not six: half a family on the card is a font
+    that lists in the picker and reverts to Noto, so "landed" has to mean all
+    of it or none. And the entry names the family rather than freezing its
+    file list, so a rebuild between queueing and pushing sends the new bytes.
+    """
+    print("\na font family through the queue:")
+    bot, tg = make_bot(tmp)
+
+    fonts_dir = tmp / "fontrepo"
+    (fonts_dir / "Fake").mkdir(parents=True)
+    for size in (12, 14):
+        (fonts_dir / "Fake" / f"Fake_{size}.cpfont").write_bytes(b"CPFONT\x00\x00")
+
+    original_dir = suite.FONTS_DIR
+    orig_upload = suite.device.upload_font
+    orig_verify = suite.verify_font_family
+    orig_select = suite.device.select_font_family
+    orig_push = suite.push
+    try:
+        suite.FONTS_DIR = fonts_dir
+        family = suite.local_font_families()[0]
+        token = bot.tokens.put(family)
+
+        bot.handle(cb(f"fo:q:{token}"))
+        items = bot.queue.items()
+        check("a family is one queue entry, not one per file", len(items) == 1,
+              str(items))
+        check("... filed as a font, under the family's name",
+              items[0]["kind"] == "font" and items[0]["label"] == "Fake",
+              str(items[0]))
+        check("... and it survives a restart",
+              [i["label"] for i in Queue(bot.queue.path).items()] == ["Fake"])
+
+        tg.sent.clear()
+        bot.handle(cb(f"fo:q:{token}"))
+        check("queueing the same family twice is refused, not doubled",
+              len(bot.queue) == 1 and "Already" in tg.sent[-1]["text"],
+              tg.sent[-1]["text"])
+
+        # A third file appears after queueing: the push must send what the
+        # family is now, not what it was when the button was tapped.
+        (fonts_dir / "Fake" / "Fake_16.cpfont").write_bytes(b"CPFONT\x00\x00")
+
+        uploaded, selected, pushed = [], [], []
+        suite.device.upload_font = lambda host, name, path: \
+            uploaded.append((name, Path(path).name))
+        suite.verify_font_family = lambda host, name: \
+            [{"name": n, "expected": 8, "actual": 8, "ok": True}
+             for _, n in uploaded]
+        suite.device.select_font_family = lambda host, name: \
+            (selected.append(name), (True, ""))[1]
+        suite.push = lambda files, host=None: (pushed.extend(files),
+                                               {"ok": True, "items": []})[1]
+        bot.device_host = lambda: ("10.0.0.5", {})
+
+        bot.do_push(bot.user_id)
+        check("the push sends every file in the family as it stands now",
+              [n for _, n in uploaded] == ["Fake_12.cpfont", "Fake_14.cpfont",
+                                           "Fake_16.cpfont"], str(uploaded))
+        check("... through the font endpoint, never as a wallpaper",
+              not pushed, str(pushed))
+        check("... verifies and selects it, exactly like sending it by hand",
+              selected == ["Fake"], str(selected))
+        check("... and only then does it leave the queue", len(bot.queue) == 0,
+              str(bot.queue.items()))
+
+        # Half a family is the failure this whole feature exists to catch.
+        print("\na font family the device only half received:")
+        bot, tg = make_bot(tmp)
+        bot.device_host = lambda: ("10.0.0.5", {})
+        family = suite.local_font_families()[0]
+        bot.handle(cb(f"fo:q:{bot.tokens.put(family)}"))
+        suite.verify_font_family = lambda host, name: [
+            {"name": "Fake_12.cpfont", "expected": 8, "actual": 8, "ok": True},
+            {"name": "Fake_14.cpfont", "expected": 8, "actual": 3, "ok": False}]
+        selected.clear()
+        bot.do_push(bot.user_id)
+        check("a short file keeps the family in the queue",
+              len(bot.queue) == 1, str(bot.queue.items()))
+        check("... is named in the report",
+              any("Fake_14.cpfont" in s["text"] for s in tg.sent),
+              tg.sent[-1]["text"] if tg.sent else "")
+        check("... and the family is not selected on the reader",
+              not selected, str(selected))
+
+        # A family deleted from the repo between queueing and pushing.
+        print("\na queued family that is no longer in the repo:")
+        bot, tg = make_bot(tmp)
+        bot.device_host = lambda: ("10.0.0.5", {})
+        bot.queue.add("font", str(fonts_dir / "Gone"), label="Gone",
+                      meta={"family": "Gone"})
+        bot.do_push(bot.user_id)
+        check("is reported, not pushed as a wallpaper",
+              any("Gone" in s["text"] for s in tg.sent), str(tg.sent[-1]))
+    finally:
+        suite.FONTS_DIR = original_dir
+        suite.device.upload_font = orig_upload
+        suite.verify_font_family = orig_verify
+        suite.device.select_font_family = orig_select
+        suite.push = orig_push
+
 
 # -- 5a. a message must never simply vanish --------------------------------
 
@@ -921,6 +1042,7 @@ def main() -> int:
         check_book_delivery(tmp)
         check_wallpaper_collection(tmp)
         check_fonts(tmp)
+        check_font_queue(tmp)
         check_tokens(tmp)
         check_device_menu(tmp)
         check_never_silent(tmp)

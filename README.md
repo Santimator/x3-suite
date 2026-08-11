@@ -366,8 +366,10 @@ The shape worth knowing before you use it: **server-side work happens any time,
 device-side work only when you ask.** A built wallpaper is *queued*, and the
 queue is drained only by an explicit push, only while the X3 is on Home → File
 Transfer → Join a Network. If the reader isn't there, the queue is untouched —
-so you can send pictures all week and push once. Books are never queued: the
-reader pulls those from the catalog itself.
+so you can send pictures all week and push once. A font family queues the same
+way, as one entry: it goes across, is verified against `CHECKSUMS.tsv` and
+selected, or it stays queued. Books are never queued: the reader pulls those
+from the catalog itself.
 
 It is **optional by construction**. Nothing else in the repo imports it, and if
 you never want a bot, you never need a token.
