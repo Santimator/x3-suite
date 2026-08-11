@@ -306,8 +306,9 @@ Docs: [`wallpaper-maker/SKILL.md`](wallpaper-maker/SKILL.md) · device rules:
 
 ## 8. Fonts
 
-**Tested:** device-confirmed. Stock firmware shows hanzi as tofu boxes; these
-render.
+**Tested:** device-confirmed for the three Chinese families — stock firmware
+shows hanzi as tofu boxes and these render. The Arabic one is source-confirmed
+only, and says so below.
 
 Copy a family folder from `reference/fonts/` to the SD card under `/fonts/`,
 power-cycle (fonts are scanned once at boot), then pick it under Settings →
@@ -321,6 +322,15 @@ failure the reader cannot tell you about.
   (Cochineal, the extended Crimson) for Latin and pinyin: an oldstyle book
   serif, lighter on the page, at the same stem width on e-ink.
 - **`WenKaiFull/`** — pure kaiti baseline.
+- **`NaskhFull/`** — Arabic. Noto Naskh Arabic with a Noto Sans fallback, and
+  not a matter of taste: the firmware reorders and joins Arabic itself, then
+  asks the font for the **presentation forms** it produced (U+FE70–U+FEFC and
+  friends). The built-in menu fonts carry those; the built-in *reading* fonts
+  carry no Arabic at all, so on stock firmware the menus render Arabic and the
+  page renders nothing. Four sizes, 1.1 MB. **Source-confirmed against
+  CrossPoint 1.5.0, not yet seen on a device** — the mechanism, the build
+  command and what each failure mode accuses are in
+  [`reference/readers.md`](reference/readers.md), "Arabic in the book body".
 
 Glyphs stream from the SD card, so a big font costs no RAM. Build rules for
 making your own — including the trap where a subset font loads in the picker and

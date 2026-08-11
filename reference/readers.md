@@ -23,6 +23,9 @@ otherwise.
    **`WenKaiFull/`** is the pure-kaiti baseline (device-confirmed). Glyphs
    stream from SD. All three ship sizes **8, 10, 12, 14, 16, 18** — the small
    three exist for the UI fallback, not for reading.
+   For Arabic the font is not a preference but the whole feature:
+   **`NaskhFull/`** ships 12–18 and is what makes a book body render at all
+   (the menus already work without it) — see "Arabic in the book body".
    Install details: `reference/fonts/README.md`.
 3. **Books:** build with `reading_style: after` in book.json (pinyin after each
    glossed word) — see the rendering verdicts below.
@@ -90,6 +93,129 @@ Two upstream issue candidates: the exact-size lookup could use the
 `findNearestSize` that already exists next to it, and a UI font without U+FFFD
 fails silently (blank) instead of showing the boxes the firmware's own
 `docs/sd-card-fonts.md` promises.
+
+## Arabic in the book body (why the menus work and the pages do not)
+
+***SOURCE-CONFIRMED, NOT DEVICE-CONFIRMED.*** Everything below is read from
+the crosspoint-reader source at tag **v1.5.0** and from the fonts as built;
+none of it has been photographed on an X3. `NaskhFull/` was built and verified
+off-device (interval table and glyph bitmaps read back out of the `.cpfont`),
+not selected on a reader. Treat the failure modes at the end as the checklist
+for confirming it, and mark this section device-confirmed when you do.
+
+**The firmware does bidi and joining itself, and it is done well.** A UI or
+book string goes through `BidiUtils::applyBidiVisual`
+(`lib/MiniBidi/BidiUtils.cpp:94`), reached from the renderer's
+`resolveVisualText` (`lib/GfxRenderer/GfxRenderer.cpp:646`, called at `:542`,
+`:567`, `:1877`). Inside it, order matters and is deliberate: `do_bidi()`
+first for visual order, `do_shape()` second, because contextual forms are
+resolved from *visual* adjacency (`BidiUtils.cpp:139-140`). Both are a port of
+mintty's `minibidi.c`, extended for Perso-Arabic letters and in-stream
+diacritics (`lib/MiniBidi/minibidi.c`).
+
+**The shaper emits presentation forms, not letters.** That is the fact the
+font has to be built around. The shape table's own comment is literal —
+`uchar form_b; /* isolated form = 0xFE00 + form_b (Presentation Forms-B) */`
+(`minibidi.c:169`) — and the lookup returns `0xFE00 + form_b + form`
+(`minibidi.c:336`), landing every ordinary Arabic letter in **U+FE70–U+FEFC**.
+Perso-Arabic extensions map into **Forms-A**, U+FB50–U+FBFF
+(`minibidi.c:254`, from UnicodeData.txt). Lam-alef collapses to one of
+**U+FEF5–U+FEFC** (`minibidi.c:398`), and the absorbed alef is overwritten
+with `LIGATURE_PLACEHOLDER` = `0xFFFF` (`minibidi.c:414`,
+`lib/MiniBidi/minibidi.h:93`), which is filtered out before emission along
+with ZWJ/ZWNJ (`BidiUtils.cpp:146`) — so no font needs a glyph for it.
+
+**A font covering only U+0600–U+06FF therefore renders nothing.** It covers
+what the *book* contains and none of what the *renderer* asks for.
+
+**The built-in fonts split the difference, which is why this looks like a book
+bug.** The interface fonts were built with Arabic: `ubuntu_10_regular.h:6` and
+`ubuntu_12_regular.h:6` (list rows / headers) and `notosans_8_regular.h:6`
+(subtitles) all record a `fontconvert.py` command taking
+`NotoSansArabic-Regular.ttf` with `--additional-intervals 0xFE80,0xFEFC` plus
+selected FB ranges and the Arabic-Indic digits `0x0660,0x0669`. The **reading**
+fonts do not: `notosans_12_regular.h:6` and `notoserif_12_regular.h:6` (and
+their 14/16/18 siblings) are `NotoSans-Regular.ttf` / `NotoSerif-Regular.ttf`
+with no `--additional-intervals` at all. Menus, titles and the file browser
+render Arabic on stock 1.5.0; the page cannot.
+
+**And nothing rescues it.** The renderer's only font redirect,
+`GfxRenderer::resolveTextFontId`, is gated on `utf8IsCjkCodepoint(cp)`
+(`GfxRenderer.cpp:205`) — an Arabic codepoint never qualifies. It also runs
+built-in-UI-font → SD-font, the opposite direction from what a book body would
+need, and that map is only ever populated for the three UI font ids
+(`src/SdCardFontSystem.cpp:166`, over `kUiFontSizes`). The setup that
+populates it bails out first unless the SD family answers to one of
+`{0x4E00, 0x3042, 0x30A2, 0xAC00}` — Han, Hiragana, Katakana, Hangul
+(`SdCardFontSystem.cpp:150`). An Arabic family is skipped by design, which is
+also why `NaskhFull` shipping 8/10/12 pt files would be dead weight.
+
+**Nor is there one to download.** `lib/EpdFont/scripts/sd-fonts.yaml` — the
+catalog behind Manage Fonts — lists 21 families and no Arabic one, and
+`fontconvert_sdcard.py:47` has a `hebrew` preset (`0x0590-0x05FF`,
+`0xFB1D-0xFB4F`: base block plus presentation forms, exactly the right shape)
+but no `arabic`. Hence spelling the intervals out below. Upstream issue
+candidate, and an easy one: `"arabic": [(0x0600,0x06FF), (0xFB50,0xFDFF),
+(0xFE70,0xFEFF)]` next to `hebrew` is the whole patch.
+
+**The build** (what produced `reference/fonts/NaskhFull/`; same pinned
+converter as the CJK families below):
+
+```bash
+# Noto Naskh Arabic + Noto Sans fallback, from notofonts.github.io:
+#   fonts/NotoNaskhArabic/hinted/ttf/NotoNaskhArabic-Regular.ttf   (v2.021)
+#   fonts/NotoSans/hinted/ttf/NotoSans-Regular.ttf                 (v2.015)
+# hinted/, not full/: the converter renders with FreeType's native hinting
+# (FT_LOAD_RENDER, no FORCE_AUTOHINT unless asked), and the two builds encode
+# the same Arabic coverage anyway.
+python3 fontconvert_sdcard.py \
+    --intervals 'latin-ext,(0x0600-0x06FF),(0xFB50-0xFDFC),(0xFDFE-0xFDFF),(0xFE70-0xFEFF)' \
+    --sizes 12,14,16,18 \
+    --regular NotoNaskhArabic-Regular.ttf --fallback-regular NotoSans-Regular.ttf \
+    --name NaskhFull --output-dir NaskhFull/
+```
+
+**The one deliberate hole in that range: U+FDFD.** The obvious interval is
+`(0xFB50-0xFDFF)` in one piece, and it **crashes the converter** —
+`struct.error: ubyte format requires 0 <= number <= 255`, thrown at
+`fontconvert_sdcard.py:790` packing `GLYPH_STRUCT_FORMAT = "<BBHhhH2xI"`
+(`:775`), whose first two fields are the glyph's width and height as `uint8`.
+The offender is exactly one codepoint at every size: U+FDFD ARABIC LIGATURE
+BISMILLAH AR-RAHMAN AR-RAHEEM, which rasterizes **304×43 px at 12 pt** and
+**455×64 at 18 pt** — wider than the 528 px panel, and unrepresentable in the
+format. Splitting the range around it costs nothing the shaper can ever ask
+for (`do_shape` never emits the FC00–FDFF word ligatures; they appear only if
+the book's own text contains one literally). Upstream issue candidate: an
+oversize glyph should be skipped with a warning, not abort the build.
+
+**Coverage, verified before building** — the trap with modern Arabic fonts is
+that many implement the joined forms in GSUB and encode *none* of them in the
+cmap, which subsets to a font that installs cleanly and draws tofu. Noto Naskh
+Arabic 2.021 encodes them, and this was checked with fontTools first: of the
+codepoints Unicode actually assigns, **U+FE80–U+FEFC 125/125**,
+**U+FB50–U+FDFF 802/802**, **U+0600–U+06FF 256/256**, Arabic-Indic digits
+10/10. Reading the built files back gives the same answer: 125 of 125 forms-B
+and all 8 lam-alef ligatures carry a non-empty bitmap. If you rebuild from a
+different Arabic face, run that count first — Scheherazade New and Amiri also
+encode the forms; many others do not.
+
+**Failure modes, and which layer each accuses:**
+
+- **Lists in the picker, reverts to built-in Noto on opening a book** → a
+  build-time problem, not a rendering one. Suspect the **intervals** first:
+  this is the one family here built from custom ranges rather than a preset,
+  and sparse intervals are the known cause of exactly this symptom (see the
+  font-building rules below). Suspect a **truncated file** second — check
+  `GET /api/fonts` against `reference/fonts/CHECKSUMS.tsv`.
+- **Boxes or blanks where the letters should be** → the font is loading and
+  the glyphs are missing: presentation forms absent from the build. Not the
+  intervals as a whole, the *coverage*.
+- **Correct letters, wrong order** (words reversed, punctuation at the wrong
+  end) → a **bidi** problem, and nothing a font can fix. Bidi runs before
+  shaping and is independent of it.
+- **Menus fine, page broken** → the expected stock-1.5.0 state, and the reason
+  this family exists. It means no SD font is selected, or the selection did not
+  survive the boot scan.
 
 ## Screen text capacity (measured on-device, 2026)
 
@@ -223,7 +349,7 @@ only while that screen is up.
 | Delete | `POST /delete?path=...`, or `paths=` with a **JSON array** to batch. A directory is removed only when already **empty**, so clearing one means the files first and the folder after |
 | Fonts | `GET /api/fonts` → `{families:[{name, sizes:[…], files:[{name,size}]}], maxFamilies}` (128). `POST /api/fonts/upload` with `family` + `file` — the firmware creates the family directory itself, and checks the `CPFONT\0\0` magic on the first chunk, so a "save link as" HTML page is refused. It cannot catch a **truncated** upload: the magic is fine and the file is short. Verify sizes against `reference/fonts/CHECKSUMS.tsv` |
 | Font delete | `POST /api/fonts/delete`, JSON body `{"family":"WenZilla"}` — removes the whole family through the firmware's own `FontInstaller` and marks the registry dirty. Prefer it to deleting the files by hand |
-| Font size | A family is ~24 MB in six files, the largest 6.8 MB. Minutes over WiFi; the twenty-second timeout used everywhere else is far too short |
+| Font size | A CJK family is ~24 MB in six files, the largest 6.8 MB. Minutes over WiFi; the twenty-second timeout used everywhere else is far too short. `NaskhFull` is 1.1 MB in four files and goes up in seconds — the timeout only bites on the big ones |
 | Settings shape | `GET /api/settings` returns a **list** of `{key, name, category, type, value}`, and an enum also carries an `options` array of its labels. Not a flat key→value map |
 | Selecting a font | `fontFamily` is an enum whose index depends on the scanned registry (built-ins, then SD families) — but the setter stores the **name** (`SETTINGS.sdFontFamilyName`) and the getter resolves it back each time. So a family can be selected *before* the reboot that makes it usable: the choice persists and the next boot's scan makes it real. Find the index by looking the family up in `options`, never by adding to a built-in count. `POST /api/settings` rebuilds the list from the live registry, which `/api/fonts/upload` marks dirty, so a just-uploaded family is already there |
 | WebDAV | Port 80, PUT overwrites atomically. **Refuses any path segment beginning with `.`** — `isProtectedPath` walks every segment, not just the last — so `/.sleep` and everything in it is unreachable this way, and `/sleep` is not |
@@ -363,6 +489,9 @@ python3 fontconvert_sdcard.py --intervals latin-ext,cjk \
     --regular NV_Scarlet-Regular.ttf --fallback-regular LXGWWenKai-Regular.ttf \
     --name CrimKai --output-dir CrimKai/
 
+# NaskhFull (Arabic) is built with the same converter and four sizes instead
+# of six; its command, its sources and why its intervals are spelled out by
+# hand are in "Arabic in the book body" above.
 ```
 
 The recipe is deterministic: re-running it reproduces the committed 12 pt files
@@ -373,6 +502,14 @@ new size you built — and it is worth doing *first*, because it fails loudly
 where a mismatched WenKai or converter would otherwise just quietly hand you a
 family that differs from the committed one. The WenKai in the 2026-08 check was
 Ubuntu noble's `fonts-lxgw-wenkai` 1.315+repack-1.
+
+**Which WenKai is not a detail.** Re-run before building `NaskhFull` (2026-08):
+that same Ubuntu package (an 18,769,824-byte TTF) reproduces
+`WenZilla_12.cpfont` byte for byte, md5 `fd33f3fc245ca18e86649c236986bb28`.
+Upstream's own `v1.315` release TTF (18,950,002 bytes) does **not** — identical
+22,415 glyphs over 61 intervals, but a file 41 bytes shorter and a different
+md5. The repack is this repo's source of record. If a reproduction comes out
+tens of bytes off, check the TTF before suspecting the converter.
 
 ## Font style guide
 
@@ -443,6 +580,8 @@ book, and none of them is.
   docs/sd-card-fonts.md; font catalog in lib/EpdFont/scripts/sd-fonts.yaml)
 - https://crosspointreader.com/ (web flasher; /fonts builder)
 - https://github.com/lxgw/LxgwWenKai · https://github.com/notofonts/noto-cjk
+- https://github.com/notofonts/notofonts.github.io (Noto Naskh Arabic, Noto
+  Sans) · https://github.com/mintty/mintty (the bidi/shaping port's upstream)
 - https://github.com/bigbag/papyrix-reader ·
   https://github.com/aBER0724/crosspoint-reader-cjk
 - On-device photo evidence: stock tofu (2026-07); CrossPoint + WenKaiFull

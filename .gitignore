@@ -28,10 +28,16 @@ tgbot/state/*
 # whose licence forbids redistribution — must not be republished under it by a
 # stray `git add`. Same shape as workspace/: ignore them all, allowlist
 # deliberately, and add the attribution when you do.
+#
+# NaskhFull is the fourth line, and it earns it the same way the others do:
+# Noto Naskh Arabic and Noto Sans are both SIL OFL, so redistributing bitmap
+# conversions of them here is exactly what their licence permits — that, and
+# nothing about how useful the font is, is why it may be allowlisted.
 reference/fonts/*/
 !reference/fonts/WenKaiFull/
 !reference/fonts/WenZilla/
 !reference/fonts/CrimKai/
+!reference/fonts/NaskhFull/
 
 # opds-server: local library paths + Basic-auth password (never commit)
 opds-server/config.json

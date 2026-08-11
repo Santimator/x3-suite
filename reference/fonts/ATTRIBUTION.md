@@ -37,6 +37,25 @@ conversion.
 Sources: https://github.com/mozilla/zilla-slab ·
 https://github.com/nicoverbruggen/ebook-fonts (fonts/extra, `NV_Zilla_Slab-*`)
 
+## NaskhFull/ (Arabic)
+
+**Noto Naskh Arabic** — the Arabic half of `NaskhFull`, and the reason the
+family exists: it encodes the Arabic presentation forms (U+FB50–U+FDFF,
+U+FE70–U+FEFC) that CrossPoint's shaper emits. Version 2.021, used unmodified.
+> Copyright 2022 The Noto Project Authors
+> (https://github.com/notofonts/arabic)
+
+No Reserved Font Name is declared by the notice.
+
+**Noto Sans** — the fallback half of `NaskhFull`, supplying the Latin and
+punctuation codepoints Noto Naskh Arabic does not carry. Version 2.015, used
+unmodified.
+> Copyright 2022 The Noto Project Authors
+> (https://github.com/notofonts/latin-greek-cyrillic)
+
+Sources: https://github.com/notofonts/notofonts.github.io
+(`fonts/NotoNaskhArabic/hinted/ttf/`, `fonts/NotoSans/hinted/ttf/`)
+
 ## CrimKai/ (Latin)
 
 **NV Scarlet** — the Latin/pinyin half of `CrimKai`. An e-reader-tuned build
