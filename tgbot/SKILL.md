@@ -320,20 +320,39 @@ Each of the three works differently, and the differences are the firmware's:
   here. The same family delete still lives in the browse view, on the
   `/fonts/<Family>` folder card.
 
-Two names are refused before anything is sent, because the reader would take
-them and then behave as though the family had vanished: anything with a slash,
-and anything starting with `.` or `_` — the scan skips those directories
-outright, with no error anywhere.
+**The name rule is the firmware's, and it is stricter than it looks.**
+`FontInstaller::isValidFamilyName` allows only `[A-Za-z0-9_-]`, and it guards
+the **delete** as well as the upload — while nothing enforces it on the way in.
+So a folder named `Noto Naskh`, by hand or by a rename, is scanned, listed and
+perfectly readable, and then `POST /api/fonts/delete` answers 500 *for the name
+itself*, before it even looks for the folder. A family you cannot delete is a
+worse outcome than a rename that was refused, so the bot applies the firmware's
+rule before it sends anything, and offers rename — not a doomed delete — on a
+family that is already in that state. Names starting with `.` or `_` are
+refused too, for a different reason: `scanRoot` skips those directories, so the
+family would vanish from the picker with no error anywhere.
 
-**And renaming has a tail the reader does not hide well.** The registry
-re-scans at boot and otherwise only when an upload or a delete marks it dirty
-— a WebDAV rename marks nothing. So for the rest of the session the reader
-still reports the *old* family name, and `fontFamily`'s options still list it.
-If the family being renamed is the selected one, the selection is dropped (it
-is stored by name, and the next boot's scan clears a name it cannot find): the
-bot tries to set it again under the new name, and when the reader will not
-take it yet, says so and tells you to pick it after the power-cycle rather
-than pretending it worked.
+**And a rename leaves the reader's own list stale, so the bot fixes that too.**
+The registry is a boot-time snapshot, refreshed only when something marks it
+dirty — and only the upload and delete endpoints do. A WebDAV rename marks
+nothing, so the reader goes on listing the *old* family name, reporting every
+file at **0 B** (the recorded paths no longer open), refusing to select the new
+name because its `options` list has not changed, and answering "already gone"
+to a delete of either name.
+
+The way out is the delete endpoint's own no-op: `deleteFamily` walks both
+roots, finds nothing, removes nothing and returns **OK**, which marks the
+registry dirty. So `suite.rescan_device_fonts` deletes a random name that
+cannot exist and then re-reads the list — a remote re-scan, no power-cycle.
+The bot runs it after every rename and after a delete, and offers it as
+**🔄 Re-scan** whenever a family shows up stale. It is also how a family copied
+to the card by hand appears without rebooting.
+
+**One thing it will not guess:** `/api/fonts` never reports a path, so when a
+listed family has no folder in `/fonts` there are two possible reasons — it
+lives in the hidden `/.fonts`, or the list is stale — and the bot says which
+ones are possible rather than picking one. It only names `/.fonts` as the cause
+when the card has no visible `/fonts` at all.
 
 **There is no way to end File Transfer mode from here.** The route table is 18
 endpoints, `onNotFound` and WebDAV, and none of them stops the server; the
@@ -516,11 +535,14 @@ temporary workspace. It grades the four things that would actually hurt:
    against that port directly, including the 100-byte budget and a title of
    nothing but dots.
 6. **The families on the reader**, against a fake device: the selected one is
-   marked and not offered again, a family in `/.fonts` is offered no rename and
-   told why, a name with a slash or a leading `.`/`_` is refused before
-   anything is sent, a good one renames the folder and nothing else, a family
-   the reader has not scanned is declined with the reason rather than selected
-   by a guessed index, and a delete asks twice before the firmware's endpoint.
+   marked and not offered again; a name the firmware's own rule rejects is
+   refused *before* the move, and a family already carrying one is offered a
+   rename instead of a delete that would 500; a family listing every file at
+   0 B is called stale rather than empty, is not blamed on `/.fonts`, and
+   deleting it re-scans instead of reporting a deletion that did not happen;
+   the re-scan probe is a valid family name that can match nothing; a rename
+   moves the folder and only the folder, then re-scans and re-selects; and
+   `/.fonts` is named as the reason only when the card has no `/fonts`.
 
 Plus: a 200-character device name with decomposed accents round-trips through a
 button token byte-identically, a stale token is answered rather than guessed

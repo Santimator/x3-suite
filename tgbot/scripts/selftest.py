@@ -829,142 +829,181 @@ def check_device_fonts(tmp: Path) -> None:
 
     All three are name-based on the device and none of them is symmetrical
     with the others: selection is a settings enum resolved by label, deletion
-    is the firmware's own endpoint, and a rename is a *folder* rename that only
-    WebDAV will do and only outside `/.fonts`.
+    is the firmware's own endpoint behind a stricter name rule than anything
+    that creates a folder, and a rename is a *folder* rename that only WebDAV
+    will do, only outside `/.fonts`, and which leaves the reader's own font
+    list stale until something makes it scan again.
     """
     print("\nfont families on the reader:")
-    bot, tg = make_bot(tmp)
-    bot.device_host = lambda: ("10.0.0.5", {})
 
-    state = {"families": ["WenZilla", "Hidden"], "value": 3,
-             "options": ["Noto Serif", "Noto Sans", "WenKaiFull", "WenZilla"],
-             "moved": [], "deleted": []}
+    def device(state):
+        """A fake reader whose fonts folder is whatever `state` says."""
+        def fonts(host):
+            return {"families": [
+                {"name": n, "sizes": [12, 14],
+                 "files": [{"name": f"{n}_12.cpfont", "size": state["sizes"].get(n, 10)}]}
+                for n in state["families"]]}
 
-    def fake_fonts(host):
-        return {"families": [{"name": n, "sizes": [12, 14],
-                              "files": [{"name": f"{n}_12.cpfont", "size": 10}]}
-                             for n in state["families"]]}
+        def settings(host):
+            return {"fontFamily": {"key": "fontFamily", "type": "enum",
+                                   "value": state["value"],
+                                   "options": state["options"]}}
 
-    def fake_settings(host):
-        return {"fontFamily": {"key": "fontFamily", "type": "enum",
-                               "value": state["value"],
-                               "options": state["options"]}}
+        def list_dir(host, path):
+            if path == "/":
+                return [{"name": d, "isDirectory": True} for d in state["root"]]
+            if path == "/fonts":
+                return [{"name": d, "isDirectory": True} for d in state["visible"]]
+            return []
 
-    def fake_list_dir(host, path):
-        # Only WenZilla is in the visible root; Hidden lives in /.fonts, which
-        # /api/files does not show and WebDAV will not touch.
-        return ([{"name": "WenZilla", "isDirectory": True}]
-                if path == "/fonts" else [])
+        def delete_family(host, name):
+            state["deleted"].append(name)
+
+        suite.device.fonts = fonts
+        suite.device.settings = settings
+        suite.device.list_dir = list_dir
+        suite.device.delete_font_family = delete_family
+        suite.device.dav_move = lambda h, src, dst: state["moved"].append((src, dst))
+        suite.verify_font_family = lambda h, n: \
+            [{"name": "x", "expected": 1, "actual": 1, "ok": True}]
+
+        def select(host, name):
+            if name not in state["options"]:
+                return False, f"the reader does not list {name} yet"
+            state["value"] = state["options"].index(name)
+            return True, name
+        suite.device.select_font_family = select
+
+    def buttons(sent):
+        return [b[1] for row in (sent["keyboard"] or []) for b in row]
+
+    def open_family(bot, tg, listing, label):
+        for row in listing["keyboard"]:
+            for text, data in row:
+                if label in text:
+                    tg.sent.clear()
+                    bot.handle(cb(data))
+                    return tg.sent[-1]
+        raise AssertionError(f"no button for {label}")
 
     orig = (suite.device.fonts, suite.device.settings, suite.device.list_dir,
             suite.device.dav_move, suite.device.delete_font_family,
             suite.device.select_font_family, suite.verify_font_family)
     try:
-        suite.device.fonts = fake_fonts
-        suite.device.settings = fake_settings
-        suite.device.list_dir = fake_list_dir
-        suite.device.dav_move = lambda host, src, dst: state["moved"].append((src, dst))
-        suite.device.delete_font_family = lambda host, name: \
-            state["deleted"].append(name)
-        suite.verify_font_family = lambda host, name: \
-            [{"name": "x", "expected": 1, "actual": 1, "ok": True}]
-
-        def fake_select(host, name):
-            if name not in state["options"]:
-                return False, f"the reader does not list {name} yet"
-            state["value"] = state["options"].index(name)
-            return True, name
-        suite.device.select_font_family = fake_select
+        # A reader with a visible /fonts, one family in it, and one the
+        # registry remembers from a scan that is no longer true.
+        state = {"families": ["WenZilla", "Ghost"], "visible": ["WenZilla"],
+                 "root": ["fonts", "Books"], "sizes": {"Ghost": 0},
+                 "value": 3, "moved": [], "deleted": [],
+                 "options": ["Noto Serif", "Noto Sans", "WenKaiFull", "WenZilla"]}
+        device(state)
+        bot, tg = make_bot(tmp)
+        bot.device_host = lambda: ("10.0.0.5", {})
 
         tg.sent.clear()
         bot.handle(cb("dev:fo:"))
         listing = tg.sent[-1]
-        check("the reader's families are listed", "WenZilla" in listing["text"]
-              and "Hidden" in listing["text"], listing["text"])
-        check("... with the selected one marked", "✅" in listing["text"],
+        check("the reader's families are listed", "WenZilla" in listing["text"])
+        check("... with the selected one marked", "✅" in listing["text"])
+        check("a family whose files all report 0 B is called stale, not empty",
+              "stale" in str(listing["keyboard"]) and "last scanned" in listing["text"],
               listing["text"])
+        check("... and a re-scan is offered",
+              "dev:foscan:" in str(listing["keyboard"]), str(listing["keyboard"]))
 
-        def open_family(label):
-            for row in listing["keyboard"]:
-                for text, data in row:
-                    if label in text:
-                        tg.sent.clear()
-                        bot.handle(cb(data))
-                        return tg.sent[-1]
-            raise AssertionError(f"no button for {label}")
+        card = open_family(bot, tg, listing, "WenZilla")
+        check("a family with a folder in /fonts can be renamed",
+              any(b.startswith("dfo:rn") for b in buttons(card)), str(buttons(card)))
 
-        card = open_family("WenZilla")
-        buttons = [b[1] for row in (card["keyboard"] or []) for b in row]
-        check("the selected family is not offered 'read with this'",
-              not any(b.startswith("dfo:sel") for b in buttons), str(buttons))
-        check("... and can be renamed, being in the visible root",
-              any(b.startswith("dfo:rn") for b in buttons), str(buttons))
+        ghost = open_family(bot, tg, listing, "Ghost")
+        check("a family with no folder is not offered a rename",
+              not any(b.startswith("dfo:rn") for b in buttons(ghost)), str(buttons(ghost)))
+        check("... and is not blamed on /.fonts, which we cannot know",
+              "/.fonts" not in ghost["text"], ghost["text"])
+        check("... it says the list is stale and offers the re-scan",
+              "not caught up" in ghost["text"]
+              and "dev:foscan:" in str(buttons(ghost)), ghost["text"])
 
-        hidden = open_family("Hidden")
-        buttons = [b[1] for row in (hidden["keyboard"] or []) for b in row]
-        check("a family in /.fonts offers no rename",
-              not any(b.startswith("dfo:rn") for b in buttons), str(buttons))
-        check("... and says why", "/.fonts" in hidden["text"], hidden["text"])
-        check("... but can still be deleted",
-              any(b.startswith("dfo:rm") for b in buttons), str(buttons))
-
-        # Selecting the other one. The reader has not scanned it into the
-        # enum's options yet, which is a refusal with a reason, never a guess
-        # at an index.
-        select = next(b[1] for row in hidden["keyboard"] for b in row
-                      if b[1].startswith("dfo:sel"))
+        # Deleting the stale one: the firmware would answer OK and remove
+        # nothing, so the bot must not report a deletion.
         tg.sent.clear()
-        bot.handle(cb(select))
-        check("a family the reader has not scanned is declined, with the reason",
-              state["value"] == 3 and "does not list" in tg.sent[-1]["text"],
-              tg.sent[-1]["text"])
+        bot.handle(cb(next(b for b in buttons(ghost) if b.startswith("dfo:rm"))))
+        bot.handle(cb(next(b for b in buttons(tg.sent[-1]) if b.startswith("dfo:rm!"))))
+        check("deleting a stale family removes nothing and says so",
+              "Ghost" not in [d for d in state["deleted"]
+                              if not d.startswith("cprescan")]
+              and any("Nothing to delete" in s["text"] for s in tg.sent),
+              str(state["deleted"]))
+        check("... and makes the reader re-scan instead",
+              any(d.startswith("cprescan") for d in state["deleted"]),
+              str(state["deleted"]))
 
-        state["options"] = state["options"] + ["Hidden"]
-        tg.sent.clear()
-        bot.handle(cb(select))
-        check("once it is listed, selecting it sets it by name",
-              state["value"] == state["options"].index("Hidden"),
-              str(state["value"]))
-        check("... and says it needs the power-cycle",
-              "power-cycle" in tg.sent[-1]["text"], tg.sent[-1]["text"])
-        state["value"] = 3                      # back to WenZilla for the rest
+        # The re-scan itself: a delete aimed at a name that cannot exist.
+        state["deleted"].clear()
+        bot.handle(cb("dev:foscan:"))
+        check("the re-scan probe is a valid family name that cannot match one",
+              len(state["deleted"]) == 1
+              and state["deleted"][0].startswith("cprescan")
+              and suite.family_name_problem(state["deleted"][0]) is None,
+              str(state["deleted"]))
 
-        # Renaming: the guards first, then the move.
-        card = open_family("WenZilla")
-        rename = next(b[1] for row in card["keyboard"] for b in row
-                      if b[1].startswith("dfo:rn"))
-        for bad, why in [("a/b", "slash"), (".hidden", "skips"), ("_old", "skips")]:
-            bot.handle(cb(rename))
-            tg.sent.clear()
-            bot.handle(msg(bad))
+        # Names: the firmware's rule, not a looser one of ours.
+        for bad in ("Noto Naskh", "Naskh.v2", "Ärabe", "a/b", "_old"):
             check(f"{bad!r} is refused as a family name",
-                  not state["moved"] and why in tg.sent[-1]["text"],
-                  tg.sent[-1]["text"])
+                  suite.family_name_problem(bad) is not None)
+        check("a plain name is accepted",
+              suite.family_name_problem("Naskh-Full_2") is None)
 
+        card = open_family(bot, tg, listing, "WenZilla")
+        rename = next(b for b in buttons(card) if b.startswith("dfo:rn"))
         bot.handle(cb(rename))
         tg.sent.clear()
+        bot.handle(msg("Noto Naskh"))
+        check("a name the reader could not delete is refused before the move",
+              not state["moved"] and "only accepts" in tg.sent[-1]["text"],
+              tg.sent[-1]["text"])
+
+        state["deleted"].clear()
+        bot.handle(cb(rename))
+        tg.sent.clear()
+        state["options"] = state["options"] + ["Zilla"]
         bot.handle(msg("Zilla"))
         check("a good name renames the folder, and only the folder",
               state["moved"] == [("/fonts/WenZilla", "/fonts/Zilla")],
               str(state["moved"]))
-        check("... re-selects it when it was the reading font",
-              "still the selected family" in tg.sent[-1]["text"]
-              or "power-cycle" in tg.sent[-1]["text"], tg.sent[-1]["text"])
-        check("... and warns the reader's list is stale until it re-scans",
-              "re-scans at boot" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+        check("... then makes the reader re-scan, so its list is not left stale",
+              any(d.startswith("cprescan") for d in state["deleted"]),
+              str(state["deleted"]))
+        check("... and re-selects it, since it was the family being read with",
+              state["value"] == state["options"].index("Zilla")
+              and "reads with" in tg.sent[-1]["text"], tg.sent[-1]["text"])
 
-        # Deleting asks twice, like every other delete in this bot.
-        card = open_family("Hidden")
-        remove = next(b[1] for row in card["keyboard"] for b in row
-                      if b[1].startswith("dfo:rm"))
+        # A family whose folder holds characters the delete endpoint rejects.
+        state.update(families=["Noto Naskh"], visible=["Noto Naskh"],
+                     sizes={}, value=0)
         tg.sent.clear()
-        bot.handle(cb(remove))
-        check("deleting a family asks first", not state["deleted"]
-              and "Yes, delete" in str(tg.sent[-1]["keyboard"]), str(tg.sent[-1]))
-        bot.handle(cb(next(b[1] for row in tg.sent[-1]["keyboard"] for b in row
-                           if b[1].startswith("dfo:rm!"))))
-        check("... and the confirmation goes through the firmware's endpoint",
-              state["deleted"] == ["Hidden"], str(state["deleted"]))
+        bot.handle(cb("dev:fo:"))
+        card = open_family(bot, tg, tg.sent[-1], "Noto Naskh")
+        tg.sent.clear()
+        bot.handle(cb(next(b for b in buttons(card) if b.startswith("dfo:rm"))))
+        check("a family the firmware cannot name is not offered a doomed delete",
+              "refuse to delete" in tg.sent[-1]["text"]
+              and not any(b.startswith("dfo:rm!") for b in buttons(tg.sent[-1])),
+              tg.sent[-1]["text"])
+        check("... and rename is offered as the way out",
+              any(b.startswith("dfo:rn") for b in buttons(tg.sent[-1])),
+              str(buttons(tg.sent[-1])))
+
+        # A reader with no visible /fonts at all: everything is in /.fonts.
+        state.update(families=["WenZilla"], visible=[], root=["Books"],
+                     sizes={}, value=0)
+        tg.sent.clear()
+        bot.handle(cb("dev:fo:"))
+        card = open_family(bot, tg, tg.sent[-1], "WenZilla")
+        check("with no /fonts on the card, the hidden root is named as the reason",
+              "/.fonts" in card["text"]
+              and not any(b.startswith("dfo:rn") for b in buttons(card)),
+              card["text"])
     finally:
         (suite.device.fonts, suite.device.settings, suite.device.list_dir,
          suite.device.dav_move, suite.device.delete_font_family,

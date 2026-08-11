@@ -293,15 +293,7 @@ class Bot:
             # so renaming one is a single folder rename, and the .cpfont files
             # keep the old prefix without the reader minding.
             new = text.strip()
-            why = None
-            if "/" in new or "\\" in new:
-                why = "a family name cannot contain a slash"
-            elif new.startswith((".", "_")):
-                why = ("the reader's scan skips folders starting with "
-                       "<code>.</code> or <code>_</code> — the family would "
-                       "vanish from the picker")
-            elif len(new.encode("utf-8")) > 100:
-                why = "that is longer than the reader's name buffer"
+            why = suite.family_name_problem(new)
             if why:
                 return self.say(chat, f"Not renamed — {why}.",
                                 [[("🔤 On the reader", "dev:fo:")]])
@@ -313,18 +305,26 @@ class Bot:
                 suite.device.dav_move(job["host"], old_path, new_path)
                 lines = [f"✅ <b>{html.escape(job['family'])}</b> is now "
                          f"<b>{html.escape(new)}</b> on the card."]
+                # A WebDAV rename marks nothing dirty, so without this the
+                # reader would keep listing the old name with dead paths until
+                # its next boot — and refuse to be selected under the new one.
+                try:
+                    suite.rescan_device_fonts(job["host"])
+                    lines.append("🔄 and the reader has re-scanned, so its own "
+                                 "list is right without a power-cycle.")
+                except suite.DeviceError as exc:
+                    lines.append(f"⚠️ could not make it re-scan "
+                                 f"({html.escape(str(exc)[:80])}) — its font "
+                                 f"list will stay stale until you power-cycle.")
                 if job["selected"]:
                     ok, detail = suite.device.select_font_family(job["host"], new)
                     lines.append(
-                        "✅ and it is still the selected family." if ok else
-                        "The reader has not re-scanned yet, so it cannot be "
-                        "selected under the new name from here — after the "
-                        "power-cycle, pick it again (from here, or Settings → "
-                        "Reader → Font Family). Until then it will start on a "
-                        "built-in font.")
-                lines.append("\nThe reader's own list only re-scans at boot, so "
-                             "it may still show the old name until you "
-                             "power-cycle. The card is renamed either way.")
+                        "✅ and it is still the family it reads with."
+                        if ok else
+                        f"⚠️ it was the selected family and could not be "
+                        f"re-selected ({html.escape(str(detail)[:80])}). Pick it "
+                        f"again here or under Settings → Reader → Font Family, "
+                        f"or the reader starts on a built-in font.")
                 self.say(chat, "\n".join(lines),
                          [[("🔤 On the reader", "dev:fo:")], [("🏠 Menu", "m:main")]])
             return self.submit(chat, work)
@@ -1177,11 +1177,22 @@ class Bot:
                 [[("🔤 Send one", "m:fo")], [("📲 Device", "m:dev")]])
 
         local = {f["name"]: f for f in suite.local_font_families()}
-        lines, rows = ["🔤 <b>On the reader</b>"], []
+        lines, rows, stale = ["🔤 <b>On the reader</b>"], [], False
         for f in families:
             name = f.get("name", "?")
             sizes = f.get("sizes", [])
             total = sum(x.get("size", 0) for x in f.get("files", []))
+            # Every file reporting 0 B means the registry is holding paths that
+            # no longer open — handleFontList writes 0 when the file will not
+            # open. The family was renamed or removed since the last scan.
+            if f.get("files") and not total:
+                stale = True
+                lines.append(f"⚠️ <b>{html.escape(name)}</b> — the reader still "
+                             f"lists it, but its files no longer open. It was "
+                             f"renamed or removed since it last scanned.")
+                rows.append([(f"⚠️ {name} · stale",
+                              f"dfo:one:{self.tokens.put({'name': name, 'sizes': sizes, 'bytes': 0, 'selected': name == current})}")])
+                continue
             # A family we ship is one we can read the coverage of; for anything
             # else, keep the old blunt warning rather than guess it away.
             known = local.get(name)
@@ -1201,6 +1212,10 @@ class Bot:
         if current and current not in {f.get("name") for f in families}:
             lines.append(f"\nReading with <b>{html.escape(current)}</b>, "
                          f"which is built in.")
+        if stale:
+            lines.append("\nThe reader only re-reads its fonts folder at boot. "
+                         "<b>🔄 Re-scan</b> makes it do so now.")
+            rows.append([("🔄 Re-scan", "dev:foscan:")])
         rows.append([("🔤 Send one", "m:fo"), ("📲 Device", "m:dev")])
         self.say(chat, "\n".join(lines), rows)
 
@@ -1243,20 +1258,29 @@ class Bot:
                                  if bad else
                                  "✅ every file matches CHECKSUMS.tsv")
                 # Renaming is a folder rename, and only the visible root can be
-                # reached; asked now so the button is offered only when it works.
-                root = suite.device_font_root(host, name)
-                if not root:
-                    lines.append("\n<i>Cannot be renamed from here: it is in "
-                                 "the reader's hidden <code>/.fonts</code>, "
-                                 "which WebDAV refuses.</i>")
+                # reached; asked now so the button is offered only when it
+                # works, and so the *reason* it does not is the true one.
+                root, where = suite.device_font_location(host, name)
                 rows = []
-                if not family["selected"]:
+                if where == "hidden-root":
+                    lines.append("\n<i>Cannot be renamed from here: this reader "
+                                 "keeps its fonts in the hidden "
+                                 "<code>/.fonts</code>, which WebDAV refuses to "
+                                 "touch.</i>")
+                elif where == "missing":
+                    lines.append(
+                        "\n⚠️ <b>The reader lists this family, but there is no "
+                        "<code>/fonts/" + html.escape(name) + "</code> on the "
+                        "card.</b> Its font list is from the last boot and has "
+                        "not caught up — a rename does exactly this. Re-scan "
+                        "and the list will tell the truth; deleting it now "
+                        "reports success and removes nothing.")
+                    rows.append([("🔄 Re-scan the reader", "dev:foscan:")])
+                if not family["selected"] and where != "missing":
                     rows.append([("✅ Read with this", f"dfo:sel:{token}")])
-                if root:
-                    rows.append([("✏️ Rename", f"dfo:rn:{token}"),
-                                 ("🗑 Delete", f"dfo:rm:{token}")])
-                else:
-                    rows.append([("🗑 Delete", f"dfo:rm:{token}")])
+                rows.append([("✏️ Rename", f"dfo:rn:{token}"),
+                             ("🗑 Delete", f"dfo:rm:{token}")]
+                            if root else [("🗑 Delete", f"dfo:rm:{token}")])
                 rows.append([("🔤 On the reader", "dev:fo:"), ("🏠 Menu", "m:main")])
                 self.say(chat, "\n".join(lines), rows)
             return self.submit(chat, work)
@@ -1280,10 +1304,12 @@ class Bot:
         if action == "rn":
             def work():
                 host, _ = self.device_host()
-                root = suite.device_font_root(host, name)
+                root, where = suite.device_font_location(host, name)
                 if not root:
-                    return self.say(chat, "That family is not in <code>/fonts</code>, "
-                                          "so it cannot be renamed from here.",
+                    return self.say(chat, "There is no <code>/fonts/"
+                                          f"{html.escape(name)}</code> on the card "
+                                          "to rename — see the family's card for "
+                                          "which of the two reasons that is.",
                                     [[("🔤 On the reader", "dev:fo:")]])
                 self.pending = {"kind": "devfontrename", "host": host,
                                 "root": root, "family": name,
@@ -1298,12 +1324,29 @@ class Bot:
                          f"Send the new name for <b>{html.escape(name)}</b>.\n"
                          f"The folder name <i>is</i> the family name — the files "
                          f"inside keep their own names and the reader will not "
-                         f"care. No slashes, and nothing starting with "
-                         f"<code>.</code> or <code>_</code> (the reader's scan "
-                         f"skips those).{warn}")
+                         f"care.\n\n<b>Letters, digits, <code>-</code> and "
+                         f"<code>_</code> only</b>, and not starting with "
+                         f"<code>_</code>. That is the firmware's rule, not "
+                         f"mine: a folder whose name it cannot parse is one it "
+                         f"will later refuse to delete.{warn}")
             return self.submit(chat, work)
 
         if action == "rm":
+            # The delete endpoint validates the family *name* before it looks
+            # for the folder, with a stricter rule than anything that created
+            # it. A folder named by hand or by a rename outside those characters
+            # can never be deleted this way — say so instead of offering a
+            # button that always 500s.
+            unusable = suite.family_name_problem(name)
+            if unusable:
+                return self.say(
+                    chat,
+                    f"The reader will refuse to delete <b>{html.escape(name)}</b>: "
+                    f"{unusable}.\n\nRename it to something with only letters, "
+                    f"digits, <code>-</code> and <code>_</code> first — then the "
+                    f"delete goes through.",
+                    [[("✏️ Rename", f"dfo:rn:{token}")],
+                     [("🔤 On the reader", "dev:fo:")]])
             return self.say(
                 chat,
                 f"Delete <b>{html.escape(name)}</b> from the reader — "
@@ -1315,7 +1358,20 @@ class Bot:
         if action == "rm!":
             def work():
                 host, _ = self.device_host()
+                root, where = suite.device_font_location(host, name)
+                if where == "missing":
+                    # deleteFamily returns OK when the folder is in neither
+                    # root — "already gone" — so this would report success and
+                    # remove nothing, and the stale list would still show it.
+                    suite.rescan_device_fonts(host)
+                    self.say(chat,
+                             f"Nothing to delete: there is no folder for "
+                             f"<b>{html.escape(name)}</b> on the card. The "
+                             f"reader was listing it from its last scan, and "
+                             f"has now re-scanned.")
+                    return self.show_device_fonts(chat)
                 suite.device.delete_font_family(host, name)
+                suite.rescan_device_fonts(host)
                 self.say(chat, f"🗑 <b>{html.escape(name)}</b> is gone from the "
                                f"reader.", [[("🔤 On the reader", "dev:fo:")],
                                             [("🏠 Menu", "m:main")]])
@@ -1375,6 +1431,13 @@ class Bot:
             return self.submit(chat, work)
         if action == "fo":
             return self.submit(chat, lambda: self.show_device_fonts(chat))
+        if action == "foscan":
+            def work():
+                host, _ = self.device_host()
+                suite.rescan_device_fonts(host)
+                self.say(chat, "🔄 The reader re-read its fonts folders.")
+                self.show_device_fonts(chat)
+            return self.submit(chat, work)
 
         if action == "dirrn":                      # rename the folder we are in
             path = self.tokens.get(token)

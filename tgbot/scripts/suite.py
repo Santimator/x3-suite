@@ -30,6 +30,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -341,23 +342,83 @@ def verify_font_family(host: str, family: str) -> list:
             for name, size in sorted(expected.items())]
 
 
-def device_font_root(host: str, family: str) -> str | None:
-    """Which fonts root holds `family` on the device — or None if unreachable.
+def family_name_problem(name: str) -> str | None:
+    """Why the reader would reject or ignore this family name — or None.
 
-    The firmware scans two roots, `/.fonts` first and `/fonts` second
-    (`SdCardFontRegistry::discover`), and `GET /api/fonts` reports neither: it
-    hands back names, sizes and files, never a path. That matters for exactly
-    one operation. Renaming a family *is* renaming its folder — the registry
-    takes the family name from the directory entry and never looks at the
-    filenames inside — and WebDAV `MOVE` is the only route that will rename a
-    folder, while refusing any path with a dot-prefixed segment. So a family
-    sitting in `/.fonts` cannot be renamed by any route this bot has, and the
-    only way to find out is to look for it in the visible root.
+    Two different rules, from two different places in the firmware, and a name
+    has to satisfy both:
+
+    - `FontInstaller::isValidFamilyName` allows **only** `[A-Za-z0-9_-]`. It
+      guards the upload *and the delete*, so a family whose folder holds a
+      space, a dot or an accent can be created by hand (or by a WebDAV rename,
+      which applies no such rule) and then **cannot be deleted through the
+      firmware's own endpoint** — it answers 500 for the name itself.
+    - `SdCardFontRegistry::scanRoot` skips any directory whose name starts with
+      `.` or `_`, so such a family is simply invisible to the reader, with no
+      error anywhere.
     """
+    if not name:
+        return "an empty name"
+    if name.startswith((".", "_")):
+        return ("the reader's scan skips folders starting with <code>.</code> "
+                "or <code>_</code> — the family would vanish from the picker")
+    bad = sorted({c for c in name if not (c.isascii() and (c.isalnum() or c in "-_"))})
+    if bad:
+        shown = " ".join("space" if c == " " else f"<code>{c}</code>" for c in bad)
+        return (f"the reader only accepts letters, digits, <code>-</code> and "
+                f"<code>_</code> in a family name (not {shown}) — a folder it "
+                f"cannot name is one it will refuse to delete")
+    if len(name.encode("utf-8")) > 100:
+        return "that is longer than the reader's name buffer"
+    return None
+
+
+def device_font_location(host: str, family: str) -> tuple:
+    """Where the family's folder actually is: (root, state).
+
+    `GET /api/fonts` reports names, sizes and files, **never a path**, and the
+    firmware scans two roots — `/.fonts` first, then `/fonts`. Renaming needs
+    the visible one (WebDAV refuses dot-prefixed segments), so the folder has
+    to be found rather than assumed. Three answers, and they are not the same:
+
+    - `("/fonts", "visible")` — the folder is there and can be renamed.
+    - `(None, "hidden-root")` — there is no `/fonts` at all, so every family is
+      in `/.fonts` and none of them can be renamed by any route here.
+    - `(None, "missing")` — `/fonts` exists but has no folder by that name.
+      Either the family lives in `/.fonts` alongside a visible root, or the
+      card changed since the reader last scanned its fonts — which is what a
+      rename through this bot does. Do not report that as a hidden family: it
+      is the state the registry is lying about.
+    """
+    roots = {e.get("name") for e in device.list_dir(host, "/")
+             if e.get("isDirectory")}
+    if "fonts" not in roots:
+        return None, "hidden-root"
     for entry in device.list_dir(host, "/fonts"):
         if entry.get("isDirectory") and entry.get("name") == family:
-            return "/fonts"
-    return None
+            return "/fonts", "visible"
+    return None, "missing"
+
+
+def rescan_device_fonts(host: str) -> None:
+    """Make the reader re-read its fonts folders, without a power-cycle.
+
+    The registry is built at boot and refreshed **only** when something marks
+    it dirty — `GET /api/fonts` calls `refreshIfDirty()`, not `discover()` —
+    and the only two things that mark it are the font upload and delete
+    endpoints. A rename through WebDAV marks nothing, which is why a renamed
+    family keeps its old name in the list, reports 0 B for files whose paths no
+    longer open, and cannot be selected under its new name.
+
+    The way out is the delete endpoint's own no-op branch:
+    `FontInstaller::deleteFamily` walks both roots, and when the family is in
+    neither it removes nothing and returns OK — at which point the handler
+    marks the registry dirty. So a delete aimed at a name that cannot exist is
+    a remote re-scan. The probe name is random and passes the firmware's
+    `[A-Za-z0-9_-]` rule, so it can match nothing and delete nothing.
+    """
+    device.delete_font_family(host, "cprescan" + uuid.uuid4().hex[:8])
+    device.fonts(host)          # the GET is what acts on the dirty flag
 
 
 def sleep_dir(host: str) -> str:
