@@ -287,6 +287,48 @@ class Bot:
                 self.browse(chat, dest)
             return self.submit(chat, work)
 
+        if job["kind"] == "devfontrename":
+            # A family *is* its folder — the registry reads the name off the
+            # directory entry and never compares it to the filenames inside —
+            # so renaming one is a single folder rename, and the .cpfont files
+            # keep the old prefix without the reader minding.
+            new = text.strip()
+            why = None
+            if "/" in new or "\\" in new:
+                why = "a family name cannot contain a slash"
+            elif new.startswith((".", "_")):
+                why = ("the reader's scan skips folders starting with "
+                       "<code>.</code> or <code>_</code> — the family would "
+                       "vanish from the picker")
+            elif len(new.encode("utf-8")) > 100:
+                why = "that is longer than the reader's name buffer"
+            if why:
+                return self.say(chat, f"Not renamed — {why}.",
+                                [[("🔤 On the reader", "dev:fo:")]])
+
+            old_path = f"{job['root']}/{job['family']}"
+            new_path = f"{job['root']}/{new}"
+
+            def work():
+                suite.device.dav_move(job["host"], old_path, new_path)
+                lines = [f"✅ <b>{html.escape(job['family'])}</b> is now "
+                         f"<b>{html.escape(new)}</b> on the card."]
+                if job["selected"]:
+                    ok, detail = suite.device.select_font_family(job["host"], new)
+                    lines.append(
+                        "✅ and it is still the selected family." if ok else
+                        "The reader has not re-scanned yet, so it cannot be "
+                        "selected under the new name from here — after the "
+                        "power-cycle, pick it again (from here, or Settings → "
+                        "Reader → Font Family). Until then it will start on a "
+                        "built-in font.")
+                lines.append("\nThe reader's own list only re-scans at boot, so "
+                             "it may still show the old name until you "
+                             "power-cycle. The card is renamed either way.")
+                self.say(chat, "\n".join(lines),
+                         [[("🔤 On the reader", "dev:fo:")], [("🏠 Menu", "m:main")]])
+            return self.submit(chat, work)
+
         if job["kind"] == "wlrename":
             src = Path(job["path"])
             if not inside(self.workspace, src):
@@ -345,6 +387,8 @@ class Bot:
 
         if head == "fo":
             return self.on_font_callback(chat, rest)
+        if head == "dfo":                      # a family already on the reader
+            return self.on_device_font_callback(chat, rest)
         if head == "wl":
             return self.on_wallpaper_callback(
                 chat, rest, (cb.get("message") or {}).get("message_id"))
@@ -984,26 +1028,7 @@ class Bot:
         action, _, token = rest.partition(":")
 
         if action == "dev":
-            def work():
-                host, _ = self.device_host()
-                data = suite.device.fonts(host)
-                families = data.get("families", [])
-                if not families:
-                    return self.say(chat, "🔤 The reader has no SD fonts installed.",
-                                    [[("🔤 Fonts", "m:fo")]])
-                lines = ["🔤 <b>On the reader</b>"]
-                for f in families:
-                    sizes = f.get("sizes", [])
-                    total = sum(x.get("size", 0) for x in f.get("files", []))
-                    ui = "" if suite.UI_FALLBACK_SIZES.issubset(set(sizes)) \
-                        else "  ⚠️ no 8/10/12 — blank chapter list"
-                    lines.append(f"· <b>{html.escape(f.get('name', '?'))}</b> — "
-                                 f"{', '.join(str(s) for s in sizes)} pt, "
-                                 f"{human(total)}{ui}")
-                lines.append("\nDelete one by browsing to it: "
-                             "📲 Device → 📂 Browse → fonts")
-                self.say(chat, "\n".join(lines), [[("🔤 Fonts", "m:fo")]])
-            return self.submit(chat, work)
+            return self.submit(chat, lambda: self.show_device_fonts(chat))
 
         family = self.tokens.get(token)
         if not family:
@@ -1130,13 +1155,183 @@ class Bot:
                           f"{html.escape(str(detail)[:120])})</i>"]
         return (not bad and not failed), lines
 
+    # -- fonts on the device -----------------------------------------------
+
+    def show_device_fonts(self, chat) -> None:
+        """The reader's own font registry: what it scanned, and what it reads with.
+
+        🔤 Fonts lists what this repo can *send*; this lists what the device
+        *has*. The difference matters once a card has been used for a while —
+        families sent months ago, families copied by hand, a family you no
+        longer want — and until now the only way to touch one from here was to
+        browse to `/fonts/<Family>` and use the folder's delete button.
+        """
+        host, _ = self.device_host()
+        families = suite.device.fonts(host).get("families", [])
+        current = self.device_font_selection(host)
+        if not families:
+            return self.say(
+                chat,
+                "🔤 The reader has no SD font families.\n"
+                f"It is reading with <b>{html.escape(current or 'a built-in font')}</b>.",
+                [[("🔤 Send one", "m:fo")], [("📲 Device", "m:dev")]])
+
+        local = {f["name"]: f for f in suite.local_font_families()}
+        lines, rows = ["🔤 <b>On the reader</b>"], []
+        for f in families:
+            name = f.get("name", "?")
+            sizes = f.get("sizes", [])
+            total = sum(x.get("size", 0) for x in f.get("files", []))
+            # A family we ship is one we can read the coverage of; for anything
+            # else, keep the old blunt warning rather than guess it away.
+            known = local.get(name)
+            ui = ""
+            if not suite.UI_FALLBACK_SIZES.issubset(set(sizes)):
+                ui = ("" if known and not known["cjk"]
+                      else "  ⚠️ no 8/10/12 — blank chapter list for CJK")
+            here = "" if name in local else "  (not in this repo)"
+            lines.append(f"{'✅' if name == current else '·'} "
+                         f"<b>{html.escape(name)}</b> — "
+                         f"{', '.join(str(s) for s in sizes)} pt, "
+                         f"{human(total)}{ui}{here}")
+            token = self.tokens.put({"name": name, "sizes": sizes,
+                                     "bytes": total, "selected": name == current})
+            rows.append([(f"{'✅ ' if name == current else ''}{name} · "
+                          f"{human(total)}", f"dfo:one:{token}")])
+        if current and current not in {f.get("name") for f in families}:
+            lines.append(f"\nReading with <b>{html.escape(current)}</b>, "
+                         f"which is built in.")
+        rows.append([("🔤 Send one", "m:fo"), ("📲 Device", "m:dev")])
+        self.say(chat, "\n".join(lines), rows)
+
+    @staticmethod
+    def device_font_selection(host) -> str | None:
+        """The family the reader is set to, by name.
+
+        `fontFamily` is an enum whose value is an index into its own `options`
+        list — built-ins first, then the scanned SD families — so the name has
+        to be looked up rather than computed. Returns None if the firmware
+        exposes no such setting.
+        """
+        entry = suite.device.settings(host).get("fontFamily") or {}
+        options, value = entry.get("options") or [], entry.get("value")
+        if isinstance(value, int) and 0 <= value < len(options):
+            return options[value]
+        return None
+
+    def on_device_font_callback(self, chat, rest: str) -> None:
+        action, _, token = rest.partition(":")
+        family = self.tokens.get(token)
+        if not family:
+            return self.stale(chat)
+        name = family["name"]
+
+        if action == "one":
+            def work():
+                host, _ = self.device_host()
+                lines = [f"🔤 <b>{html.escape(name)}</b> — on the reader",
+                         f"{', '.join(str(s) for s in family['sizes'])} pt · "
+                         f"{human(family['bytes'])}"]
+                if family["selected"]:
+                    lines.append("✅ this is the family it reads with")
+                if any(f["name"] == name for f in suite.local_font_families()):
+                    report = suite.verify_font_family(host, name)
+                    bad = [r for r in report if not r["ok"]]
+                    lines.append(f"❌ {len(bad)} of {len(report)} files do not "
+                                 f"match CHECKSUMS.tsv — a short one reverts to "
+                                 f"Noto when selected"
+                                 if bad else
+                                 "✅ every file matches CHECKSUMS.tsv")
+                # Renaming is a folder rename, and only the visible root can be
+                # reached; asked now so the button is offered only when it works.
+                root = suite.device_font_root(host, name)
+                if not root:
+                    lines.append("\n<i>Cannot be renamed from here: it is in "
+                                 "the reader's hidden <code>/.fonts</code>, "
+                                 "which WebDAV refuses.</i>")
+                rows = []
+                if not family["selected"]:
+                    rows.append([("✅ Read with this", f"dfo:sel:{token}")])
+                if root:
+                    rows.append([("✏️ Rename", f"dfo:rn:{token}"),
+                                 ("🗑 Delete", f"dfo:rm:{token}")])
+                else:
+                    rows.append([("🗑 Delete", f"dfo:rm:{token}")])
+                rows.append([("🔤 On the reader", "dev:fo:"), ("🏠 Menu", "m:main")])
+                self.say(chat, "\n".join(lines), rows)
+            return self.submit(chat, work)
+
+        if action == "sel":
+            def work():
+                host, _ = self.device_host()
+                ok, detail = suite.device.select_font_family(host, name)
+                if ok:
+                    return self.say(
+                        chat,
+                        f"✅ <b>{html.escape(name)}</b> is now the reading font.\n"
+                        f"It takes effect when you <b>power-cycle the reader</b> — "
+                        f"the choice is stored by name and the next boot's scan "
+                        f"makes it real.",
+                        [[("🔤 On the reader", "dev:fo:")], [("🏠 Menu", "m:main")]])
+                self.say(chat, f"Could not select it: {html.escape(str(detail))}",
+                         [[("🔤 On the reader", "dev:fo:")]])
+            return self.submit(chat, work)
+
+        if action == "rn":
+            def work():
+                host, _ = self.device_host()
+                root = suite.device_font_root(host, name)
+                if not root:
+                    return self.say(chat, "That family is not in <code>/fonts</code>, "
+                                          "so it cannot be renamed from here.",
+                                    [[("🔤 On the reader", "dev:fo:")]])
+                self.pending = {"kind": "devfontrename", "host": host,
+                                "root": root, "family": name,
+                                "selected": family["selected"]}
+                warn = ("\n\n⚠️ This is the family the reader is using. The "
+                        "selection is stored by <i>name</i>, so renaming it "
+                        "drops that selection — I will try to set it again "
+                        "under the new name and tell you if it has to wait for "
+                        "the power-cycle."
+                        if family["selected"] else "")
+                self.say(chat,
+                         f"Send the new name for <b>{html.escape(name)}</b>.\n"
+                         f"The folder name <i>is</i> the family name — the files "
+                         f"inside keep their own names and the reader will not "
+                         f"care. No slashes, and nothing starting with "
+                         f"<code>.</code> or <code>_</code> (the reader's scan "
+                         f"skips those).{warn}")
+            return self.submit(chat, work)
+
+        if action == "rm":
+            return self.say(
+                chat,
+                f"Delete <b>{html.escape(name)}</b> from the reader — "
+                f"{human(family['bytes'])}, all of it?"
+                + ("\n\n⚠️ It is the family the reader is using; it will fall "
+                   "back to a built-in font." if family["selected"] else ""),
+                [[("Yes, delete", f"dfo:rm!:{token}"), ("No", "dev:fo:")]])
+
+        if action == "rm!":
+            def work():
+                host, _ = self.device_host()
+                suite.device.delete_font_family(host, name)
+                self.say(chat, f"🗑 <b>{html.escape(name)}</b> is gone from the "
+                               f"reader.", [[("🔤 On the reader", "dev:fo:")],
+                                            [("🏠 Menu", "m:main")]])
+            return self.submit(chat, work)
+
+        log("unhandled device font callback:", action, token)
+        self.say(chat, "That button did nothing — please tell Claude.")
+
     # -- the device --------------------------------------------------------
 
     def show_device(self, chat) -> None:
         self.say(chat, "📲 The reader answers only while it is on "
                        "<b>Home → File Transfer → Join a Network</b>.",
                  [[("🔎 Find it", "dev:st:"), ("📂 Browse", "dev:ls0:")],
-                  [("🖼 Wallpapers", "dev:wp:"), ("📤 Push queue", "push:ask")],
+                  [("🖼 Wallpapers", "dev:wp:"), ("🔤 Fonts", "dev:fo:")],
+                  [("📤 Push queue", "push:ask")],
                   [("📍 Set its address", "dev:addr:")],
                   [("🏠 Menu", "m:main")]])
 
@@ -1178,6 +1373,8 @@ class Bot:
                 host, _ = self.device_host()
                 self.browse(chat, suite.sleep_dir(host))
             return self.submit(chat, work)
+        if action == "fo":
+            return self.submit(chat, lambda: self.show_device_fonts(chat))
 
         if action == "dirrn":                      # rename the folder we are in
             path = self.tokens.get(token)

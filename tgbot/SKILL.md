@@ -78,7 +78,7 @@ and pull converge on one file rather than racing to make two.
 🖼 Wallpapers sleep screens built here       ├ three collections on the server
 🔤 Fonts      families in this repo          ┘
 📥 Inbox      files you dropped in workspace/inbox/ by hand
-📲 Device     find it, browse the SD card, push the queue
+📲 Device     find it, browse the SD card, its wallpapers and fonts, push
 📤 Queue      what is waiting for the reader; push or clear it
 ⚙️ Status     catalog up? queue depth? AI configured? last push?
 ```
@@ -292,11 +292,54 @@ count, so a firmware that ships another built-in face cannot silently move the
 selection onto the wrong family — and it reads the value back, so a family the
 registry has not picked up is reported rather than assumed.
 
-Deleting a family is in the browse view — walk to `/fonts/<Family>` and the
-folder's own **🗑 Delete this folder** becomes a family delete, routed through
-`POST /api/fonts/delete` so the firmware's `FontInstaller` does it and marks the
-registry dirty. For any other folder the same button empties it and removes it,
-because `/delete` only takes a directory that is already empty.
+### The families already on the reader
+
+**📲 Device → 🔤 Fonts** is the other half, and the one with no equivalent
+anywhere else in this repo: what the *device* holds, rather than what this
+repo can send. It lists every family the reader scanned at boot with its sizes
+and bytes, ticks the one it is reading with, marks any that this repo does not
+ship, and checks the ones it does against `CHECKSUMS.tsv`. Open a family and
+you can **read with it**, **rename** it or **delete** it without touching the
+SD card.
+
+Each of the three works differently, and the differences are the firmware's:
+
+- **Read with this** is the `fontFamily` setting, resolved by *label* in the
+  enum's own `options` — never by counting past the built-ins. Stored by name,
+  so it survives to the next boot, which is when it becomes real.
+- **Rename** is a *folder* rename, because the family name **is** the folder
+  name: `SdCardFontRegistry` reads it off the directory entry and only ever
+  parses `_<size>.cpfont` off the files, so the `.cpfont` files keep their old
+  prefix and the reader does not care. `/rename` refuses directories, so it
+  goes through WebDAV `MOVE` — which refuses dot-prefixed segments, so a
+  family in the hidden `/.fonts` root cannot be renamed at all. The bot looks
+  for the family in `/fonts` first and simply does not offer the button when
+  it is not there, saying why.
+- **Delete** goes through `POST /api/fonts/delete`, the firmware's own
+  `FontInstaller`, which marks the registry dirty. Twice, like every delete
+  here. The same family delete still lives in the browse view, on the
+  `/fonts/<Family>` folder card.
+
+Two names are refused before anything is sent, because the reader would take
+them and then behave as though the family had vanished: anything with a slash,
+and anything starting with `.` or `_` — the scan skips those directories
+outright, with no error anywhere.
+
+**And renaming has a tail the reader does not hide well.** The registry
+re-scans at boot and otherwise only when an upload or a delete marks it dirty
+— a WebDAV rename marks nothing. So for the rest of the session the reader
+still reports the *old* family name, and `fontFamily`'s options still list it.
+If the family being renamed is the selected one, the selection is dropped (it
+is stored by name, and the next boot's scan clears a name it cannot find): the
+bot tries to set it again under the new name, and when the reader will not
+take it yet, says so and tells you to pick it after the power-cycle rather
+than pretending it worked.
+
+**There is no way to end File Transfer mode from here.** The route table is 18
+endpoints, `onNotFound` and WebDAV, and none of them stops the server; the
+WebSocket on 81 speaks only `START`/binary/`DONE`. The activity exits when it
+sees the device's own **Back** button. So the bot cannot tidy up after a push,
+and does not pretend to — details in `../reference/readers.md`.
 
 ### A book
 
@@ -472,6 +515,12 @@ temporary workspace. It grades the four things that would actually hurt:
 5. **A pushed book gets the name the OPDS client would give it**, checked
    against that port directly, including the 100-byte budget and a title of
    nothing but dots.
+6. **The families on the reader**, against a fake device: the selected one is
+   marked and not offered again, a family in `/.fonts` is offered no rename and
+   told why, a name with a slash or a leading `.`/`_` is refused before
+   anything is sent, a good one renames the folder and nothing else, a family
+   the reader has not scanned is declined with the reason rather than selected
+   by a guessed index, and a delete asks twice before the firmware's endpoint.
 
 Plus: a 200-character device name with decomposed accents round-trips through a
 button token byte-identically, a stale token is answered rather than guessed

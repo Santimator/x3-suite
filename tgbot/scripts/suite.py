@@ -341,6 +341,25 @@ def verify_font_family(host: str, family: str) -> list:
             for name, size in sorted(expected.items())]
 
 
+def device_font_root(host: str, family: str) -> str | None:
+    """Which fonts root holds `family` on the device — or None if unreachable.
+
+    The firmware scans two roots, `/.fonts` first and `/fonts` second
+    (`SdCardFontRegistry::discover`), and `GET /api/fonts` reports neither: it
+    hands back names, sizes and files, never a path. That matters for exactly
+    one operation. Renaming a family *is* renaming its folder — the registry
+    takes the family name from the directory entry and never looks at the
+    filenames inside — and WebDAV `MOVE` is the only route that will rename a
+    folder, while refusing any path with a dot-prefixed segment. So a family
+    sitting in `/.fonts` cannot be renamed by any route this bot has, and the
+    only way to find out is to look for it in the visible root.
+    """
+    for entry in device.list_dir(host, "/fonts"):
+        if entry.get("isDirectory") and entry.get("name") == family:
+            return "/fonts"
+    return None
+
+
 def sleep_dir(host: str) -> str:
     """Which folder the device is actually reading wallpapers from.
 

@@ -349,7 +349,8 @@ A Telegram bot that operates everything above without a terminal. Send it a
 photo and it comes back as a sleep-screen preview with the mat choices as
 buttons; send it an EPUB and it lands on the catalog, with the SD card offered
 as an extra; browse the reader's wallpapers, look at them, and rename or delete
-from the couch. Books, wallpapers and fonts each get a card listing what this
+from the couch; see the font families the reader actually holds and select,
+rename or delete one there. Books, wallpapers and fonts each get a card listing what this
 server holds, so anything you ever built can go back on the card in a few taps.
 
 ```bash

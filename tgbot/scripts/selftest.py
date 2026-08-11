@@ -821,6 +821,156 @@ def check_font_queue(tmp: Path) -> None:
         suite.push = orig_push
 
 
+# -- 4e. the families already on the reader --------------------------------
+
+
+def check_device_fonts(tmp: Path) -> None:
+    """Select, rename and delete a family that is already on the card.
+
+    All three are name-based on the device and none of them is symmetrical
+    with the others: selection is a settings enum resolved by label, deletion
+    is the firmware's own endpoint, and a rename is a *folder* rename that only
+    WebDAV will do and only outside `/.fonts`.
+    """
+    print("\nfont families on the reader:")
+    bot, tg = make_bot(tmp)
+    bot.device_host = lambda: ("10.0.0.5", {})
+
+    state = {"families": ["WenZilla", "Hidden"], "value": 3,
+             "options": ["Noto Serif", "Noto Sans", "WenKaiFull", "WenZilla"],
+             "moved": [], "deleted": []}
+
+    def fake_fonts(host):
+        return {"families": [{"name": n, "sizes": [12, 14],
+                              "files": [{"name": f"{n}_12.cpfont", "size": 10}]}
+                             for n in state["families"]]}
+
+    def fake_settings(host):
+        return {"fontFamily": {"key": "fontFamily", "type": "enum",
+                               "value": state["value"],
+                               "options": state["options"]}}
+
+    def fake_list_dir(host, path):
+        # Only WenZilla is in the visible root; Hidden lives in /.fonts, which
+        # /api/files does not show and WebDAV will not touch.
+        return ([{"name": "WenZilla", "isDirectory": True}]
+                if path == "/fonts" else [])
+
+    orig = (suite.device.fonts, suite.device.settings, suite.device.list_dir,
+            suite.device.dav_move, suite.device.delete_font_family,
+            suite.device.select_font_family, suite.verify_font_family)
+    try:
+        suite.device.fonts = fake_fonts
+        suite.device.settings = fake_settings
+        suite.device.list_dir = fake_list_dir
+        suite.device.dav_move = lambda host, src, dst: state["moved"].append((src, dst))
+        suite.device.delete_font_family = lambda host, name: \
+            state["deleted"].append(name)
+        suite.verify_font_family = lambda host, name: \
+            [{"name": "x", "expected": 1, "actual": 1, "ok": True}]
+
+        def fake_select(host, name):
+            if name not in state["options"]:
+                return False, f"the reader does not list {name} yet"
+            state["value"] = state["options"].index(name)
+            return True, name
+        suite.device.select_font_family = fake_select
+
+        tg.sent.clear()
+        bot.handle(cb("dev:fo:"))
+        listing = tg.sent[-1]
+        check("the reader's families are listed", "WenZilla" in listing["text"]
+              and "Hidden" in listing["text"], listing["text"])
+        check("... with the selected one marked", "✅" in listing["text"],
+              listing["text"])
+
+        def open_family(label):
+            for row in listing["keyboard"]:
+                for text, data in row:
+                    if label in text:
+                        tg.sent.clear()
+                        bot.handle(cb(data))
+                        return tg.sent[-1]
+            raise AssertionError(f"no button for {label}")
+
+        card = open_family("WenZilla")
+        buttons = [b[1] for row in (card["keyboard"] or []) for b in row]
+        check("the selected family is not offered 'read with this'",
+              not any(b.startswith("dfo:sel") for b in buttons), str(buttons))
+        check("... and can be renamed, being in the visible root",
+              any(b.startswith("dfo:rn") for b in buttons), str(buttons))
+
+        hidden = open_family("Hidden")
+        buttons = [b[1] for row in (hidden["keyboard"] or []) for b in row]
+        check("a family in /.fonts offers no rename",
+              not any(b.startswith("dfo:rn") for b in buttons), str(buttons))
+        check("... and says why", "/.fonts" in hidden["text"], hidden["text"])
+        check("... but can still be deleted",
+              any(b.startswith("dfo:rm") for b in buttons), str(buttons))
+
+        # Selecting the other one. The reader has not scanned it into the
+        # enum's options yet, which is a refusal with a reason, never a guess
+        # at an index.
+        select = next(b[1] for row in hidden["keyboard"] for b in row
+                      if b[1].startswith("dfo:sel"))
+        tg.sent.clear()
+        bot.handle(cb(select))
+        check("a family the reader has not scanned is declined, with the reason",
+              state["value"] == 3 and "does not list" in tg.sent[-1]["text"],
+              tg.sent[-1]["text"])
+
+        state["options"] = state["options"] + ["Hidden"]
+        tg.sent.clear()
+        bot.handle(cb(select))
+        check("once it is listed, selecting it sets it by name",
+              state["value"] == state["options"].index("Hidden"),
+              str(state["value"]))
+        check("... and says it needs the power-cycle",
+              "power-cycle" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+        state["value"] = 3                      # back to WenZilla for the rest
+
+        # Renaming: the guards first, then the move.
+        card = open_family("WenZilla")
+        rename = next(b[1] for row in card["keyboard"] for b in row
+                      if b[1].startswith("dfo:rn"))
+        for bad, why in [("a/b", "slash"), (".hidden", "skips"), ("_old", "skips")]:
+            bot.handle(cb(rename))
+            tg.sent.clear()
+            bot.handle(msg(bad))
+            check(f"{bad!r} is refused as a family name",
+                  not state["moved"] and why in tg.sent[-1]["text"],
+                  tg.sent[-1]["text"])
+
+        bot.handle(cb(rename))
+        tg.sent.clear()
+        bot.handle(msg("Zilla"))
+        check("a good name renames the folder, and only the folder",
+              state["moved"] == [("/fonts/WenZilla", "/fonts/Zilla")],
+              str(state["moved"]))
+        check("... re-selects it when it was the reading font",
+              "still the selected family" in tg.sent[-1]["text"]
+              or "power-cycle" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+        check("... and warns the reader's list is stale until it re-scans",
+              "re-scans at boot" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+
+        # Deleting asks twice, like every other delete in this bot.
+        card = open_family("Hidden")
+        remove = next(b[1] for row in card["keyboard"] for b in row
+                      if b[1].startswith("dfo:rm"))
+        tg.sent.clear()
+        bot.handle(cb(remove))
+        check("deleting a family asks first", not state["deleted"]
+              and "Yes, delete" in str(tg.sent[-1]["keyboard"]), str(tg.sent[-1]))
+        bot.handle(cb(next(b[1] for row in tg.sent[-1]["keyboard"] for b in row
+                           if b[1].startswith("dfo:rm!"))))
+        check("... and the confirmation goes through the firmware's endpoint",
+              state["deleted"] == ["Hidden"], str(state["deleted"]))
+    finally:
+        (suite.device.fonts, suite.device.settings, suite.device.list_dir,
+         suite.device.dav_move, suite.device.delete_font_family,
+         suite.device.select_font_family, suite.verify_font_family) = orig
+
+
 # -- 5a. a message must never simply vanish --------------------------------
 
 
@@ -1043,6 +1193,7 @@ def main() -> int:
         check_wallpaper_collection(tmp)
         check_fonts(tmp)
         check_font_queue(tmp)
+        check_device_fonts(tmp)
         check_tokens(tmp)
         check_device_menu(tmp)
         check_never_silent(tmp)
