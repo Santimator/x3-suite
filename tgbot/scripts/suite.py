@@ -400,6 +400,53 @@ def device_font_location(host: str, family: str) -> tuple:
     return None, "missing"
 
 
+def move_font_family(host: str, root: str, old: str, new: str) -> dict:
+    """Rename a family by moving its files, never by renaming its folder.
+
+    **WebDAV `MOVE` on a directory is destructive on this firmware.** It
+    answers 201 and leaves an *empty* folder at the destination: the handler
+    opens the directory and calls SdFat's `FatFile::rename`, which creates the
+    new entry without carrying the cluster chain across, so the files that were
+    in it become unreferenced. Device-confirmed 2026-08, on an X3, at the cost
+    of one font family. Do not rename a folder that way.
+
+    What works is the flat structure of a font family and three endpoints that
+    are ordinary file operations: `mkdir` the new folder, `move` each file into
+    it, and delete the old folder once it is empty. The old folder is removed
+    **only** when every file has arrived at its expected size — a rename that
+    fails halfway leaves both folders on the card, which is recoverable, rather
+    than one empty folder and nothing else, which is not.
+
+    Returns {"moved": [...], "failed": [(name, error)], "arrived": bool,
+    "removed_old": bool}.
+    """
+    src, dst = f"{root}/{old}", f"{root}/{new}"
+    expected = {e["name"]: e.get("size")
+                for e in device.list_dir(host, src) if not e.get("isDirectory")}
+    if not expected:
+        raise DeviceError(f"{src} holds no files to move")
+
+    device.mkdir(host, root, new)
+    moved, failed = [], []
+    for name in expected:
+        try:
+            device.move(host, f"{src}/{name}", dst)
+            moved.append(name)
+        except DeviceError as exc:
+            failed.append((name, str(exc)))
+
+    landed = {e["name"]: e.get("size")
+              for e in device.list_dir(host, dst) if not e.get("isDirectory")}
+    arrived = all(landed.get(n) == size for n, size in expected.items())
+    removed_old = False
+    if arrived and not failed:
+        # /delete takes a directory only when it is already empty, which is
+        # exactly the check we want: it refuses if anything was left behind.
+        removed_old = device.delete(host, src)
+    return {"moved": moved, "failed": failed, "arrived": arrived,
+            "removed_old": removed_old, "expected": len(expected)}
+
+
 def rescan_device_fonts(host: str) -> None:
     """Make the reader re-read its fonts folders, without a power-cycle.
 

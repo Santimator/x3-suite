@@ -210,12 +210,15 @@ foreign BMP, a non-native palette — the preview falls back to an ordinary
 decode and says so, because identifying the picture is still the job and "the
 device will redo this one" is worth knowing.
 
-**Folders can be renamed, but only some.** `/rename` and `/move` refuse
-directories outright ("Only files can be renamed"), so a folder goes through
-WebDAV `MOVE`, which has no such check. WebDAV's own guard is stricter in the
-other direction: it rejects any path containing a dot-prefixed segment, so
-`/sleep` can be renamed and `/.sleep` cannot, by any route. The bot turns that
-down with the reason rather than letting you discover a 403.
+**Folders cannot be renamed, and the bot no longer offers to.** `/rename` and
+`/move` refuse directories outright ("Only files can be renamed"); WebDAV
+`MOVE` accepts one and **empties it** — 201, a new folder, and the files that
+were inside orphaned (device-confirmed 2026-08). So the button is gone, and
+says what it would have cost. A font family is the exception, because its
+shape is known and flat: 🔤 Fonts renames one by moving its files into a new
+folder and checking they all arrived. For anything else the same three steps
+work by hand in 📂 Browse — new folder, move the files, delete the empty
+original.
 
 **Device names are opaque tokens.** Whatever `/api/files` returns is what the
 SD card holds, byte for byte, and it is exactly what goes back out in a
@@ -307,14 +310,20 @@ Each of the three works differently, and the differences are the firmware's:
 - **Read with this** is the `fontFamily` setting, resolved by *label* in the
   enum's own `options` — never by counting past the built-ins. Stored by name,
   so it survives to the next boot, which is when it becomes real.
-- **Rename** is a *folder* rename, because the family name **is** the folder
+- **Rename** changes the folder, because the family name **is** the folder
   name: `SdCardFontRegistry` reads it off the directory entry and only ever
   parses `_<size>.cpfont` off the files, so the `.cpfont` files keep their old
-  prefix and the reader does not care. `/rename` refuses directories, so it
-  goes through WebDAV `MOVE` — which refuses dot-prefixed segments, so a
-  family in the hidden `/.fonts` root cannot be renamed at all. The bot looks
-  for the family in `/fonts` first and simply does not offer the button when
-  it is not there, saying why.
+  prefix and the reader does not care. It is done by `mkdir` + `move` per file
+  + delete the empty original, **never by renaming the directory** — WebDAV
+  `MOVE` is the only call that accepts one, and on this firmware it answers
+  201 and leaves the new folder empty with the contents orphaned. That cost a
+  font family on 2026-08 and is why `suite.move_font_family` exists. The old
+  folder is removed only once every file has arrived at its expected size, so
+  a rename that fails halfway leaves both folders and nothing lost. It needs
+  the visible `/fonts`, so a family in the hidden root gets no button.
+  Neither does the family the reader is currently **reading with**: its files
+  are open on the device for glyph streaming, and the family that lost its
+  contents was the selected one. Select another first.
 - **Delete** goes through `POST /api/fonts/delete`, the firmware's own
   `FontInstaller`, which marks the registry dirty. Twice, like every delete
   here. The same family delete still lives in the browse view, on the

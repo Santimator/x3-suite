@@ -388,20 +388,24 @@ def move(host: str, path: str, dest_dir: str) -> None:
 
 
 def dav_move(host: str, path: str, dest: str) -> None:
-    """Rename or move via WebDAV, which is the only way to touch a *folder*.
+    """WebDAV MOVE. **Never give this a directory.**
 
-    The HTTP API refuses directories outright — `/rename` and `/move` both end
-    in "Only files can be renamed". WebDAV's MOVE has no such check: it opens
-    the source and calls the filesystem's own rename, which on FAT works for a
-    directory as well as a file.
+    It is the only route that will *accept* a folder — `/rename` and `/move`
+    both end in "Only files can be renamed" — and that is a trap, not a
+    feature. On an X3 (1.5.0, 2026-08) moving a directory answered **201** and
+    left an **empty folder** at the destination: the handler opens the
+    directory and calls SdFat's `FatFile::rename`, and the files that were
+    inside it did not come across. The family it was tried on had to be sent
+    again. Rename a folder the long way instead — `mkdir`, `move` each file,
+    delete the empty original — which is what `suite.move_font_family` does.
 
-    The catch is the other guard. WebDAV's `isProtectedPath` inspects **every
+    For a *file* the same call is the ordinary case, though `rename()` is the
+    better route: it is one call, device-confirmed, and it takes a bare name.
+
+    The other guard is real and unchanged: `isProtectedPath` inspects **every
     segment** of the path, not just the last, so anything under a dot-prefixed
     folder — `/.sleep` and everything in it — is unreachable this way. That is
-    the mirror image of the HTTP API, which only guards the final segment. Use
-    this for folders; use `rename()` for files.
-
-    Source-confirmed at 1.5.0; not yet driven against a device.
+    the mirror image of the HTTP API, which only guards the final segment.
     """
     url = f"http://{host}{urllib.parse.quote(path)}"
     req = urllib.request.Request(url, method="MOVE")

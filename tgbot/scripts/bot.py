@@ -275,37 +275,42 @@ class Bot:
                           [("🏠 Menu", "m:main")]])
             return self.submit(chat, work)
 
-        if job["kind"] == "devdirrename":
-            # Folders go through WebDAV, which is the only route that will
-            # touch one — and which refuses any path with a dotted segment.
-            parent = job["path"].rstrip("/").rpartition("/")[0] or ""
-            dest = f"{parent}/{text}"
-
-            def work():
-                suite.device.dav_move(job["host"], job["path"], dest)
-                self.say(chat, f"✅ folder renamed to <code>{html.escape(dest)}</code>")
-                self.browse(chat, dest)
-            return self.submit(chat, work)
-
         if job["kind"] == "devfontrename":
             # A family *is* its folder — the registry reads the name off the
             # directory entry and never compares it to the filenames inside —
-            # so renaming one is a single folder rename, and the .cpfont files
-            # keep the old prefix without the reader minding.
+            # so the .cpfont files keep their old prefix and only the folder
+            # has to change. It is done by moving the files into a new folder
+            # rather than by renaming the old one: see suite.move_font_family
+            # for what renaming a directory does to its contents here.
             new = text.strip()
             why = suite.family_name_problem(new)
             if why:
                 return self.say(chat, f"Not renamed — {why}.",
                                 [[("🔤 On the reader", "dev:fo:")]])
 
-            old_path = f"{job['root']}/{job['family']}"
-            new_path = f"{job['root']}/{new}"
-
             def work():
-                suite.device.dav_move(job["host"], old_path, new_path)
+                report = suite.move_font_family(job["host"], job["root"],
+                                                job["family"], new)
+                if report["failed"] or not report["arrived"]:
+                    stuck = ", ".join(html.escape(n) for n, _ in report["failed"])
+                    return self.say(
+                        chat,
+                        f"⚠️ Half-renamed. {len(report['moved'])} of "
+                        f"{report['expected']} files reached "
+                        f"<code>{html.escape(new)}</code>"
+                        + (f"; {stuck} did not" if stuck else "") + ".\n\n"
+                        f"Both folders are still on the card and nothing is "
+                        f"lost — move the rest by hand in 📂 Browse, or delete "
+                        f"the new folder and send the family again.",
+                        [[("📂 Browse", "dev:ls0:")], [("🔤 Send one", "m:fo")]])
                 lines = [f"✅ <b>{html.escape(job['family'])}</b> is now "
-                         f"<b>{html.escape(new)}</b> on the card."]
-                # A WebDAV rename marks nothing dirty, so without this the
+                         f"<b>{html.escape(new)}</b> on the card — "
+                         f"{report['expected']} files moved across."]
+                if not report["removed_old"]:
+                    lines.append(f"<i>(the old <code>{html.escape(job['family'])}"
+                                 f"</code> folder is still there and empty; "
+                                 f"delete it in 📂 Browse)</i>")
+                # Moving files marks nothing dirty either, so without this the
                 # reader would keep listing the old name with dead paths until
                 # its next boot — and refuse to be selected under the new one.
                 try:
@@ -316,15 +321,6 @@ class Bot:
                     lines.append(f"⚠️ could not make it re-scan "
                                  f"({html.escape(str(exc)[:80])}) — its font "
                                  f"list will stay stale until you power-cycle.")
-                if job["selected"]:
-                    ok, detail = suite.device.select_font_family(job["host"], new)
-                    lines.append(
-                        "✅ and it is still the family it reads with."
-                        if ok else
-                        f"⚠️ it was the selected family and could not be "
-                        f"re-selected ({html.escape(str(detail)[:80])}). Pick it "
-                        f"again here or under Settings → Reader → Font Family, "
-                        f"or the reader starts on a built-in font.")
                 self.say(chat, "\n".join(lines),
                          [[("🔤 On the reader", "dev:fo:")], [("🏠 Menu", "m:main")]])
             return self.submit(chat, work)
@@ -1311,15 +1307,24 @@ class Bot:
                                           "to rename — see the family's card for "
                                           "which of the two reasons that is.",
                                     [[("🔤 On the reader", "dev:fo:")]])
+                if family["selected"]:
+                    # The selected family is the loaded one: the font system
+                    # streams glyphs from these files, so they are open on the
+                    # device while we move them. Not worth finding out what
+                    # that does — the family that lost its files to a rename
+                    # was the selected one.
+                    return self.say(
+                        chat,
+                        f"<b>{html.escape(name)}</b> is the family the reader "
+                        f"is reading with, and its files are open on the device "
+                        f"— glyphs stream from the card as you read.\n\n"
+                        f"Pick another family first, then rename this one, then "
+                        f"pick it back.",
+                        [[("🔤 On the reader", "dev:fo:")], [("🏠 Menu", "m:main")]])
                 self.pending = {"kind": "devfontrename", "host": host,
                                 "root": root, "family": name,
-                                "selected": family["selected"]}
-                warn = ("\n\n⚠️ This is the family the reader is using. The "
-                        "selection is stored by <i>name</i>, so renaming it "
-                        "drops that selection — I will try to set it again "
-                        "under the new name and tell you if it has to wait for "
-                        "the power-cycle."
-                        if family["selected"] else "")
+                                "selected": False}
+                warn = ""
                 self.say(chat,
                          f"Send the new name for <b>{html.escape(name)}</b>.\n"
                          f"The folder name <i>is</i> the family name — the files "
@@ -1443,21 +1448,28 @@ class Bot:
             path = self.tokens.get(token)
             if path is None:
                 return self.stale(chat)
-            if "/." in path or path.startswith("/."):
-                return self.say(
-                    chat,
-                    "That folder can't be renamed. WebDAV — the only way in for "
-                    "a folder — refuses every path with a dot-prefixed segment, "
-                    "and the plain API refuses directories outright.",
-                    [[("📂 Back", f"dev:ls:{self.tokens.put(path)}")]])
-
-            def work():
-                host, _ = self.device_host()
-                self.pending = {"kind": "devdirrename", "host": host, "path": path}
-                self.say(chat, f"Send me the new name for the folder\n"
-                               f"<code>{html.escape(path)}</code>\n\n"
-                               f"(name only — it stays where it is)")
-            return self.submit(chat, work)
+            # Renaming a folder used to go through WebDAV MOVE, the only route
+            # that will touch a directory. On this firmware that **loses the
+            # folder's contents**: it answers 201, the new folder is there and
+            # empty, and the files that were inside are unreferenced.
+            # Device-confirmed 2026-08 on an X3. A font family can still be
+            # renamed — 🔤 Fonts does it by moving the files one at a time —
+            # but nothing here may do it to an arbitrary folder.
+            family = self.font_family_of(path)
+            return self.say(
+                chat,
+                "Renaming a folder on the reader <b>loses what is inside it</b> "
+                "— WebDAV is the only route that will rename a directory, and on "
+                "this firmware it leaves an empty folder behind and orphans the "
+                "files. Confirmed the hard way.\n\n"
+                + (f"A font family is the exception: 🔤 Fonts renames "
+                   f"<b>{html.escape(family)}</b> by moving its files into a new "
+                   f"folder and checking they all arrived."
+                   if family else
+                   "To rename this one: make the new folder, move the files "
+                   "across in 📂 Browse, then delete the empty original."),
+                [[("🔤 On the reader", "dev:fo:")] if family else
+                 [("📂 Back", f"dev:ls:{self.tokens.put(path)}")]])
 
         if action in ("dirrm", "dirrm!"):
             path = self.tokens.get(token)
