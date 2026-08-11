@@ -11,7 +11,7 @@ Fonts" is the WiFi download store; not needed for these.)
 | `WenZilla` | **Chinese books (recommended)** | Hybrid: **NV Zilla Slab** for Latin + **LXGW WenKai** for CJK. Chinese in kaiti (like HSK textbooks); Latin and pinyin in a warm slab serif instead of WenKai's plainer Latin — so mixed hanzi+pinyin (`gloss-pinyin`) and any Latin in the text read nicely. Full CJK, 22.4k glyphs, streamed from SD. Regular only. |
 | `CrimKai` | Chinese books, if you prefer a book serif | Same idea as WenZilla with the Latin half swapped: **NV Scarlet** (Cochineal — Michael Sharpe's extension of Sebastian Kosch's **Crimson**) for Latin + **LXGW WenKai** for CJK. An oldstyle garalde instead of a slab: lighter colour on the page, a slightly larger x-height, and pen-written roots that sit naturally next to brush-written kaiti. Full CJK, 22.4k glyphs. Regular only. |
 | `WenKaiFull` | Chinese books (pure kaiti) | LXGW WenKai 霞鹜文楷 (kaiti / brush style) + Noto fallback, Latin included from WenKai itself. Full CJK — 22.5k glyphs. **Device-confirmed working**; the baseline WenZilla is built on. |
-| `NaskhFull` | **Arabic books** | Noto Naskh Arabic + Noto Sans fallback, Latin included from Naskh itself. Carries the Arabic **presentation forms** the firmware's shaper emits — which no built-in reading font does, so without it an Arabic book body renders nothing. 2k glyphs, 1.1 MB, four sizes. Regular only. **Not device-confirmed** — see below. |
+| `NaskhFull` | **Arabic books** | Noto Naskh Arabic + Noto Sans fallback, Latin included from Naskh itself. Carries the Arabic **presentation forms** the firmware's shaper emits — which no built-in reading font does, so without it an Arabic book body renders nothing. 2k glyphs, 1.1 MB, four sizes. Regular only. **Device-confirmed working** (2026-08). |
 
 All SIL OFL licensed. Built with CrossPoint's own `fontconvert_sdcard.py`; the
 reproducible recipe (and the full device debugging record, including why
@@ -76,14 +76,13 @@ not needed — the built-in UI fonts already draw Arabic, which is why the menus
 have always looked fine while the book body did not. Four files, 1.1 MB total,
 against ~4 MB of dead weight.
 
-**First thing to suspect if it misbehaves: the intervals.** `NaskhFull` is
-built from four broad ranges rather than a preset, because the converter has
-no `arabic` preset to use (it has `hebrew`, and that is the shape the Arabic
-one would take). Four wide ranges is a world away from the sparse-subset trap
-below — the built font has 18 intervals, next to WenZilla's 61 — but it is
-still custom ranges, and that is the untested variable. If the family lists in
-the picker and then reverts to Noto when you open a book, suspect the
-intervals before anything else, and a truncated file second.
+**Built from hand-written ranges, and that turned out to be fine.**
+`NaskhFull` uses four broad ranges rather than a preset, because the converter
+has no `arabic` preset to offer (it has `hebrew`, and that is the shape the
+Arabic one would take). That made it the suspect if the family had listed in
+the picker and then reverted to Noto — the classic symptom below. It does not:
+18 wide intervals load and render on 1.5.0, device-confirmed 2026-08. So the
+rule below is about **sparsity**, not about writing your own ranges.
 
 **Hard-won rule: build CJK fonts with broad preset intervals
 (`latin-ext,cjk`), never with sparse custom ranges.** Sparse-interval

@@ -484,7 +484,10 @@ leftover id, a relocated config resolves paths against itself, and a
 **Status: the flows above are implemented and self-tested; the device half is
 built on endpoints device-confirmed on a 1.5.0 RC (2026-08) —
 `/api/status`, `/api/files`, `/upload`, `/delete`, `/mkdir`, `/api/settings`
-through `push_wallpaper.py`, and `/rename` directly.** `/download` and `/move`
+through `push_wallpaper.py`, and `/rename` directly.** The font path is
+device-confirmed end to end (2026-08): a family queued here went across on a
+push, verified against `CHECKSUMS.tsv`, was selected, and rendered after the
+power-cycle. `/download` and `/move`
 are source-confirmed and wired but have not been driven against a device.
 
 ## Files

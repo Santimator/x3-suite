@@ -306,9 +306,8 @@ Docs: [`wallpaper-maker/SKILL.md`](wallpaper-maker/SKILL.md) · device rules:
 
 ## 8. Fonts
 
-**Tested:** device-confirmed for the three Chinese families — stock firmware
-shows hanzi as tofu boxes and these render. The Arabic one is source-confirmed
-only, and says so below.
+**Tested:** device-confirmed, all four families. Stock firmware shows hanzi as
+tofu boxes and Arabic book text as nothing at all; these render.
 
 Copy a family folder from `reference/fonts/` to the SD card under `/fonts/`,
 power-cycle (fonts are scanned once at boot), then pick it under Settings →
@@ -327,9 +326,9 @@ failure the reader cannot tell you about.
   asks the font for the **presentation forms** it produced (U+FE70–U+FEFC and
   friends). The built-in menu fonts carry those; the built-in *reading* fonts
   carry no Arabic at all, so on stock firmware the menus render Arabic and the
-  page renders nothing. Four sizes, 1.1 MB. **Source-confirmed against
-  CrossPoint 1.5.0, not yet seen on a device** — the mechanism, the build
-  command and what each failure mode accuses are in
+  page renders nothing. Four sizes, 1.1 MB. **Device-confirmed 2026-08**: with
+  it installed, an Arabic book body renders joined and right-to-left. The
+  mechanism, the build command and what each failure mode accuses are in
   [`reference/readers.md`](reference/readers.md), "Arabic in the book body".
 
 Glyphs stream from the SD card, so a big font costs no RAM. Build rules for
@@ -343,7 +342,8 @@ fonts are ignored, ruby and interlinear pinyin are broken, RAM is ~400 KB.
 ## 9. From your phone
 
 **Tested:** self-tested; the device half rides endpoints device-confirmed on a
-1.5.0 RC (2026-08).
+1.5.0 RC (2026-08), and the font path — queue, push, verify, select — was
+driven onto an X3 end to end (2026-08).
 
 A Telegram bot that operates everything above without a terminal. Send it a
 photo and it comes back as a sleep-screen preview with the mat choices as

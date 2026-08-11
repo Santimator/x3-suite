@@ -25,8 +25,8 @@ otherwise.
    three exist for the UI fallback, not for reading.
    For Arabic the font is not a preference but the whole feature:
    **`NaskhFull/`** ships 12–18 and is what makes a book body render at all
-   (the menus already work without it) — see "Arabic in the book body".
-   Install details: `reference/fonts/README.md`.
+   (the menus already work without it) — **device-confirmed 2026-08**, see
+   "Arabic in the book body". Install details: `reference/fonts/README.md`.
 3. **Books:** build with `reading_style: after` in book.json (pinyin after each
    glossed word) — see the rendering verdicts below.
 
@@ -41,6 +41,7 @@ otherwise.
 | Embedded EPUB fonts (`@font-face`) | Ignored — the renderer only rasterizes pre-converted `.cpfont` bitmaps; never fatten the books with fonts |
 | Glossary/internal links | Harmless; not tappable (no touchscreen) — kept for phone reading |
 | CJK in *interface* text (TOC, library, browser) | Needs 1.5.0 **and** 8/10/12 pt `.cpfont` sizes — see below. On 1.4.1 those rows render **blank** |
+| Arabic body text (bidi + contextual joining) | **Works** — right-to-left order and joined letterforms are the firmware's own, and correct. Needs an SD font carrying the *presentation forms*; no built-in reading font does. `NaskhFull` device-confirmed 2026-08 |
 
 Keep chapter CSS trivial: the engine honors basic text properties only.
 `reading_style: ruby` remains for capable readers (Apple Books renders ruby
@@ -96,12 +97,11 @@ fails silently (blank) instead of showing the boxes the firmware's own
 
 ## Arabic in the book body (why the menus work and the pages do not)
 
-***SOURCE-CONFIRMED, NOT DEVICE-CONFIRMED.*** Everything below is read from
-the crosspoint-reader source at tag **v1.5.0** and from the fonts as built;
-none of it has been photographed on an X3. `NaskhFull/` was built and verified
-off-device (interval table and glyph bitmaps read back out of the `.cpfont`),
-not selected on a reader. Treat the failure modes at the end as the checklist
-for confirming it, and mark this section device-confirmed when you do.
+*Mechanism **source-confirmed** against the crosspoint-reader source at tag
+**v1.5.0**; outcome **device-confirmed 2026-08** — an X3 with `NaskhFull/`
+installed and selected renders an Arabic book body: joined letterforms, in
+right-to-left order, from a family built with the intervals below. Before it,
+the same device rendered Arabic menus and an empty page.*
 
 **The firmware does bidi and joining itself, and it is done well.** A UI or
 book string goes through `BidiUtils::applyBidiVisual`
@@ -199,14 +199,22 @@ and all 8 lam-alef ligatures carry a non-empty bitmap. If you rebuild from a
 different Arabic face, run that count first — Scheherazade New and Amiri also
 encode the forms; many others do not.
 
-**Failure modes, and which layer each accuses:**
+**And the interval question is now answered.** `NaskhFull` is the only family
+here built from custom ranges rather than a preset, which made it the obvious
+suspect if it had failed to load — it did not. Four broad ranges over 18
+validated intervals load and render on 1.5.0. So the sparse-interval trap is
+about **sparsity**, not about custom ranges: hundreds of tiny intervals break,
+a handful of wide ones are fine, preset or not. That is a narrowing of the rule
+below, not an exception to it.
+
+**Failure modes, and which layer each accuses** (kept because each still names
+a different layer, and none of them is the font by default):
 
 - **Lists in the picker, reverts to built-in Noto on opening a book** → a
-  build-time problem, not a rendering one. Suspect the **intervals** first:
-  this is the one family here built from custom ranges rather than a preset,
-  and sparse intervals are the known cause of exactly this symptom (see the
-  font-building rules below). Suspect a **truncated file** second — check
-  `GET /api/fonts` against `reference/fonts/CHECKSUMS.tsv`.
+  build-time problem, not a rendering one. Suspect a **truncated file** first —
+  check `GET /api/fonts` against `reference/fonts/CHECKSUMS.tsv` — and the
+  **intervals** second, if you rebuilt with narrower ranges than the command
+  above.
 - **Boxes or blanks where the letters should be** → the font is loading and
   the glyphs are missing: presentation forms absent from the build. Not the
   intervals as a whole, the *coverage*.
@@ -435,7 +443,10 @@ means the glyph is genuinely missing rather than the font being broken.
    intervals, 22.5k glyphs) loads and renders. Glyphs stream from SD, so the
    big font costs no RAM. *Upstream issue candidate; found and verified on
    1.4.1, not re-tested since — the converter and loader are unchanged in
-   1.5.0, so assume it still holds.*
+   1.5.0, so assume it still holds.* **What it is not** is a rule against
+   custom ranges as such: `NaskhFull` is built from four hand-written ranges
+   (18 validated intervals) and loads and renders on 1.5.0, device-confirmed
+   2026-08. Sparsity is the trap; a handful of wide ranges is not sparse.
 2. **Ship 8, 10 and 12 pt as well as the reading sizes.** Those three are what
    the 1.5.0 UI fallback looks for, by exact size, to draw CJK in the chapter
    list, library and browser (see "CJK in the interface"). Cost: ~4 MB of SD
