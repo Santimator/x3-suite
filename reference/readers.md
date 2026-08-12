@@ -319,10 +319,12 @@ is `bpp > 1`, so it never gets the four-level pipeline at all.
 2026-08** for the HTTP path — `/api/status`, `/api/files`, `/mkdir`, `/upload`
 and `/api/settings` all drove a real X3 from
 `wallpaper-maker/scripts/push_wallpaper.py`, and `/rename` was driven by hand on
-a 1.5.0 RC. `/api/fonts`, `/api/fonts/upload` and the `fontFamily` setting were
-driven end to end from `tgbot/` (2026-08). `/download` and `/move` are wired in
-`crosspoint_device.py` but read-from-source; WebDAV — including the folder
-rename the font rename depends on — and the WebSocket upload likewise. The font
+a 1.5.0 RC. `/move` too, in the `/Books` test recorded under Subfolders below —
+`mkdir` + `move` put a book in a folder and the reader opened it there.
+`/api/fonts`, `/api/fonts/upload` and the `fontFamily` setting were driven end
+to end from `tgbot/` (2026-08), as was **WebDAV `MOVE` on a directory**, which
+renamed a font family folder with its contents intact. What is still
+read-from-source: `/download` and the WebSocket upload on 81. The font
 registry rows below are read from `lib/EpdFont/SdCardFontRegistry.cpp` and
 `src/network/CrossPointWebServer.cpp` at the 1.5.0 tag.*
 
@@ -354,7 +356,7 @@ only while that screen is up.
 | Move | `POST /move?path=FILE&dest=DIR`. Files only, not directories |
 | Parameters | Read from **either** the query string or a form body — `hasArg`/`arg` see both. `push_wallpaper.py` and `crosspoint_device.py` use the query form throughout |
 | Protected names | `rename`, `move`, `delete` and `download` all guard on the **final path segment** only. So a file *inside* `/.sleep` is fair game — which is why wallpapers can be replaced — while `/.sleep` itself cannot be renamed or deleted |
-| Renaming loses your place | **A rename or move through the web API forgets where you were reading.** Reading state is keyed by *path* — `RecentBook::operator==` compares paths — and the firmware has `RecentBooksStore::repointPath(old, new)` written for exactly this, which persists and keeps the entry's list position. `CrossPointWebServer.cpp` never calls it: zero references. The handlers also `clearBookCache()`, deleting the parsed cache under `/.crosspoint/`, so the book re-parses on next open. **Device-confirmed 2026-08** — a book moved into `/Books` opened fine and had lost its position. Upstream issue candidate: the web move/rename handlers should call `repointPath` the way the device's own file browser does |
+| Renaming loses your place | **A rename or move through the web API forgets where you were reading.** Reading state is keyed by *path*: `RecentBook` is `{path, title, author, coverBmpPath}` and `operator==` compares only the path, so the entry in `/.crosspoint/recent.json` still names a file that is no longer there, and the file at the new path matches no entry and opens at the start. The fix is written and unused — `RecentBooksStore::updatePath(oldPath, newPath, oldCachePath, newCachePath)` repoints an entry, moves its cover cache with it, persists, and keeps its list position. **Nothing in the firmware calls it: zero call sites anywhere, not just in the web server** (the device's own file browser cannot rename or move at all — long-press deletes, short-press opens, and that is the whole of it). The handlers also `clearBookCache()`, deleting the parsed cache under `/.crosspoint/`, so the book re-parses on next open. **Device-confirmed 2026-08** — a book moved into `/Books` opened fine and had lost its position. Upstream issue candidate: the web move/rename handlers are the only place that can call `updatePath`, and they don't |
 | Subfolders | **Books in folders work.** `mkdir` + `move` put a book in `/Books` and the reader still found and opened it (device-confirmed 2026-08). The firmware expects this: `SETTINGS.opdsDownloadFolder` (`char[64]`, empty = SD root) sends OPDS downloads into a folder, creating it if missing |
 | Names on the card | Whatever is there, byte for byte, and `Storage.exists()` compares bytes. Books from other catalogs arrive **NFD-decomposed** (`é` as `e` + U+0301); normalizing a name before sending it back yields `Item not found` against a file plainly present. Round-trip listings verbatim |
 | Settings | `GET`/`POST /api/settings`, partial JSON by key (`{"sleepScreen": 2}`); keys are in `src/SettingsList.h` |

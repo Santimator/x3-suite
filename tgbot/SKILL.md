@@ -195,17 +195,20 @@ by hand. Each file is one `POST /move`, reported per file, and one already
 sitting in the destination is skipped rather than moved onto itself.
 
 **Moving warns about your reading position, for the same reason renaming
-does.** `RecentBook` compares paths, and the web handlers never call
-`repointPath` — so a book you are part-way through loses its place whichever of
-the two you use. The warning appears when what you are moving is readable.
+does**, and the warning appears only for readable formats — a wallpaper has no
+place to lose.
 
-**Renaming a book on the device costs you your place, and the bot says so
-before you do it.** CrossPoint keys reading state by *path* — `RecentBook`
-compares paths — and ships `RecentBooksStore::repointPath(old, new)` written for
-exactly this case. `CrossPointWebServer.cpp` never calls it, so a rename or
-move made from here orphans the entry and clears the parsed cache under
-`/.crosspoint/`. Device-confirmed 2026-08. The warning appears only for
-readable formats, since a wallpaper has no place to lose.
+**Renaming or moving a book on the device costs you your place, and the bot
+says so before you do it.** CrossPoint remembers where you were by the file's
+*path*: `RecentBook` is `{path, title, author, coverBmpPath}` and `operator==`
+compares the path alone. Change the path and the saved entry points at a file
+that is gone while the file that exists matches no entry, so it opens at the
+beginning. The firmware has the repair written —
+`RecentBooksStore::updatePath(oldPath, newPath, oldCachePath, newCachePath)`,
+which repoints the entry, brings its cover cache along and keeps its position
+in the list — and **nothing anywhere calls it**. The web handlers also
+`clearBookCache()`, so the book re-parses on next open. Device-confirmed
+2026-08.
 
 This is the half of the bot with no alternative anywhere else in the repo.
 Everything else is a nicer front end for a script you could run over ssh;
