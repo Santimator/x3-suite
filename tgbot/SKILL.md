@@ -177,8 +177,27 @@ never answered removes nothing.
 
 ### Browsing and renaming on the device
 
-**📂 Browse** lists the SD card. Folders navigate; files offer **✏️ Rename**,
-**🗑 Delete** (twice, always), and **⬇️ Pull to server**.
+**📂 Browse** lists the SD card. A folder row navigates and carries its own
+**🗑**; a file opens a card with **✏️ Rename**, **📦 Move to…**, **🗑 Delete**
+(twice, always) and **⬇️ Pull to server**. **➕ New folder** makes one where you
+are standing.
+
+**☑ Pick several** turns every file in the listing into a tick box — the same
+trick the wallpaper contact sheet uses, `editMessageReplyMarkup` on the message
+that is already there — and then **📦 Move 3** or **🗑 Delete 3** applies to the
+lot. That is the gesture the browse view was missing: "these three books go in
+that folder" was nine taps and a lot of scrolling, or it was a terminal.
+
+**A destination is walked to, never typed.** 📦 Move opens the card at `/` and
+lets you step down into it, with **📥 Move here** on every level, so the folder
+you are looking at is always a valid answer and nothing has to be spelled out
+by hand. Each file is one `POST /move`, reported per file, and one already
+sitting in the destination is skipped rather than moved onto itself.
+
+**Moving warns about your reading position, for the same reason renaming
+does.** `RecentBook` compares paths, and the web handlers never call
+`repointPath` — so a book you are part-way through loses its place whichever of
+the two you use. The warning appears when what you are moving is readable.
 
 **Renaming a book on the device costs you your place, and the bot says so
 before you do it.** CrossPoint keys reading state by *path* — `RecentBook`
@@ -542,7 +561,14 @@ temporary workspace. It grades the four things that would actually hurt:
 5. **A pushed book gets the name the OPDS client would give it**, checked
    against that port directly, including the 100-byte budget and a title of
    nothing but dots.
-6. **The families on the reader**, against a fake device: the selected one is
+6. **Files and folders on the card**, against a fake device: a folder name with
+   a slash is refused and a plain one creates the folder where you stand;
+   picking turns files into tick boxes and the count follows them; a move sends
+   one call per file to the folder you stopped on, warns about the reading
+   position when books are involved, skips a file already there, and leaves
+   nothing ticked; deleting several asks first and then removes exactly those;
+   and a listing from before a restart is answered rather than acted on.
+7. **The families on the reader**, against a fake device: the selected one is
    marked and not offered again; a name the firmware's own rule rejects is
    refused *before* the move, and a family already carrying one is offered a
    rename instead of a delete that would 500; a family listing every file at

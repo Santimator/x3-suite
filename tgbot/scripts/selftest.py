@@ -821,6 +821,123 @@ def check_font_queue(tmp: Path) -> None:
         suite.push = orig_push
 
 
+# -- 4d2. files and folders on the card ------------------------------------
+
+
+def check_device_files(tmp: Path) -> None:
+    """Making a folder, and putting things in it.
+
+    The half of Browse that had no buttons for a long time: you could rename
+    and delete one file at a time, and that was all. "These three books go in
+    that folder" is the gesture worth having, so it is a listing that can be
+    ticked, a destination you walk to, and a move that reports per file.
+    """
+    print("\nfiles and folders on the card:")
+    fs = {"/": [{"name": "Books", "isDirectory": True},
+                {"name": "a.epub", "isDirectory": False, "size": 10, "isEpub": True},
+                {"name": "b.epub", "isDirectory": False, "size": 20, "isEpub": True}],
+          "/Books": []}
+    made, moved, deleted = [], [], []
+
+    orig = (suite.device.list_dir, suite.device.move, suite.device.mkdir,
+            suite.device.delete_many)
+    try:
+        suite.device.list_dir = lambda h, p: fs.get(p, [])
+        suite.device.move = lambda h, path, dest: moved.append((path, dest))
+        suite.device.mkdir = lambda h, parent, name: made.append((parent, name))
+        suite.device.delete_many = lambda h, paths: (deleted.extend(paths), (True, ""))[1]
+
+        bot, tg = make_bot(tmp)
+        bot.device_host = lambda: ("10.0.0.5", {})
+        bot.handle(cb("dev:ls0:"))
+        listing = tg.sent[-1]
+        flat = [b for row in listing["keyboard"] for b in row]
+        check("a folder in the listing carries its own delete",
+              any(t == "🗑" and d.startswith("dev:dirrm") for t, d in flat),
+              str(flat))
+        check("... and the listing offers a new folder and a multi-pick",
+              any(d.startswith("dev:mkdir") for _, d in flat)
+              and any(d.startswith("dev:pick") for _, d in flat), str(flat))
+
+        # New folder, and a name that is really a path.
+        bot.handle(cb(next(d for _, d in flat if d.startswith("dev:mkdir"))))
+        tg.sent.clear()
+        bot.handle(msg("Sci/Fi"))
+        check("a folder name with a slash is refused",
+              not made and "no slashes" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+        bot.handle(cb(next(d for _, d in flat if d.startswith("dev:mkdir"))))
+        bot.handle(msg("Poetry"))
+        check("a plain name creates the folder where you are",
+              made == [("/", "Poetry")], str(made))
+
+        # Tick two files and move them into /Books.
+        tg.sent.clear()
+        bot.handle(cb(next(d for _, d in flat if d.startswith("dev:pick"))))
+        picking = [b for row in tg.sent[-1]["keyboard"] for b in row]
+        check("picking turns every file into a tick box, folders aside",
+              sum(1 for t, _ in picking if t.startswith("☐")) == 2, str(picking))
+        for _ in range(2):          # tick whichever is still empty, twice
+            buttons = [b for row in (tg.sent[-1]["keyboard"] or []) for b in row]
+            bot.handle(cb(next(d for t, d in buttons if t.startswith("☐"))))
+        ticked = [b for row in tg.sent[-1]["keyboard"] for b in row]
+        check("... and the count follows what is ticked",
+              any("Move 2" in t for t, _ in ticked), str(ticked))
+
+        tg.sent.clear()
+        bot.handle(cb("dev:mvpick:"))
+        check("the destination is walked to, not typed",
+              any(d.startswith("dev:mvto:") for row in tg.sent[-1]["keyboard"]
+                  for _, d in row), str(tg.sent[-1]["keyboard"]))
+        check("... and moving books warns about the reading position",
+              "loses its place" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+        into = next(d for row in tg.sent[-1]["keyboard"] for _, d in row
+                    if d.startswith("dev:mvto:"))
+        tg.sent.clear()
+        bot.handle(cb(into))            # walk into /Books, then move there
+        go = next(d for row in tg.sent[-1]["keyboard"] for _, d in row
+                  if d.startswith("dev:mvgo:"))
+        tg.sent.clear()
+        bot.handle(cb(go))
+        check("moving sends one call per file, to the folder you stopped on",
+              sorted(moved) == [("/a.epub", "/Books"), ("/b.epub", "/Books")],
+              str(moved))
+        check("... and nothing stays ticked afterwards", not bot.picked,
+              str(bot.picked))
+
+        # A file already in the destination is not moved onto itself.
+        moved.clear()
+        bot.moving = {"paths": ["/Books/old.epub"], "back": "/Books"}
+        bot.do_move(bot.user_id, "/Books")
+        check("a file already in the destination is left alone", not moved,
+              str(moved))
+
+        # Deleting several asks first, then deletes exactly those.
+        bot, tg = make_bot(tmp)
+        bot.device_host = lambda: ("10.0.0.5", {})
+        bot.handle(cb("dev:ls0:"))
+        flat = [b for row in tg.sent[-1]["keyboard"] for b in row]
+        bot.handle(cb(next(d for _, d in flat if d.startswith("dev:pick"))))
+        bot.handle(cb("dev:pall:"))
+        tg.sent.clear()
+        bot.handle(cb("dev:rmpick:"))
+        check("deleting several asks first, naming them",
+              not deleted and "a.epub" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+        bot.handle(cb(next(d for row in tg.sent[-1]["keyboard"] for _, d in row
+                           if d.startswith("dev:rmpick!"))))
+        check("... and then deletes exactly what was ticked",
+              sorted(deleted) == ["/a.epub", "/b.epub"], str(deleted))
+
+        # A listing from before a restart cannot be ticked against.
+        bot.listings.clear()
+        tg.sent.clear()
+        bot.handle(cb("dev:pall:"))
+        check("a listing the bot no longer remembers is answered, not guessed",
+              "before a restart" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+    finally:
+        (suite.device.list_dir, suite.device.move, suite.device.mkdir,
+         suite.device.delete_many) = orig
+
+
 # -- 4e. the families already on the reader --------------------------------
 
 
@@ -1232,6 +1349,7 @@ def main() -> int:
         check_wallpaper_collection(tmp)
         check_fonts(tmp)
         check_font_queue(tmp)
+        check_device_files(tmp)
         check_device_fonts(tmp)
         check_tokens(tmp)
         check_device_menu(tmp)

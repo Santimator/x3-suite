@@ -96,6 +96,13 @@ class Bot:
         # answered rather than guessed at.
         self.sheets = {}
         self.selected = set()
+        # The same trick for a folder listing on the device: what a message is
+        # showing, and which of its files are ticked. Separate from the
+        # wallpaper set above — one is paths on this server, the other paths on
+        # the card, and mixing them would delete the wrong thing.
+        self.listings = {}
+        self.picked = set()
+        self.moving = None            # files waiting for a destination folder
         self.max_bytes = int(cfg.get("max_download_mb", 20)) * 1024 * 1024
         self._jobs = queuelib.Queue()
         self._worker = None
@@ -275,6 +282,21 @@ class Bot:
                           [("🏠 Menu", "m:main")]])
             return self.submit(chat, work)
 
+        if job["kind"] == "devmkdir":
+            name = text.strip()
+            if "/" in name or "\\" in name:
+                return self.say(chat, "A folder name, not a path — no slashes.")
+
+            def work():
+                suite.device.mkdir(job["host"], job["path"], name)
+                note = ("\n<i>(a dot-prefixed folder is hidden from the "
+                        "reader's listings — including this one)</i>"
+                        if name.startswith(".") else "")
+                self.say(chat, f"📁 <code>{html.escape(name)}</code> created."
+                               f"{note}")
+                self.browse(chat, job["path"])
+            return self.submit(chat, work)
+
         if job["kind"] == "devdirrename":
             # Folders go through WebDAV, which is the only route that will
             # touch one — and which refuses any path with a dotted segment.
@@ -446,7 +468,8 @@ class Bot:
                 return self.submit(chat, lambda: self.do_push(chat))
 
         if head == "dev":
-            return self.on_device_callback(chat, rest)
+            return self.on_device_callback(
+                chat, rest, (cb.get("message") or {}).get("message_id"))
         if head == "lib":
             return self.on_library_callback(chat, rest)
         if head == "in":
@@ -1395,7 +1418,7 @@ class Bot:
         host, info = suite.device.find_device(None)
         return host, info
 
-    def on_device_callback(self, chat, rest: str) -> None:
+    def on_device_callback(self, chat, rest: str, msg_id=None) -> None:
         action, _, token = rest.partition(":")
 
         if action == "st":
@@ -1437,6 +1460,97 @@ class Bot:
                 suite.rescan_device_fonts(host)
                 self.say(chat, "🔄 The reader re-read its fonts folders.")
                 self.show_device_fonts(chat)
+            return self.submit(chat, work)
+
+        # -- picking several out of a listing ------------------------------
+        if action == "nop":
+            return
+        if action in ("pick", "pall", "pnone", "pdone", "t"):
+            listing = self.listings.get(msg_id)
+            if not listing:
+                return self.stale(chat)
+            path, entries = listing["path"], listing["entries"]
+            here = {f"{path.rstrip('/')}/{e.get('name', '')}"
+                    for e in entries if not e.get("isDirectory")}
+            if action in ("pick", "pdone"):
+                self.picked -= here
+            elif action == "pall":
+                self.picked |= here
+            elif action == "pnone":
+                self.picked -= here
+            else:                                   # one name toggled
+                payload = self.tokens.get(token)
+                if not payload:
+                    return self.stale(chat)
+                self.picked ^= {payload["path"]}
+            self.tg.edit_markup(chat, msg_id,
+                                self.browse_keyboard(path, entries,
+                                                     action != "pdone"))
+            return
+
+        if action == "rmpick":
+            if not self.picked:
+                return self.say(chat, "Nothing picked.")
+            names = sorted(Path(p).name for p in self.picked)
+            listed = "\n".join(f"· {html.escape(n)}" for n in names[:15])
+            more = f"\n… and {len(names) - 15} more" if len(names) > 15 else ""
+            return self.say(chat,
+                            f"Delete <b>{len(names)}</b> file(s) from the "
+                            f"reader?\n{listed}{more}",
+                            [[("Yes, delete them", f"dev:rmpick!:{msg_id or 0}"),
+                              ("No", "dev:pdone:")]])
+
+        if action == "rmpick!":
+            def work():
+                host, _ = self.device_host()
+                targets = sorted(self.picked)
+                ok, detail = suite.device.delete_many(host, targets)
+                self.picked.clear()
+                self.say(chat, f"🗑 {len(targets)} deleted." if ok
+                         else f"⚠️ {html.escape(detail[:200])}")
+                listing = self.listings.get(int(token) if token.isdigit() else None)
+                self.browse(chat, listing["path"] if listing else "/")
+            return self.submit(chat, work)
+
+        if action == "mvpick":
+            if not self.picked:
+                return self.say(chat, "Nothing picked.")
+            listing = self.listings.get(msg_id) or {}
+            self.moving = {"paths": sorted(self.picked),
+                           "back": listing.get("path", "/")}
+            self.picked.clear()
+            return self.submit(chat, lambda: self.show_move_picker(chat, "/"))
+
+        if action == "mv":                          # move one file
+            payload = self.tokens.get(token)
+            if not payload:
+                return self.stale(chat)
+            self.moving = {"paths": [payload["path"]], "back": payload["parent"]}
+            return self.submit(chat, lambda: self.show_move_picker(chat, "/"))
+
+        if action == "mvto":
+            dest = self.tokens.get(token)
+            if dest is None:
+                return self.stale(chat)
+            return self.submit(chat, lambda: self.show_move_picker(chat, dest))
+
+        if action == "mvgo":
+            dest = self.tokens.get(token)
+            if dest is None:
+                return self.stale(chat)
+            return self.submit(chat, lambda: self.do_move(chat, dest))
+
+        if action == "mkdir":
+            path = self.tokens.get(token)
+            if path is None:
+                return self.stale(chat)
+
+            def work():
+                host, _ = self.device_host()
+                self.pending = {"kind": "devmkdir", "host": host, "path": path}
+                self.say(chat, f"Send me a name for the new folder inside\n"
+                               f"<code>{html.escape(path)}</code>\n\n"
+                               f"(a name, not a path — no slashes)")
             return self.submit(chat, work)
 
         if action == "dirrn":                      # rename the folder we are in
@@ -1543,8 +1657,9 @@ class Bot:
 
         if action == "f":
             rows = [[("✏️ Rename", f"dev:rn:{token}"),
-                     ("🗑 Delete", f"dev:rm:{token}")],
-                    [("⬇️ Pull to server", f"dev:get:{token}")],
+                     ("📦 Move to…", f"dev:mv:{token}")],
+                    [("🗑 Delete", f"dev:rm:{token}"),
+                     ("⬇️ Pull to server", f"dev:get:{token}")],
                     [("📂 Back", f"dev:ls:{self.tokens.put(parent)}")]]
             if name.lower().endswith(".bmp"):
                 rows.insert(0, [("👁 Preview", f"dev:see:{token}")])
@@ -1664,33 +1779,134 @@ class Bot:
         rename that fails against a file plainly sitting there.
         """
         host, _ = self.device_host()
-        entries = suite.device.list_dir(host, path)
+        entries = sorted(suite.device.list_dir(host, path),
+                         key=lambda e: (not e.get("isDirectory"),
+                                        e.get("name", "").lower()))
+        sent = self.say(chat, f"📂 <code>{html.escape(path)}</code> — "
+                              f"{len(entries)} item(s)",
+                        self.browse_keyboard(path, entries))
+        # Remembered by message id, like a contact sheet, so ☑ Pick several can
+        # swap this listing's buttons in place instead of sending it again.
+        if sent and sent.get("message_id"):
+            self.listings[sent["message_id"]] = {"path": path, "entries": entries}
+
+    def show_move_picker(self, chat, path: str) -> None:
+        """Walk the card looking for somewhere to put what you picked.
+
+        A separate view rather than a list of every folder on the device: the
+        card is a tree, and the only honest way to offer a destination three
+        levels down is to let you walk to it. **📥 Move here** is on every
+        level, so the folder you are looking at is always a valid answer.
+        """
+        if not self.moving:
+            return self.stale(chat)
+        host, _ = self.device_host()
+        files = self.moving["paths"]
         rows = []
-        for entry in sorted(entries, key=lambda e: (not e.get("isDirectory"),
-                                                    e.get("name", "").lower())):
+        for entry in sorted(suite.device.list_dir(host, path),
+                            key=lambda e: e.get("name", "").lower()):
+            if not entry.get("isDirectory"):
+                continue
+            child = f"{path.rstrip('/')}/{entry['name']}"
+            rows.append([(f"📁 {entry['name'][:32]}",
+                          f"dev:mvto:{self.tokens.put(child)}")])
+        here = self.tokens.put(path)
+        rows.append([(f"📥 Move {len(files)} here", f"dev:mvgo:{here}")])
+        if path != "/":
+            up = path.rstrip("/").rpartition("/")[0] or "/"
+            rows.append([("⬆️ Up", f"dev:mvto:{self.tokens.put(up)}")])
+        rows.append([("✖ Cancel", f"dev:ls:{self.tokens.put(self.moving['back'])}")])
+        listed = "\n".join(f"· {html.escape(Path(p).name)}" for p in files[:10])
+        more = f"\n… and {len(files) - 10} more" if len(files) > 10 else ""
+        # The reading-position warning belongs here as much as on a rename: the
+        # handlers behave identically, and a move is the one people expect to
+        # be harmless.
+        books = [p for p in files
+                 if p.lower().endswith((".epub", ".txt", ".xtc"))]
+        warn = ("\n\n⚠️ The reader keys reading state by path and does not "
+                "follow a move made from here, so a book you are part-way "
+                "through loses its place." if books else "")
+        self.say(chat, f"📦 Moving:\n{listed}{more}\n\n"
+                       f"Destination — now in <code>{html.escape(path)}</code>"
+                       f"{warn}", rows)
+
+    def do_move(self, chat, dest: str) -> None:
+        if not self.moving:
+            return self.stale(chat)
+        host, _ = self.device_host()
+        files, back = self.moving["paths"], self.moving["back"]
+        self.moving = None
+        moved, failed = [], []
+        for path in files:
+            if path.rstrip("/").rpartition("/")[0] == dest.rstrip("/"):
+                continue               # already where it is being sent
+            try:
+                suite.device.move(host, path, dest)
+                moved.append(Path(path).name)
+            except suite.DeviceError as exc:
+                failed.append((Path(path).name, str(exc)))
+        lines = [f"📦 {len(moved)} file(s) → <code>{html.escape(dest)}</code>"]
+        lines += [f"❌ {html.escape(n)} — {html.escape(e[:80])}" for n, e in failed]
+        if not moved and not failed:
+            lines = ["Nothing to do — they are already there."]
+        self.say(chat, "\n".join(lines))
+        self.browse(chat, dest if moved else back)
+
+    def browse_keyboard(self, path: str, entries: list,
+                        picking: bool = False) -> list:
+        """The buttons under a folder listing, in either of its two moods.
+
+        Browsing: a folder navigates and carries its own delete, a file opens.
+        Picking: every *file* becomes a tick box in the same place, and the
+        actions apply to the lot — which is the only way "these three books go
+        in that folder" is a single gesture rather than nine.
+        """
+        rows = []
+        for entry in entries:
             name = entry.get("name", "")
             child = f"{path.rstrip('/')}/{name}"
             if entry.get("isDirectory"):
-                rows.append([(f"📁 {name[:32]}", f"dev:ls:{self.tokens.put(child)}")])
+                if picking:
+                    continue           # folders are not the thing being picked
+                rows.append([(f"📁 {name[:28]}", f"dev:ls:{self.tokens.put(child)}"),
+                             ("🗑", f"dev:dirrm:{self.tokens.put(child)}")])
+                continue
+            token = self.tokens.put({"parent": path, "name": name, "path": child,
+                                     "size": entry.get("size", 0)})
+            if picking:
+                mark = "☑" if child in self.picked else "☐"
+                rows.append([(f"{mark} {name[:30]}", f"dev:t:{token}")])
             else:
-                token = self.tokens.put({"parent": path, "name": name,
-                                         "path": child,
-                                         "size": entry.get("size", 0)})
                 icon = "📕" if entry.get("isEpub") else "📄"
                 rows.append([(f"{icon} {name[:32]}", f"dev:f:{token}")])
-        bmps = sum(1 for e in entries if not e.get("isDirectory")
-                   and e.get("name", "").lower().endswith(".bmp"))
+
+        files = [e for e in entries if not e.get("isDirectory")]
+        if picking:
+            here = {f"{path.rstrip('/')}/{e.get('name', '')}" for e in files}
+            chosen = len(self.picked & here)
+            rows.append([(f"📦 Move {chosen}", "dev:mvpick:"),
+                         (f"🗑 Delete {chosen}", "dev:rmpick:")]
+                        if chosen else [("Tap the names to pick", "dev:nop:")])
+            rows.append([("All", "dev:pall:"), ("None", "dev:pnone:"),
+                         ("✖ Done", "dev:pdone:")])
+            return rows
+
+        bmps = sum(1 for e in files
+                   if e.get("name", "").lower().endswith(".bmp"))
         if bmps:
             rows.append([(f"👁 Preview all {bmps}", f"dev:wpall:{self.tokens.put(path)}")])
+        here = self.tokens.put(path)
+        actions = [("➕ New folder", f"dev:mkdir:{here}")]
+        if files:
+            actions.append(("☑ Pick several", f"dev:pick:{here}"))
+        rows.append(actions)
         if path != "/":
             up = path.rstrip("/").rpartition("/")[0] or "/"
-            here = self.tokens.put(path)
             rows.append([("⬆️ Up", f"dev:ls:{self.tokens.put(up)}"),
                          ("✏️ Rename folder", f"dev:dirrn:{here}")])
             rows.append([("🗑 Delete this folder", f"dev:dirrm:{here}")])
         rows.append([("🏠 Menu", "m:main")])
-        self.say(chat, f"📂 <code>{html.escape(path)}</code> — "
-                       f"{len(entries)} item(s)", rows)
+        return rows
 
     # -- push --------------------------------------------------------------
 
