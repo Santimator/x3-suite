@@ -342,8 +342,9 @@ fonts are ignored, ruby and interlinear pinyin are broken, RAM is ~400 KB.
 ## 9. From your phone
 
 **Tested:** self-tested; the device half rides endpoints device-confirmed on a
-1.5.0 RC (2026-08), and the font path — queue, push, verify, select — was
-driven onto an X3 end to end (2026-08).
+1.5.0 RC (2026-08), and two flows were driven onto an X3 end to end (2026-08) —
+the font path (queue, push, verify, select) and tidying the card (new folder,
+move one, move three at once, delete the folder).
 
 A Telegram bot that operates everything above without a terminal. Send it a
 photo and it comes back as a sleep-screen preview with the mat choices as

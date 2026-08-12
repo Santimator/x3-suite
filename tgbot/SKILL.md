@@ -194,6 +194,12 @@ you are looking at is always a valid answer and nothing has to be spelled out
 by hand. Each file is one `POST /move`, reported per file, and one already
 sitting in the destination is skipped rather than moved onto itself.
 
+**Device-confirmed 2026-08**, the round trip: a book moved out of a folder to
+the SD root, the emptied folder deleted, a new folder made, and three books
+ticked and moved into it in one gesture — including the keyboard swap that
+turns a listing into tick boxes, which is the part a real Telegram client
+gets to have an opinion about.
+
 **Moving warns about your reading position, for the same reason renaming
 does**, and the warning appears only for readable formats — a wallpaper has no
 place to lose.
@@ -592,10 +598,11 @@ leftover id, a relocated config resolves paths against itself, and a
 **Status: the flows above are implemented and self-tested; the device half is
 built on endpoints device-confirmed on a 1.5.0 RC (2026-08) —
 `/api/status`, `/api/files`, `/upload`, `/delete`, `/mkdir`, `/api/settings`
-through `push_wallpaper.py`, and `/rename` directly.** The font path is
-device-confirmed end to end (2026-08): a family queued here went across on a
-push, verified against `CHECKSUMS.tsv`, was selected, and rendered after the
-power-cycle. `/download` and `/move`
+through `push_wallpaper.py`, and `/rename` directly.** Two whole flows are now
+device-confirmed from the bot itself (2026-08): the font path — a family queued
+here went across on a push, verified against `CHECKSUMS.tsv`, was selected, and
+rendered after the power-cycle — and the file management: new folder, single
+move, three-at-once move, folder delete. `/download` and `/move`
 are source-confirmed and wired but have not been driven against a device.
 
 ## Files

@@ -320,7 +320,9 @@ is `bpp > 1`, so it never gets the four-level pipeline at all.
 and `/api/settings` all drove a real X3 from
 `wallpaper-maker/scripts/push_wallpaper.py`, and `/rename` was driven by hand on
 a 1.5.0 RC. `/move` too, in the `/Books` test recorded under Subfolders below —
-`mkdir` + `move` put a book in a folder and the reader opened it there.
+`mkdir` + `move` put a book in a folder and the reader opened it there — and
+again from `tgbot/` in 2026-08, one file and then three in a batch, with
+`/mkdir` and the `paths=` form of `/delete` in the same session.
 `/api/fonts`, `/api/fonts/upload` and the `fontFamily` setting were driven end
 to end from `tgbot/` (2026-08), as was **WebDAV `MOVE` on a directory**, which
 renamed a font family folder with its contents intact. What is still
