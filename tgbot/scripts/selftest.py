@@ -854,33 +854,7 @@ def check_device_fonts(tmp: Path) -> None:
                 return [{"name": d, "isDirectory": True} for d in state["root"]]
             if path == "/fonts":
                 return [{"name": d, "isDirectory": True} for d in state["visible"]]
-            return [{"name": n, "size": sz, "isDirectory": False}
-                    for n, sz in state["fs"].get(path, {}).items()]
-
-        def mkdir(host, parent, name):
-            state["fs"].setdefault(f"{parent}/{name}", {})
-            state["visible"].append(name)
-            return True
-
-        def move(host, path, dest_dir):
-            src_dir, _, name = path.rpartition("/")
-            if name not in state["fs"].get(src_dir, {}):
-                raise suite.DeviceError(f"move {path}: 404")
-            state["fs"][dest_dir][name] = state["fs"][src_dir].pop(name)
-
-        def delete(host, path):
-            # /delete takes a directory only when it is already empty.
-            if state["fs"].get(path):
-                return False
-            state["fs"].pop(path, None)
-            if path.startswith("/fonts/"):
-                name = path.rpartition("/")[2]
-                state["visible"] = [d for d in state["visible"] if d != name]
-            return True
-
-        suite.device.mkdir = mkdir
-        suite.device.move = move
-        suite.device.delete = delete
+            return []
 
         def delete_family(host, name):
             state["deleted"].append(name)
@@ -914,18 +888,13 @@ def check_device_fonts(tmp: Path) -> None:
 
     orig = (suite.device.fonts, suite.device.settings, suite.device.list_dir,
             suite.device.dav_move, suite.device.delete_font_family,
-            suite.device.select_font_family, suite.verify_font_family,
-            suite.device.mkdir, suite.device.move, suite.device.delete)
+            suite.device.select_font_family, suite.verify_font_family)
     try:
         # A reader with a visible /fonts, one family in it, and one the
         # registry remembers from a scan that is no longer true.
-        state = {"families": ["WenZilla", "Bookerly", "Ghost"],
-                 "visible": ["WenZilla", "Bookerly"],
+        state = {"families": ["WenZilla", "Ghost"], "visible": ["WenZilla"],
                  "root": ["fonts", "Books"], "sizes": {"Ghost": 0},
                  "value": 3, "moved": [], "deleted": [],
-                 "fs": {"/fonts/WenZilla": {"WenZilla_12.cpfont": 10},
-                        "/fonts/Bookerly": {"Bookerly_12.cpfont": 10,
-                                            "Bookerly_14.cpfont": 20}},
                  "options": ["Noto Serif", "Noto Sans", "WenKaiFull", "WenZilla"]}
         device(state)
         bot, tg = make_bot(tmp)
@@ -985,61 +954,29 @@ def check_device_fonts(tmp: Path) -> None:
         check("a plain name is accepted",
               suite.family_name_problem("Naskh-Full_2") is None)
 
-        # The family being read with has its files open on the device — the
-        # one that lost them to a rename was the selected one.
         card = open_family(bot, tg, listing, "WenZilla")
-        tg.sent.clear()
-        bot.handle(cb(next(b for b in buttons(card) if b.startswith("dfo:rn"))))
-        check("renaming the family in use is refused, with the way round it",
-              "reading with" in tg.sent[-1]["text"]
-              and bot.pending is None, tg.sent[-1]["text"])
-
-        card = open_family(bot, tg, listing, "Bookerly")
         rename = next(b for b in buttons(card) if b.startswith("dfo:rn"))
         bot.handle(cb(rename))
         tg.sent.clear()
         bot.handle(msg("Noto Naskh"))
-        check("a name the reader could not delete is refused before anything moves",
-              state["fs"].get("/fonts/Bookerly") and "only accepts" in tg.sent[-1]["text"],
+        check("a name the reader could not delete is refused before the move",
+              not state["moved"] and "only accepts" in tg.sent[-1]["text"],
               tg.sent[-1]["text"])
 
         state["deleted"].clear()
         bot.handle(cb(rename))
         tg.sent.clear()
-        bot.handle(msg("Bookerly2"))
-        check("a rename moves the files rather than renaming the folder",
-              state["fs"].get("/fonts/Bookerly2") ==
-              {"Bookerly_12.cpfont": 10, "Bookerly_14.cpfont": 20},
-              str(state["fs"]))
-        check("... keeping the filenames, which the reader does not read",
-              "Bookerly_12.cpfont" in state["fs"].get("/fonts/Bookerly2", {}))
-        check("... and removes the old folder only once it is empty",
-              "/fonts/Bookerly" not in state["fs"], str(state["fs"]))
+        state["options"] = state["options"] + ["Zilla"]
+        bot.handle(msg("Zilla"))
+        check("a good name renames the folder, and only the folder",
+              state["moved"] == [("/fonts/WenZilla", "/fonts/Zilla")],
+              str(state["moved"]))
         check("... then makes the reader re-scan, so its list is not left stale",
               any(d.startswith("cprescan") for d in state["deleted"]),
               str(state["deleted"]))
-
-        # A move that fails partway must leave both folders, never one empty
-        # folder and orphaned files.
-        state["fs"]["/fonts/Half"] = {"Half_12.cpfont": 10, "Half_14.cpfont": 20}
-        state["visible"].append("Half")
-        real_move = suite.device.move
-
-        def flaky(host, path, dest_dir):
-            if path.endswith("_14.cpfont"):
-                raise suite.DeviceError("move: 500 SD write error")
-            return real_move(host, path, dest_dir)
-        suite.device.move = flaky
-        try:
-            report = suite.move_font_family("h", "/fonts", "Half", "Whole")
-            check("a half-finished rename keeps the original folder",
-                  state["fs"].get("/fonts/Half") == {"Half_14.cpfont": 20}
-                  and not report["removed_old"], str(state["fs"]))
-            check("... and reports which file did not make it",
-                  [n for n, _ in report["failed"]] == ["Half_14.cpfont"],
-                  str(report))
-        finally:
-            suite.device.move = real_move
+        check("... and re-selects it, since it was the family being read with",
+              state["value"] == state["options"].index("Zilla")
+              and "reads with" in tg.sent[-1]["text"], tg.sent[-1]["text"])
 
         # A family whose folder holds characters the delete endpoint rejects.
         state.update(families=["Noto Naskh"], visible=["Noto Naskh"],
@@ -1057,13 +994,6 @@ def check_device_fonts(tmp: Path) -> None:
               any(b.startswith("dfo:rn") for b in buttons(tg.sent[-1])),
               str(buttons(tg.sent[-1])))
 
-        # The one call that can empty a folder must not be reachable from a
-        # button at all — grep, because a stub in this file cannot prove it.
-        source = "\n".join((Path(__file__).parent / f).read_text()
-                           for f in ("bot.py", "suite.py"))
-        check("nothing in the bot calls the folder-eating WebDAV move",
-              "dav_move" not in source)
-
         # A reader with no visible /fonts at all: everything is in /.fonts.
         state.update(families=["WenZilla"], visible=[], root=["Books"],
                      sizes={}, value=0)
@@ -1077,8 +1007,7 @@ def check_device_fonts(tmp: Path) -> None:
     finally:
         (suite.device.fonts, suite.device.settings, suite.device.list_dir,
          suite.device.dav_move, suite.device.delete_font_family,
-         suite.device.select_font_family, suite.verify_font_family,
-         suite.device.mkdir, suite.device.move, suite.device.delete) = orig
+         suite.device.select_font_family, suite.verify_font_family) = orig
 
 
 # -- 5a. a message must never simply vanish --------------------------------
@@ -1220,18 +1149,14 @@ def check_device_menu(tmp: Path) -> None:
               said is expected, tg.sent[-1]["text"][:120])
     bot.pending = None      # asking for a name leaves one waiting; this is a test
 
-    # Renaming a folder is refused outright, for any folder. WebDAV MOVE is
-    # the only route that will touch a directory, and on this firmware it
-    # answers 201 while leaving an empty folder and orphaning the contents —
-    # device-confirmed 2026-08, at the cost of a font family. The offer has to
-    # be withdrawn, not just guarded for /.sleep.
-    for folder in ("/.sleep", "/Books"):
-        tg.sent.clear()
-        bot.handle(cb(f"dev:dirrn:{bot.tokens.put(folder)}"))
-        check(f"renaming {folder} is refused, and says what it would cost",
-              "loses what is inside" in tg.sent[-1]["text"],
-              tg.sent[-1]["text"][:90])
-        check("... and nothing was queued behind it", bot.pending is None)
+    # A folder can only be renamed through WebDAV, and WebDAV refuses every
+    # path containing a dot-prefixed segment — so /.sleep must be turned down
+    # before anything tries, not after a confusing 403.
+    tg.sent.clear()
+    bot.handle(cb(f"dev:dirrn:{bot.tokens.put('/.sleep')}"))
+    check("renaming /.sleep is refused with a reason",
+          "can't be renamed" in tg.sent[-1]["text"], tg.sent[-1]["text"][:80])
+    check("... and nothing was queued behind it", bot.pending is None)
 
 
 # -- 7. secrets that live outside the checkout -----------------------------

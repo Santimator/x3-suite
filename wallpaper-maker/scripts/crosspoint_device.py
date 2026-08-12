@@ -388,24 +388,28 @@ def move(host: str, path: str, dest_dir: str) -> None:
 
 
 def dav_move(host: str, path: str, dest: str) -> None:
-    """WebDAV MOVE. **Never give this a directory.**
+    """Rename or move via WebDAV, which is the only way to touch a *folder*.
 
-    It is the only route that will *accept* a folder — `/rename` and `/move`
-    both end in "Only files can be renamed" — and that is a trap, not a
-    feature. On an X3 (1.5.0, 2026-08) moving a directory answered **201** and
-    left an **empty folder** at the destination: the handler opens the
-    directory and calls SdFat's `FatFile::rename`, and the files that were
-    inside it did not come across. The family it was tried on had to be sent
-    again. Rename a folder the long way instead — `mkdir`, `move` each file,
-    delete the empty original — which is what `suite.move_font_family` does.
+    The HTTP API refuses directories outright — `/rename` and `/move` both end
+    in "Only files can be renamed". WebDAV's MOVE has no such check: it opens
+    the source and calls the filesystem's own rename, which on FAT works for a
+    directory as well as a file.
 
-    For a *file* the same call is the ordinary case, though `rename()` is the
-    better route: it is one call, device-confirmed, and it takes a bare name.
-
-    The other guard is real and unchanged: `isProtectedPath` inspects **every
+    The catch is the other guard. WebDAV's `isProtectedPath` inspects **every
     segment** of the path, not just the last, so anything under a dot-prefixed
     folder — `/.sleep` and everything in it — is unreachable this way. That is
-    the mirror image of the HTTP API, which only guards the final segment.
+    the mirror image of the HTTP API, which only guards the final segment. Use
+    this for folders; use `rename()` for files.
+
+    **Device-confirmed 2026-08**, on the case that matters: a font family
+    folder renamed with all four `.cpfont` files intact, and the reader then
+    listed the family under its new name at the right sizes. A directory really
+    does move, contents and all.
+
+    Expect the result to *look* wrong on the device for two reasons that are
+    not this call's fault: the reader's own file browser lists only books and
+    wallpapers, so any folder of `.cpfont` files appears empty there, and the
+    font registry is a boot-time snapshot that a rename does not invalidate.
     """
     url = f"http://{host}{urllib.parse.quote(path)}"
     req = urllib.request.Request(url, method="MOVE")
