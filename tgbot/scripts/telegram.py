@@ -22,6 +22,7 @@ rather than discovered later:
 
 from __future__ import annotations
 
+import http.client
 import json
 import mimetypes
 import time
@@ -87,6 +88,31 @@ class Telegram:
                     time.sleep(1 + attempt)
                     continue
                 raise TelegramError(f"{method}: {exc.reason}") from None
+            # Everything that fails *after* the request is on the wire. urllib
+            # only wraps the sending half in URLError, so the reply half
+            # arrives here as itself: TimeoutError when a 40-second long poll
+            # is cut off mid-read, RemoteDisconnected when Telegram or a router
+            # drops an idle connection, ssl.SSLError, or a truncated body that
+            # will not parse. Without this clause those left the module
+            # unconverted, sailed past every `except TelegramError` in bot.py —
+            # which is the whole contract of this file — and killed the
+            # process. systemd papered over it ten seconds later, so the only
+            # visible symptom was the bot greeting you at 03:11 in the morning.
+            #
+            # This clause must stay *below* the URLError one: URLError is a
+            # subclass of OSError and would be swallowed here instead.
+            except (OSError, http.client.HTTPException,
+                    json.JSONDecodeError) as exc:
+                # Retrying a timed-out POST can duplicate a message that in
+                # fact arrived — we time out on the reply, not on the send.
+                # Accepted deliberately: a wallpaper announced twice is a
+                # blemish, a wallpaper never announced is the failure this
+                # bot is built to avoid.
+                if attempt < 2:
+                    time.sleep(1 + attempt)
+                    continue
+                raise TelegramError(
+                    f"{method}: {exc or exc.__class__.__name__}") from None
             if not data.get("ok"):
                 raise TelegramError(f"{method}: {data.get('description')}")
             return data.get("result")

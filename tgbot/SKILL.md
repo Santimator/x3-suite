@@ -587,6 +587,13 @@ temporary workspace. It grades the four things that would actually hurt:
    moves the folder and only the folder, then re-scans and re-selects; and
    `/.fonts` is named as the reason only when the card has no `/fonts`.
 
+8. **Nothing leaves `telegram.py` except a `TelegramError`** — a long poll cut
+   off mid-read, an idle connection dropped by the far end, TLS failing while
+   the reply is read, a body that stops early, a refused connection, a reply
+   that is not JSON. urllib wraps only the *sending* half of a request in
+   `URLError`, so before this the reply half left the module as itself, sailed
+   past the poll loop that catches `TelegramError`, and ended the process.
+
 Plus: a 200-character device name with decomposed accents round-trips through a
 button token byte-identically, a stale token is answered rather than guessed
 at, nothing outside `tgbot/` imports `tgbot`, and — the checks that matter if

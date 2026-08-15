@@ -2093,6 +2093,16 @@ def main(argv=None) -> int:
         except KeyboardInterrupt:
             log("stopping")
             return 0
+        except Exception:
+            # The handlers and the worker have caught broadly since the first
+            # day; this loop did not, and so it was the one path in the process
+            # where a surprise was fatal. `telegram.py` now converts what leaked
+            # through here, and this stays anyway: nothing arriving from the
+            # network deserves to end the process, and the next leak should
+            # cost a log line rather than a restart. KeyboardInterrupt and
+            # SystemExit are BaseException, so stopping the unit still stops it.
+            log("poll crashed:", traceback.format_exc())
+            time.sleep(5)
 
 
 if __name__ == "__main__":

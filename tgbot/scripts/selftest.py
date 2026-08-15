@@ -22,7 +22,9 @@ Checks 1 and 3 are why this file exists at all: they are invariants about
 
 from __future__ import annotations
 
+import http.client
 import json
+import ssl
 import sys
 import tempfile
 from pathlib import Path
@@ -33,6 +35,7 @@ import suite                                            # noqa: E402
 from bot import Bot                                     # noqa: E402
 from config import ConfigError, safe_join               # noqa: E402
 from state import Queue, Tokens                         # noqa: E402
+from telegram import TelegramError                      # noqa: E402
 
 OWNER = 424242
 STRANGER = 999999
@@ -1338,6 +1341,71 @@ def check_secrets_outside(tmp: Path) -> None:
               "not a number" in str(exc))
 
 
+# -- 17. the network layer converts everything it can raise ----------------
+
+
+def check_network_errors() -> None:
+    """One rule, about types: nothing may leave `telegram.py` except a
+    `TelegramError`.
+
+    It is checked here because the day it was untrue cost two restarts. A long
+    poll cut off mid-read raises `TimeoutError`, which is not a `URLError`,
+    which meant `_post` never converted it — and the poll loop in `bot.py`
+    catches `TelegramError`. So it left the process, and systemd restarted the
+    bot ten seconds later with a cheerful greeting at three in the morning.
+
+    urllib wraps the *sending* half of a request in `URLError` and leaves the
+    reply half bare, so every case below is a way for the reply to go wrong.
+    """
+    import telegram as tgmod
+
+    real_urlopen, real_sleep = tgmod.urllib.request.urlopen, tgmod.time.sleep
+    tgmod.time.sleep = lambda *_a, **_kw: None      # three retries, no waiting
+
+    def demand_conversion(label: str, urlopen) -> None:
+        tgmod.urllib.request.urlopen = urlopen
+        try:
+            tgmod.Telegram("1:notatoken").get_updates(1)
+            check(label, False, "raised nothing at all")
+        except TelegramError:
+            check(label, True)
+        except Exception as leaked:                 # noqa: BLE001 — the point
+            check(label, False,
+                  f"leaked {leaked.__class__.__name__}: {leaked}")
+
+    class NotJSON:
+        """A 200 whose body is an error page — what a proxy in front of
+        Telegram returns when it is having a bad morning."""
+
+        def read(self):
+            return b"<html><body>502 Bad Gateway</body></html>"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_a):
+            return False
+
+    try:
+        for label, exc in [
+            ("a long poll cut off mid-read",
+             TimeoutError("The read operation timed out")),
+            ("an idle connection dropped by the far end",
+             http.client.RemoteDisconnected("remote end closed connection")),
+            ("TLS failing while the reply is read", ssl.SSLError("bad record")),
+            ("a body that stops early", http.client.IncompleteRead(b"")),
+            ("a connection refused outright", ConnectionRefusedError("refused")),
+        ]:
+            def raiser(*_a, _exc=exc, **_kw):
+                raise _exc
+            demand_conversion(label, raiser)
+
+        demand_conversion("a reply that is not JSON", lambda *_a, **_kw: NotJSON())
+    finally:
+        tgmod.urllib.request.urlopen = real_urlopen
+        tgmod.time.sleep = real_sleep
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
@@ -1357,6 +1425,7 @@ def main() -> int:
         check_entry_point()
         check_secrets_outside(tmp)
         check_optional()
+        check_network_errors()
 
     print()
     if failures:

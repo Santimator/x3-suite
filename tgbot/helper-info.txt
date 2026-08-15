@@ -83,6 +83,29 @@ DAY TO DAY
   sudo journalctl -u tgbot --since today   just today's
 
 
+"IT GREETED ME OUT OF NOWHERE"
+------------------------------
+
+The bot says "Let's read!" when it starts. If one arrives while you are asleep,
+the service restarted — and because Restart=on-failure brings it back ten
+seconds later, that greeting is the only symptom you get. It does not mean the
+machine rebooted. Tell the two apart:
+
+  uptime -p                             the machine, since when
+  systemctl show tgbot -p NRestarts     restarts since it was last started
+  sudo journalctl -u tgbot --since "7 days ago" \
+      | grep -E "Main process exited|Scheduled restart|Traceback"
+
+  code=exited, status=1/FAILURE     Python crashed; the traceback is above it
+  code=killed, signal=KILL          something killed it — check the OOM killer:
+                                      journalctl -k | grep -i oom-kill
+  nothing before a fresh start      then the machine really did go down
+
+A restart costs nothing that was written down: the queue is on disk and
+survives. What it does lose is memory — a contact sheet or a device listing
+from before the restart is answered rather than acted on.
+
+
 AFTER A GIT PULL
 ----------------
 
