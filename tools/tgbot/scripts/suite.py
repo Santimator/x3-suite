@@ -23,6 +23,7 @@ someone who only ever builds EPUBs must never need a Telegram token.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import struct
@@ -453,6 +454,42 @@ def device_book_name(author: str, title: str, host: str | None = None) -> str:
         except (DeviceError, TypeError, ValueError):
             pass            # the default is also the pre-1.5.0 behaviour
     return opds_client.opds_book_filename(author or "", title or "", fmt)
+
+
+SLIM = REPO_ROOT / "tools" / "epub-slimmer" / "scripts" / "slim_epub.py"
+# Below this, substituting a slimmed copy buys nothing worth the second file:
+# books built by this suite already carry no fonts and a panel-sized cover.
+SLIM_WORTH_IT = 0.05
+
+
+def slim_book(src: Path, cache_dir: Path) -> dict:
+    """Slim a book for the device, keeping the original untouched.
+
+    The server holds the book you were given; the reader gets the one it can
+    actually use. Slimming is deterministic, so the result is cached by content
+    hash and a book queued twice is only ever built once.
+
+    Returns {"path", "before", "after", "saved", "used"} — `used` is False when
+    the saving was too small to be worth a second file, in which case `path` is
+    the original and pushing behaves exactly as it did before.
+    """
+    before = src.stat().st_size
+    digest = hashlib.sha1(src.read_bytes()).hexdigest()[:16]
+    dest = cache_dir / f"{digest}.epub"
+    plain = {"path": src, "before": before, "after": before, "saved": 0,
+             "used": False}
+    if not dest.exists():
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        rc, out, err = run([PY_DEPS, str(SLIM), str(src), "--out", str(dest),
+                            "--json"], timeout=300)
+        if rc != 0 or not dest.exists():
+            # A book that will not slim is still a book: push what we have.
+            return plain
+    after = dest.stat().st_size
+    if before and (before - after) / before < SLIM_WORTH_IT:
+        return plain
+    return {"path": dest, "before": before, "after": after,
+            "saved": before - after, "used": True}
 
 
 def upload_book(host: str, path: Path, name: str) -> None:

@@ -32,6 +32,9 @@ This is a suite of tools. You'll find:
   the server serves what it made, and you can run it on your own.
 - **`tools/wallpaper-maker/`** — turns any image into a sleep screen for the reader,
   and pushes it onto the device.
+- **`tools/epub-slimmer/`** — strips a downloaded EPUB to what the reader can
+  actually render: no embedded fonts, images sized to the panel, every word
+  kept. A 22 MB book becomes a few hundred KB and looks identical on e-ink.
 - **`ai-tools/`** — the AI-assisted tools:
   - **`graded-reader/`** — writes leveled Chinese books.
   - **`pdf2epub/`** — converts PDFs into clean EPUBs.

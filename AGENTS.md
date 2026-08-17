@@ -29,6 +29,7 @@ where it is.
 | `epub-builder/` | stdlib; Pillow for `prepare_cover.py` only | graded-reader selftest, **output byte-identical** (canary `workspace/being-earnest`), **and** opds-server selftest |
 | `tools/opds-server/` | none, stdlib | `python3 tools/opds-server/scripts/selftest.py` |
 | `tools/wallpaper-maker/` | Pillow (decode + resample only) | `.venv/bin/python tools/wallpaper-maker/scripts/selftest.py` **and** tgbot selftest (both import `crosspoint_device`) |
+| `tools/epub-slimmer/` | Pillow | `.venv/bin/python tools/epub-slimmer/scripts/selftest.py` |
 | `tools/tgbot/` | none, stdlib | `python3 tools/tgbot/scripts/selftest.py` |
 | `ai-tools/graded-reader/` | jieba, pypinyin | `.venv/bin/python ai-tools/graded-reader/scripts/selftest.py` |
 | `ai-tools/pdf2epub/` | pdfplumber, pypdf, pypdfium2, Pillow, pytesseract + system `tesseract-ocr` | no selftest, by design — re-run a `workspace/` sample by hand, read the EPUB ([`CONVERSIONS.md`](ai-tools/pdf2epub/CONVERSIONS.md)) |
