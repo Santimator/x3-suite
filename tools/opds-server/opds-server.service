@@ -5,11 +5,22 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-# Two things to edit: the account whose home holds the books, and where you
-# cloned the repo. Everything else — port, library roots, whether auth is on —
-# comes from tools/opds-server/config.json, so this file stays put once it works.
-User=CHANGEME
-ExecStart=/usr/bin/python3 /home/CHANGEME/x3-suite/tools/opds-server/scripts/serve_opds.py
+# Do not hand-edit the two placeholders — let the shell fill them in, from the
+# clone you are standing in. Typing a path by hand is how you end up with
+# /home/you/x3-suite when the clone is somewhere else entirely, and how a unit
+# survives a pull that moved the script it points at:
+#
+#   cd /path/to/x3-suite
+#   sed -e "s|CHANGEME_REPO|$PWD|g" -e "s|CHANGEME_USER|$(id -un)|g" \
+#       tools/opds-server/opds-server.service \
+#       | sudo tee /etc/systemd/system/opds-server.service
+#   sudo systemctl daemon-reload && sudo systemctl restart opds-server
+#
+# Everything else — port, library roots, whether auth is on — comes from
+# tools/opds-server/config.json, so this file stays put once it works.
+User=CHANGEME_USER
+WorkingDirectory=CHANGEME_REPO
+ExecStart=/usr/bin/python3 CHANGEME_REPO/tools/opds-server/scripts/serve_opds.py
 
 Restart=on-failure
 RestartSec=5

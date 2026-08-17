@@ -65,16 +65,24 @@ books kept elsewhere.
 
 ## Running it as a service
 
-[`opds-server.service`](opds-server.service) is a systemd system unit. Edit the
-two `CHANGEME`s — the account whose home holds the books, and where you cloned
-the repo — then:
+[`opds-server.service`](opds-server.service) is a systemd system unit. It
+carries two placeholders — the account and the clone path — and the shell fills
+them in from the clone you are standing in, so nothing is typed by hand:
 
 ```bash
-sudo cp tools/opds-server/opds-server.service /etc/systemd/system/
+cd /path/to/x3-suite
+sed -e "s|CHANGEME_REPO|$PWD|g" -e "s|CHANGEME_USER|$(id -un)|g" \
+    tools/opds-server/opds-server.service \
+    | sudo tee /etc/systemd/system/opds-server.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now opds-server
 sudo journalctl -u opds-server -f     # the startup banner, then requests
 ```
+
+The installed unit is a **copy**, which is why it is written this way: a pull
+that changes this file, or that moves the script it points at, needs the same
+two lines run again. A unit editing itself in the checkout would fight every
+pull instead.
 
 It runs as your user (the books live in your home), and since the server only
 ever reads, the unit confines it accordingly: the filesystem read-only, home
@@ -96,9 +104,16 @@ re-install the unit, which names the old path:
 ```bash
 mv opds-server/config.json tools/opds-server/ 2>/dev/null
 mv opds-server/secrets/* tools/opds-server/secrets/ 2>/dev/null
-sudo cp tools/opds-server/opds-server.service /etc/systemd/system/
+sed -e "s|CHANGEME_REPO|$PWD|g" -e "s|CHANGEME_USER|$(id -un)|g" \
+    tools/opds-server/opds-server.service \
+    | sudo tee /etc/systemd/system/opds-server.service
 sudo systemctl daemon-reload && sudo systemctl restart opds-server
 ```
+
+The unit is the part that bites: it names the script's path, so until it is
+re-installed the service points at `opds-server/scripts/serve_opds.py`, which
+no longer exists. `systemctl status opds-server` says so plainly, and the
+catalog simply never answers.
 
 Written for Debian: `/usr/bin/python3`, `multi-user.target`. On another distro
 or init system, hand the file to your favourite AI and ask for the equivalent —

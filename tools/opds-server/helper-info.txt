@@ -1,18 +1,27 @@
 opds-server.service — what the commands do
 ==========================================
 
-First, edit opds-server.service: replace both CHANGEMEs with the account whose
-home holds the books, and the path where you cloned the repo.
+The unit carries two placeholders. Do not edit them by hand — the install
+command below fills them in from the clone you are standing in.
 
 
 INSTALLING
 ----------
 
-  sudo cp tools/opds-server/opds-server.service /etc/systemd/system/
+  cd /path/to/x3-suite
+  sed -e "s|CHANGEME_REPO|$PWD|g" -e "s|CHANGEME_USER|$(id -un)|g" \
+      tools/opds-server/opds-server.service \
+      | sudo tee /etc/systemd/system/opds-server.service
 
-      A plain file copy. /etc/systemd/system/ is where systemd looks for units,
-      and it's the directory for yours specifically — /usr/lib/systemd/system/
-      belongs to packages. Nothing runs yet; systemd hasn't looked.
+      Fills in your account and this clone's path, then writes the result
+      where systemd looks for units. /etc/systemd/system/ is the directory for
+      yours specifically — /usr/lib/systemd/system/ belongs to packages.
+      Nothing runs yet; systemd hasn't looked.
+
+      Run it again after any pull that changes this unit file or moves the
+      script it points at. The installed file is a copy, so it does not follow
+      the repo — a unit pointing at a path that has moved fails with "No such
+      file or directory" and the catalog simply never answers.
 
   sudo systemctl daemon-reload
 
