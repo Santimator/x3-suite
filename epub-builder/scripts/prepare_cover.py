@@ -17,14 +17,14 @@ Two jobs, in the suite's "bring your own, we make it work" spirit:
      We emit grayscale PNG <= 528x792, which satisfies all of them by design.
 
   2. **Optionally draw the title onto it.** For a template cover that leaves a
-     blank area (e.g. reference/covers/default.png's parchment panel), the book
+     blank area (e.g. extras/default-covers/default.png's parchment panel), the book
      title is rendered into a configured box, auto-sized to fit. Rendered at the
      source resolution, then downscaled, so the text stays crisp.
 
 Usage:
   prepare_cover.py INPUT --out images/cover.png
   prepare_cover.py INPUT --out images/cover.png --title "Los alcaldes encontrados"
-  prepare_cover.py INPUT --title-config reference/covers/default.json --title "..." --out ...
+  prepare_cover.py INPUT --title-config extras/default-covers/default.json --title "..." --out ...
   prepare_cover.py INPUT --check          # report validity only, write nothing
 """
 
@@ -43,18 +43,18 @@ PANEL_W, PANEL_H = 528, 792
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 # Title-font candidates, best first; `--font` or a config `font` overrides.
-# Both bundled faces are OFL (licenses beside them in reference/covers/):
+# Both bundled faces are OFL (licenses beside them in extras/default-covers/):
 # IM Fell English for Latin, LXGW WenKai (WenZilla's kaiti) for CJK. System
 # serifs are a last resort so the feature never hard-fails.
 FONT_CANDIDATES = [
-    "reference/covers/IMFellEnglish-Regular.ttf",
-    "reference/covers/LXGWWenKai-Regular.ttf",
+    "extras/default-covers/IMFellEnglish-Regular.ttf",
+    "extras/default-covers/LXGWWenKai-Regular.ttf",
     "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf",
     "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
 ]
 
 # Default title box (fractions of image W/H) and ink, if no --title-config is
-# given. Tuned to reference/covers/default.png's parchment panel.
+# given. Tuned to extras/default-covers/default.png's parchment panel.
 DEFAULT_TITLE = {
     "title_box": [0.185, 0.072, 0.815, 0.360],
     "color": [43, 33, 25],

@@ -6,23 +6,23 @@ __pycache__/
 workspace/*/verify-report.json
 
 # graded-reader headless runner: LLM config + API keys (never commit)
-services/graded-reader/headless/config.json
-services/graded-reader/headless/secrets/*
-!services/graded-reader/headless/secrets/README.md
+ai-tools/graded-reader/headless/config.json
+ai-tools/graded-reader/headless/secrets/*
+!ai-tools/graded-reader/headless/secrets/README.md
 
 # wallpaper-maker: the reader's address on your LAN, remembered between pushes
-wallpaper-maker/last-device.json
+tools/wallpaper-maker/last-device.json
 
 # tgbot: the Telegram token, who is allowed to talk to it, and the delivery
 # queue. The queue is state, not history — deleting it loses whatever was
 # waiting for the device and nothing else.
-tgbot/config.json
-tgbot/secrets/*
-!tgbot/secrets/README.md
-tgbot/state/*
-!tgbot/state/.gitkeep
+tools/tgbot/config.json
+tools/tgbot/secrets/*
+!tools/tgbot/secrets/README.md
+tools/tgbot/state/*
+!tools/tgbot/state/.gitkeep
 
-# reference/fonts/ ships two families, and adding a third is a *licensing*
+# extras/fonts/ ships two families, and adding a third is a *licensing*
 # decision, not a tidiness one. This repo is MIT with OFL fonts attributed in
 # ATTRIBUTION.md; a family you build from a font you bought — or from anything
 # whose licence forbids redistribution — must not be republished under it by a
@@ -33,16 +33,16 @@ tgbot/state/*
 # Noto Naskh Arabic and Noto Sans are both SIL OFL, so redistributing bitmap
 # conversions of them here is exactly what their licence permits — that, and
 # nothing about how useful the font is, is why it may be allowlisted.
-reference/fonts/*/
-!reference/fonts/WenKaiFull/
-!reference/fonts/WenZilla/
-!reference/fonts/CrimKai/
-!reference/fonts/NaskhFull/
+extras/fonts/*/
+!extras/fonts/WenKaiFull/
+!extras/fonts/WenZilla/
+!extras/fonts/CrimKai/
+!extras/fonts/NaskhFull/
 
 # opds-server: local library paths + Basic-auth password (never commit)
-opds-server/config.json
-opds-server/secrets/*
-!opds-server/secrets/README.md
+tools/opds-server/config.json
+tools/opds-server/secrets/*
+!tools/opds-server/secrets/README.md
 
 # workspace/ is yours, not the repo's: whatever you write, convert, or drop in
 # here stays local. The exceptions are the committed samples — one per tool,

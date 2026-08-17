@@ -54,7 +54,7 @@ add a *declared* option to FORMAT.md instead.
   source builds a byte-identical EPUB, and re-sideloading replaces instead
   of duplicating.
 - **Device-shaped.** Simple CSS, no embedded fonts (the X3 can't rasterize
-  them — see `reference/readers.md` at the repo root), lean files.
+  them — see `extras/readers.md` at the repo root), lean files.
 
 ## Consumers
 

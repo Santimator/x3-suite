@@ -26,17 +26,18 @@ But I digress. Let's move to the guide.
 
 This is a suite of tools. You'll find:
 
-- **`opds-server/`** — serves your built books to the reader over WiFi.
-- **`epub-builder/`** — turns the common book format into an EPUB. The services
-  hand it their books; you can also run it on your own.
-- **`wallpaper-maker/`** — turns any image into a sleep screen for the reader,
+- **`tools/opds-server/`** — serves your built books to the reader over WiFi.
+- **`epub-builder/`** — turns the common book format into an EPUB. Not a tool
+  you operate so much as the format itself: the AI tools hand it their books,
+  the server serves what it made, and you can run it on your own.
+- **`tools/wallpaper-maker/`** — turns any image into a sleep screen for the reader,
   and pushes it onto the device.
-- **`services/`** — the AI-assisted tools:
+- **`ai-tools/`** — the AI-assisted tools:
   - **`graded-reader/`** — writes leveled Chinese books.
   - **`pdf2epub/`** — converts PDFs into clean EPUBs.
-- **`tgbot/`** — a Telegram bot that drives all of the above from your phone.
+- **`tools/tgbot/`** — a Telegram bot that drives all of the above from your phone.
   Optional; nothing else needs it.
-- **`reference/`** — device notes and things for the X3 itself. Special mention
+- **`extras/`** — device notes and things for the X3 itself. Special mention
   to **WenKai**, the Chinese font that makes CrossPoint render hanzi properly,
   plus whatever else I end up adding.
 - **`workspace/`** — one folder per book, inputs and `build/` outputs. **Yours:**
@@ -46,10 +47,10 @@ Each directory has a **`SKILL.md`** that is its real documentation. This guide
 tells you what a thing is for and how to run it; `SKILL.md` tells you how it
 works. `AGENTS.md` at the root is the same map written for a coding agent.
 
-### The services' philosophy
+### The AI tools' philosophy
 
 The builder, the server and the wallpaper maker are plain deterministic tools —
-no model anywhere near them. The two services are where an LLM does the work,
+no model anywhere near them. The two AI tools are where an LLM does the work,
 and there the rule is to let the model do what models are good at, and nothing
 else:
 
@@ -69,7 +70,7 @@ rewrite.
 ### Setup
 
 `epub-builder` and `opds-server` need nothing installed — they're stdlib only,
-run them with plain `python3`. The two services do need packages, and
+run them with plain `python3`. The two AI tools do need packages, and
 `wallpaper-maker` needs Pillow, so make a venv once and install whichever
 you'll use (chapters 3, 4 and 7 name theirs):
 
@@ -111,19 +112,19 @@ glossary, and `annotate.py` marks each glossary word's first appearance with
 its pinyin.
 
 ```bash
-.venv/bin/pip install -r services/graded-reader/requirements.txt
-S=services/graded-reader/scripts
+.venv/bin/pip install -r ai-tools/graded-reader/requirements.txt
+S=ai-tools/graded-reader/scripts
 
 .venv/bin/python $S/validate.py workspace/being-earnest   # grade a book
 .venv/bin/python $S/selftest.py                           # full pipeline check
 ```
 
 Drive it with Claude Code, or with the optional headless runner in
-`services/graded-reader/headless/` against any OpenAI-compatible endpoint. On
+`ai-tools/graded-reader/headless/` against any OpenAI-compatible endpoint. On
 Debian/Ubuntu install `jieba` inside a venv — system setuptools breaks its
 legacy `setup.py`.
 
-Docs: [`services/graded-reader/SKILL.md`](services/graded-reader/SKILL.md)
+Docs: [`ai-tools/graded-reader/SKILL.md`](ai-tools/graded-reader/SKILL.md)
 
 ---
 
@@ -133,7 +134,7 @@ Docs: [`services/graded-reader/SKILL.md`](services/graded-reader/SKILL.md)
 whether a real PDF becomes an EPUB a human finds sound. The committed proof is
 `workspace/alcaldes-encontrados`, a 1793 Spanish entremés, written up with the
 gaps it surfaced in
-[`CONVERSIONS.md`](services/pdf2epub/CONVERSIONS.md).
+[`CONVERSIONS.md`](ai-tools/pdf2epub/CONVERSIONS.md).
 
 A PDF says where ink goes; an EPUB says what the text is. The pipeline recovers
 the second from the first: triage characterises the source, scripts extract and
@@ -142,25 +143,25 @@ emits decisions that scripts apply. The model never bulk-generates — every byt
 traces back to the extraction, residual OCR noise included.
 
 ```bash
-.venv/bin/pip install -r services/pdf2epub/requirements.txt
+.venv/bin/pip install -r ai-tools/pdf2epub/requirements.txt
 # the OCR route also needs the system binary:
 #   apt install tesseract-ocr tesseract-ocr-spa   (or your source language)
 ```
 
-Docs: [`services/pdf2epub/SKILL.md`](services/pdf2epub/SKILL.md) · design and
-open questions: [`DESIGN.md`](services/pdf2epub/DESIGN.md)
+Docs: [`ai-tools/pdf2epub/SKILL.md`](ai-tools/pdf2epub/SKILL.md) · design and
+open questions: [`DESIGN.md`](ai-tools/pdf2epub/DESIGN.md)
 
 ---
 
 ## 5. Building the EPUB
 
-**Tested:** shared by both services, so both self-tests exercise it. Output is
+**Tested:** shared by both AI tools, so both self-tests exercise it. Output is
 deterministic — the same source builds a byte-identical file, which is also how
 regressions get caught.
 
 One builder for everything. Hand-built XHTML/OPF, simple CSS, no embedded fonts
 (the reader can't use them). It also ships the single structural check both
-services rely on: mimetype, manifest⇄zip parity, well-formed XML, links resolve.
+of them rely on: mimetype, manifest⇄zip parity, well-formed XML, links resolve.
 
 ```bash
 python3 epub-builder/scripts/build_epub.py \
@@ -184,8 +185,8 @@ Serves `workspace/*/build/*.epub` as an OPDS catalog the X3 browses directly.
 Build a book and it's on the reader by the next page turn. Stdlib only.
 
 ```bash
-python3 opds-server/scripts/serve_opds.py     # serve workspace/ on :6737
-python3 opds-server/scripts/library.py        # what would be served
+python3 tools/opds-server/scripts/serve_opds.py     # serve workspace/ on :6737
+python3 tools/opds-server/scripts/library.py        # what would be served
 ```
 
 ### On the device
@@ -211,13 +212,13 @@ of the device and not sloppiness.
 
 ### Leaving it running
 
-`opds-server/opds-server.service` is a systemd unit: edit two lines,
+`tools/opds-server/opds-server.service` is a systemd unit: edit two lines,
 `systemctl enable --now opds-server`. The commands and what they do
-are in [`helper-info.txt`](opds-server/helper-info.txt). The unit passes no
+are in [`helper-info.txt`](tools/opds-server/helper-info.txt). The unit passes no
 flags, so under systemd anything non-default belongs in `config.json`. It's
 written for Debian; elsewhere, hand it to your favourite AI.
 
-Docs: [`opds-server/SKILL.md`](opds-server/SKILL.md)
+Docs: [`tools/opds-server/SKILL.md`](tools/opds-server/SKILL.md)
 
 ---
 
@@ -236,9 +237,9 @@ the repo — `finally-some-peace.png` — so a fresh clone has something to conv
 before you've dropped anything in.
 
 ```bash
-.venv/bin/pip install -r wallpaper-maker/requirements.txt
-.venv/bin/python wallpaper-maker/scripts/make_wallpaper.py   # -> .../build/*.bmp
-python3 wallpaper-maker/scripts/push_wallpaper.py            # -> the device
+.venv/bin/pip install -r tools/wallpaper-maker/requirements.txt
+.venv/bin/python tools/wallpaper-maker/scripts/make_wallpaper.py   # -> .../build/*.bmp
+python3 tools/wallpaper-maker/scripts/push_wallpaper.py            # -> the device
 ```
 
 Nothing to configure and nothing to answer: 528×792, greyscale BMP,
@@ -299,8 +300,8 @@ answer for a `.local` name and never mention the reader — read the address off
 the File Transfer screen and pass `--ip 192.168.x.x` once. It's remembered in a
 gitignored file, so the next run finds it on its own.
 
-Docs: [`wallpaper-maker/SKILL.md`](wallpaper-maker/SKILL.md) · device rules:
-[`reference/readers.md`](reference/readers.md)
+Docs: [`tools/wallpaper-maker/SKILL.md`](tools/wallpaper-maker/SKILL.md) · device rules:
+[`extras/readers.md`](extras/readers.md)
 
 ---
 
@@ -309,7 +310,7 @@ Docs: [`wallpaper-maker/SKILL.md`](wallpaper-maker/SKILL.md) · device rules:
 **Tested:** device-confirmed, all four families. Stock firmware shows hanzi as
 tofu boxes and Arabic book text as nothing at all; these render.
 
-Copy a family folder from `reference/fonts/` to the SD card under `/fonts/`,
+Copy a family folder from `extras/fonts/` to the SD card under `/fonts/`,
 power-cycle (fonts are scanned once at boot), then pick it under Settings →
 Reader → Font Family. Or send it over WiFi from the Telegram bot (chapter 9),
 which also checks afterwards that the device really has every byte — the one
@@ -329,11 +330,11 @@ failure the reader cannot tell you about.
   page renders nothing. Four sizes, 1.1 MB. **Device-confirmed 2026-08**: with
   it installed, an Arabic book body renders joined and right-to-left. The
   mechanism, the build command and what each failure mode accuses are in
-  [`reference/readers.md`](reference/readers.md), "Arabic in the book body".
+  [`extras/readers.md`](extras/readers.md), "Arabic in the book body".
 
 Glyphs stream from the SD card, so a big font costs no RAM. Build rules for
 making your own — including the trap where a subset font loads in the picker and
-then silently fails — are in [`reference/readers.md`](reference/readers.md),
+then silently fails — are in [`extras/readers.md`](extras/readers.md),
 along with the rendering verdicts every tool here is shaped by: embedded EPUB
 fonts are ignored, ruby and interlinear pinyin are broken, RAM is ~400 KB.
 
@@ -356,10 +357,10 @@ rename or delete one there. Books, wallpapers and fonts each get a card listing 
 server holds, so anything you ever built can go back on the card in a few taps.
 
 ```bash
-cp tgbot/config.example.json tgbot/config.json    # then add your Telegram id
-printf '%s' '<token from @BotFather>' > tgbot/secrets/telegram.token
-chmod 600 tgbot/secrets/telegram.token
-python3 tgbot/scripts/bot.py
+cp tools/tgbot/config.example.json tools/tgbot/config.json    # then add your Telegram id
+printf '%s' '<token from @BotFather>' > tools/tgbot/secrets/telegram.token
+chmod 600 tools/tgbot/secrets/telegram.token
+python3 tools/tgbot/scripts/bot.py
 ```
 
 Stdlib only — nothing to install. It answers exactly one Telegram user id and
@@ -383,7 +384,7 @@ any bot download a file over 20 MB (drop those in `workspace/inbox/` and tap
 which today is Claude Code reading the pdf2epub skill.
 
 Full documentation, including what each button does and how it talks to the
-rest of the suite: [`tgbot/SKILL.md`](tgbot/SKILL.md).
+rest of the suite: [`tools/tgbot/SKILL.md`](tools/tgbot/SKILL.md).
 
 ---
 
@@ -403,11 +404,11 @@ The code and documentation are **MIT** licensed — see [`LICENSE`](LICENSE).
 Two kinds of bundled content keep their own terms:
 
 - **Fonts**, under the **SIL Open Font License 1.1** — the `.cpfont` families in
-  `reference/fonts/` (from LXGW WenKai, Zilla Slab, Noto CJK) and
-  `reference/covers/IMFellEnglish-Regular.ttf` for cover titles. Notices in
-  [`ATTRIBUTION.md`](reference/fonts/ATTRIBUTION.md),
-  [`OFL.txt`](reference/fonts/OFL.txt) and
-  [`IMFellEnglish-OFL.txt`](reference/covers/IMFellEnglish-OFL.txt).
+  `extras/fonts/` (from LXGW WenKai, Zilla Slab, Noto CJK) and
+  `extras/default-covers/IMFellEnglish-Regular.ttf` for cover titles. Notices in
+  [`ATTRIBUTION.md`](extras/fonts/ATTRIBUTION.md),
+  [`OFL.txt`](extras/fonts/OFL.txt) and
+  [`IMFellEnglish-OFL.txt`](extras/default-covers/IMFellEnglish-OFL.txt).
 - **Sample texts** under `workspace/`, either original here or public domain —
   Oscar Wilde's *The Importance of Being Earnest*, retold in Chinese, and the
   1793 entremés *Los alcaldes encontrados*.

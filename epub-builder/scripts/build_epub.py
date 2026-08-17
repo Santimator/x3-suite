@@ -55,7 +55,7 @@ from typing import Dict, List, Optional, Tuple
 # but mark each glossary word's first occurrence: underlined, or followed by
 # word-level pinyin (猴子hóuzi). Device-tested on the X3: ruby leaks <rt>
 # inline and interlinear's CSS stacking collapses, so plain/gloss-* are the
-# CrossPoint-safe modes (see reference/readers.md).
+# CrossPoint-safe modes (see extras/readers.md).
 # How a `{word|reading}` annotation is *presented*. Presentation is the
 # builder's business; deciding which words carry a reading, and what the
 # reading says, is the calling service's (see FORMAT.md).
