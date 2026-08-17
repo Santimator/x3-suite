@@ -2008,6 +2008,7 @@ class Bot:
 
         if books:
             lines.append("📕 SD root")
+            slim_cache = self.state_dir / "cache" / "slim"
             for item in books:
                 meta = item.get("meta") or {}
                 name = item["label"]
@@ -2017,16 +2018,24 @@ class Bot:
                     name = suite.device_book_name(meta.get("author", ""),
                                                   meta.get("title", item["label"]),
                                                   host=host)
-                    # The slim copy if it survived since queueing, the original
-                    # otherwise — a cache that was cleared must cost a bigger
-                    # upload, never a missing book.
+                    # Slimming belongs to the push, not to the queue: queueing
+                    # only warms the cache. Whatever route a book took to get
+                    # here — queued days ago, cache since cleared, or never
+                    # queued at all — it is slimmed before it goes across.
                     slim = Path(meta["slim"]) if meta.get("slim") else None
-                    source = slim if slim and slim.exists() else Path(item["path"])
+                    if not (slim and slim.exists()):
+                        made = suite.slim_book(Path(item["path"]), slim_cache)
+                        slim = made["path"] if made["used"] else None
+                    source = slim or Path(item["path"])
                     suite.upload_book(host, source, name)
                     done.append(item)
                     lines.append(f"✅ {html.escape(name)}"
                                  + (f" ({human(source.stat().st_size)}, slimmed)"
-                                    if source is slim else ""))
+                                    if slim else ""))
+                    # It has landed, so the copy is rubbish. The cache is for
+                    # the gap between queueing and pushing and nothing else.
+                    if slim:
+                        suite.drop_slim(slim, slim_cache)
                 except Exception as exc:
                     # Deliberately broad. A surprise in one item must not throw
                     # away the whole report — including the wallpapers that
@@ -2060,6 +2069,13 @@ class Bot:
                              f"{html.escape(str(exc)[:100])}")
 
         self.queue.remove_many(i["id"] for i in done)
+        # Whatever is left in the cache now belongs to no queued book — pushed,
+        # or dropped from the queue without ever being sent. Either way it is
+        # not a store, so it does not keep them.
+        suite.prune_slim_cache(
+            self.state_dir / "cache" / "slim",
+            {(i.get("meta") or {}).get("slim") for i in self.queue.items()
+             if (i.get("meta") or {}).get("slim")})
         self.notes.set("last_push", datetime.now().strftime("%Y-%m-%d %H:%M"))
         remaining = len(self.queue)
         lines.append(f"\n{remaining} still queued." if remaining

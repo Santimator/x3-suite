@@ -79,17 +79,24 @@ entry carries the slim copy alongside the original it still names. A shop-bought
 book is routinely an order of magnitude smaller afterwards, with every word,
 filename and nav link identical.
 
-Three deliberate details. It happens **at queue time**, because that is the
-server's own work and the push should be nothing but bytes over the wire.
-The result is cached by content hash, so the same book queued twice is only
-slimmed once — the slimmer is deterministic, which is what makes that safe.
-And if the saving is under 5% it is dropped and the original is pushed: books
-built by this suite carry no fonts and an already-sized cover, so a second
-near-identical file would be clutter for nothing.
+**The guarantee belongs to the push, not to the queue.** Queueing slims early
+so the push is nothing but bytes over the wire, but a book arriving at the push
+without a usable copy — cache cleared, queued before this existed, never queued
+at all — is slimmed right there. There is no route through this bot that puts a
+fat book on the card.
 
-If the cache is cleaned out between queueing and pushing, the push falls back
-to the original. A missing cache must cost a bigger upload, never a missing
-book.
+The copy is **deleted once it lands**. The cache is scratch space for the gap
+between queueing and pushing, not a store: after a push it holds only the
+copies still-queued books point at, and everything else goes. Deleting is
+guarded on the cache directory itself, because `slim_book` hands back *the
+original* when slimming is not worth it, and unlinking that would take a book
+out of your library.
+
+Two more details worth knowing. The copy is cached by content hash, so a book
+queued twice is slimmed once — safe precisely because the slimmer is
+deterministic. And a saving under 5% is discarded and the original pushed:
+books built by this suite carry no fonts and an already-sized cover, so a
+second near-identical file would be clutter for nothing.
 
 **The catalog is untouched by all this, on purpose.** `opds-server` serves
 originals, because an OPDS feed is read by anything — phones, laptops, other

@@ -243,6 +243,24 @@ def check_queue(tmp: Path) -> None:
     check("... and lands where the catalog scans",
           (bot.workspace / "library" / "incoming.epub").exists())
 
+    print("\nthe slim cache deletes copies and nothing else:")
+    cache = tmp / "slimcache"; cache.mkdir(parents=True, exist_ok=True)
+    copy = cache / "abc.epub"; copy.write_bytes(b"slim")
+    library_book = tmp / "library-book.epub"; library_book.write_bytes(b"a real book")
+    check("a copy inside the cache is deleted",
+          suite.drop_slim(copy, cache) and not copy.exists())
+    check("a book outside it is refused, not deleted",
+          suite.drop_slim(library_book, cache) is False and library_book.exists(),
+          "slim_book hands back the original when slimming is not worth it")
+    check("... and so is a path that walks out of the cache",
+          suite.drop_slim(cache / ".." / "library-book.epub", cache) is False
+          and library_book.exists())
+    keep, junk = cache / "keep.epub", cache / "junk.epub"
+    keep.write_bytes(b"x"); junk.write_bytes(b"y")
+    check("pruning keeps what the queue still points at",
+          suite.prune_slim_cache(cache, {str(keep)}) == 1
+          and keep.exists() and not junk.exists())
+
     print("\na book queued for the card is slimmed on the way:")
     bot, tg = make_bot(tmp)
     fat = bot.workspace / "library" / "fat.epub"
@@ -281,15 +299,40 @@ def check_queue(tmp: Path) -> None:
               uploaded == [slim_out], str(uploaded))
         check("... and the original is untouched on the server",
               fat.exists() and fat.stat().st_size == 50_004)
+        check("... and the slim copy is gone once it has landed",
+              not slim_out.exists(),
+              "the cache is for the gap between queueing and pushing")
 
-        # A cache cleared between queueing and pushing must cost bytes, not a book.
+        # The rule is about the push, not the queue: a book arriving at the
+        # push without a usable copy is slimmed there, never sent fat.
         uploaded.clear()
         bot.queue.add("book", str(fat), label="Fat",
                       meta={"title": "Fat", "author": "A", "slim": str(slim_out)})
-        slim_out.unlink()
         bot.do_push(bot.user_id)
-        check("a slim copy that has been cleaned up falls back to the original",
-              uploaded == [fat], str(uploaded))
+        check("a cache cleared before the push is rebuilt, not given up on",
+              uploaded == [slim_out], str(uploaded))
+        check("... and cleaned up again afterwards", not slim_out.exists())
+
+        # Queued by something that never slimmed at all — the same guarantee.
+        uploaded.clear()
+        bot.queue.add("book", str(fat), label="Fat",
+                      meta={"title": "Fat", "author": "A"})
+        bot.do_push(bot.user_id)
+        check("a book queued with no slim copy at all is slimmed at push time",
+              uploaded == [slim_out], str(uploaded))
+
+        # Slimming that saves nothing hands back the original, and that must
+        # never be mistaken for a cache entry and deleted.
+        uploaded.clear()
+        suite.slim_book = lambda src, cache: {"path": src, "before": 10,
+                                              "after": 10, "saved": 0,
+                                              "used": False}
+        bot.queue.add("book", str(fat), label="Fat",
+                      meta={"title": "Fat", "author": "A"})
+        bot.do_push(bot.user_id)
+        check("a book not worth slimming is pushed as it is", uploaded == [fat],
+              str(uploaded))
+        check("... and is emphatically not deleted", fat.exists())
     finally:
         # Restoring every one of them matters: a stub left behind here made the
         # book-naming checks two sections later fail against a name this

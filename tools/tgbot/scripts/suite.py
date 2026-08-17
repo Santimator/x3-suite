@@ -492,6 +492,41 @@ def slim_book(src: Path, cache_dir: Path) -> dict:
             "saved": before - after, "used": True}
 
 
+def drop_slim(path: Path, cache_dir: Path) -> bool:
+    """Delete a slimmed copy, and refuse to delete anything else.
+
+    The slim cache is scratch space that exists between queueing a book and
+    pushing it, so a pushed book's copy is rubbish the moment it lands. The
+    guard is the whole of this function's job: `slim_book` hands back the
+    *original* when slimming was not worth it, and unlinking that would delete
+    a book out of the user's library.
+    """
+    path, cache_dir = Path(path).resolve(), Path(cache_dir).resolve()
+    if cache_dir not in path.parents:
+        return False
+    path.unlink(missing_ok=True)
+    return True
+
+
+def prune_slim_cache(cache_dir: Path, keep) -> int:
+    """Leave only the copies the queue still refers to.
+
+    Anything else is a book that was pushed, or one dropped from the queue
+    without ever being sent. Either way the cache is not a store: it holds work
+    in progress and nothing more.
+    """
+    cache_dir = Path(cache_dir)
+    if not cache_dir.is_dir():
+        return 0
+    wanted = {str(Path(k).resolve()) for k in keep}
+    gone = 0
+    for f in cache_dir.glob("*.epub"):
+        if str(f.resolve()) not in wanted:
+            f.unlink(missing_ok=True)
+            gone += 1
+    return gone
+
+
 def upload_book(host: str, path: Path, name: str) -> None:
     """Put a book on the SD root, where the reader looks for books.
 
