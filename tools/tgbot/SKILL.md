@@ -527,6 +527,35 @@ you must edit locally is a file that fights every pull.
 command, the day-to-day ones, what a `git pull` does and does not need, and the
 handful of failures worth recognising on sight.
 
+### If you pulled the move to `tools/` (2026-08)
+
+This unit used to live at `tgbot/`. **git moves what it tracks and leaves
+everything else exactly where it was** — and everything that matters here is
+gitignored on purpose: your `config.json`, your token, and the delivery queue.
+So an older clone ends up with a working bot's worth of files in the old
+folder, a bot looking in the new one, and a systemd unit still pointing at
+`tgbot/scripts/bot.py`. Three moves and a re-install:
+
+```bash
+cd /path/to/x3-suite
+mv tgbot/config.json tools/tgbot/                        # your settings
+mv tgbot/secrets/telegram.token tools/tgbot/secrets/     # your token
+mv tgbot/state/* tools/tgbot/state/ 2>/dev/null          # the delivery queue
+mv wallpaper-maker/last-device.json tools/wallpaper-maker/ 2>/dev/null
+mv opds-server/config.json tools/opds-server/ 2>/dev/null
+rmdir -p tgbot/secrets tgbot/state wallpaper-maker opds-server 2>/dev/null
+
+sed -e "s|CHANGEME_REPO|$PWD|g" -e "s|CHANGEME_USER|$(id -un)|g" \
+    tools/tgbot/tgbot.service | sudo tee /etc/systemd/system/tgbot.service
+sudo systemctl daemon-reload && sudo systemctl restart tgbot
+```
+
+The queue is the one with anything to lose: it holds whatever was waiting for
+the reader. Everything else is a setting you could retype. Starting the bot
+without moving them says so by name rather than reporting "no config" — but it
+cannot move them for you, because a program that relocates your token on its
+own initiative is worse than one that asks.
+
 ## How it talks to the rest of the suite
 
 Two kinds of call, and the difference is deliberate.

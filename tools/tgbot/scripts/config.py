@@ -31,7 +31,11 @@ import os
 from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parents[1]      # tools/tgbot/
-REPO_ROOT = SKILL_DIR.parent
+# Two levels, not one: this unit lives under tools/. Deriving the repo root
+# by walking up a fixed number of directories is exactly what broke when
+# tgbot/ became tools/tgbot/, and it broke silently — every relative path
+# in the config resolved one directory too high.
+REPO_ROOT = SKILL_DIR.parents[1]
 DEFAULT_CONFIG = SKILL_DIR / "config.json"
 
 DEFAULTS = {
@@ -68,6 +72,24 @@ def _merge(base: dict, over: dict) -> dict:
 def load(path: Path | None = None) -> dict:
     path = Path(path) if path else DEFAULT_CONFIG
     raw = {}
+    if not path.exists() and path == DEFAULT_CONFIG:
+        # This unit moved to tools/tgbot/ in 2026-08. git leaves *ignored* files
+        # where they were, so an older clone still has its config, token and
+        # queue sitting in the old folder while the bot looks in the new one —
+        # and "no config" is the least useful way to say that.
+        stranded = REPO_ROOT / "tgbot" / "config.json"
+        if stranded.exists():
+            raise ConfigError(
+                f"your configuration is still in the old location.\n"
+                f"  found:  {stranded}\n"
+                f"  wanted: {path}\n\n"
+                f"tgbot/ moved to tools/tgbot/, and git does not move the "
+                f"gitignored files it never tracked. Move them across:\n"
+                f"  mv tgbot/config.json tools/tgbot/\n"
+                f"  mv tgbot/secrets/telegram.token tools/tgbot/secrets/ "
+                f"2>/dev/null\n"
+                f"  mv tgbot/state/* tools/tgbot/state/ 2>/dev/null\n"
+                f"then re-install the unit file — it names the old path too.")
     if path.exists():
         text = path.read_text(encoding="utf-8")
         try:

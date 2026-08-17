@@ -88,6 +88,18 @@ Port, library roots and auth all stay in `config.json` — the unit doesn't
 repeat them, so changing any of them is `systemctl restart opds-server` and
 nothing more.
 
+**If you pulled the move to `tools/` (2026-08)**, this unit moved from
+`opds-server/` and your `config.json` and `secrets/` did not come with it — git
+moves what it tracks, and those are gitignored by design. Move them across and
+re-install the unit, which names the old path:
+
+```bash
+mv opds-server/config.json tools/opds-server/ 2>/dev/null
+mv opds-server/secrets/* tools/opds-server/secrets/ 2>/dev/null
+sudo cp tools/opds-server/opds-server.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl restart opds-server
+```
+
 Written for Debian: `/usr/bin/python3`, `multi-user.target`. On another distro
 or init system, hand the file to your favourite AI and ask for the equivalent —
 it's twenty declarative lines.

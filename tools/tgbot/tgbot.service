@@ -38,7 +38,7 @@ ProtectSystem=strict
 ProtectHome=read-only
 ReadWritePaths=-CHANGEME_REPO/workspace
 ReadWritePaths=-CHANGEME_REPO/tools/tgbot/state
-ReadWritePaths=-CHANGEME_REPO/wallpaper-maker
+ReadWritePaths=-CHANGEME_REPO/tools/wallpaper-maker
 
 PrivateTmp=yes
 NoNewPrivileges=yes

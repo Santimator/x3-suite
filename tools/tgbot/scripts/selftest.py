@@ -1310,6 +1310,17 @@ def check_secrets_outside(tmp: Path) -> None:
     check("the outside file beats a leftover id in the config",
           conf.load(repo_cfg)["telegram"]["user_id"] == 777)
 
+    # The repo root is walked to by counting directories, so moving this unit
+    # deeper silently resolved every relative path one level too high. It did
+    # exactly that when tgbot/ became tools/tgbot/, and nothing here noticed.
+    check("REPO_ROOT is the actual repo root",
+          (conf.REPO_ROOT / "AGENTS.md").exists()
+          and (conf.REPO_ROOT / "epub-builder").is_dir(), str(conf.REPO_ROOT))
+    check("... so a default relative path lands in the repo, not beside it",
+          conf.load(tmp / "nothing-here.json")["workspace_path"]
+          == conf.REPO_ROOT / "workspace",
+          str(conf.load(tmp / "nothing-here.json")["workspace_path"]))
+
     # A config moved wholesale out of the repo must resolve its own relative
     # paths, not paths relative to this source file.
     away = tmp / "away"
