@@ -63,6 +63,30 @@ DAY TO DAY
   sudo journalctl -u opds-server --since today   just today's
 
 
+WHEN IT WILL NOT START
+----------------------
+
+Two failures account for nearly all of them, and systemd names both in
+`systemctl status opds-server` as an exit code rather than a sentence:
+
+  status=217/USER
+
+      The unit still contains the literal word CHANGEME — it was copied
+      instead of being filled in. There is no user called CHANGEME, so systemd
+      gives up before running anything. Re-run the install command above; it
+      substitutes your account and clone path.
+
+  status=203/EXEC
+
+      ExecStart names a file that is not there. Almost always a pull that moved
+      the script — the units under /etc/systemd/system are copies and do not
+      follow the repo. Same fix: re-run the install command.
+
+Neither leaves a Python traceback in the log, because Python never ran. If the
+service is up and the catalog still refuses, that is a different problem and
+the server's own log has it — see SKILL.md, "When the device says it failed".
+
+
 SETTINGS
 --------
 
