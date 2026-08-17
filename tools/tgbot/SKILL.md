@@ -71,6 +71,33 @@ Copying it onto the card *as well* is then an offer, not a default, and it is
 safe because the upload borrows the OPDS client's own naming (see below). Push
 and pull converge on one file rather than racing to make two.
 
+**The server keeps the book you were given; the reader gets one it can use.**
+Queueing a book for the card runs it through
+[`tools/epub-slimmer/`](../epub-slimmer/SKILL.md) first — embedded fonts out
+(the renderer ignores them), images to grayscale at panel size — and the queue
+entry carries the slim copy alongside the original it still names. A shop-bought
+book is routinely an order of magnitude smaller afterwards, with every word,
+filename and nav link identical.
+
+Three deliberate details. It happens **at queue time**, because that is the
+server's own work and the push should be nothing but bytes over the wire.
+The result is cached by content hash, so the same book queued twice is only
+slimmed once — the slimmer is deterministic, which is what makes that safe.
+And if the saving is under 5% it is dropped and the original is pushed: books
+built by this suite carry no fonts and an already-sized cover, so a second
+near-identical file would be clutter for nothing.
+
+If the cache is cleaned out between queueing and pushing, the push falls back
+to the original. A missing cache must cost a bigger upload, never a missing
+book.
+
+**The catalog is untouched by all this, on purpose.** `opds-server` serves
+originals, because an OPDS feed is read by anything — phones, laptops, other
+readers — and degrading every book to suit one 528×792 panel would be the wrong
+trade. So a book fetched by the reader *over OPDS* is the fat one. That
+asymmetry is a choice, not an oversight: the bot is the usual route, and a few
+MB on a 32 GB card is not a problem worth a second catalog.
+
 ## What the buttons do
 
 ```

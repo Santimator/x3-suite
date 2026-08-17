@@ -243,6 +243,61 @@ def check_queue(tmp: Path) -> None:
     check("... and lands where the catalog scans",
           (bot.workspace / "library" / "incoming.epub").exists())
 
+    print("\na book queued for the card is slimmed on the way:")
+    bot, tg = make_bot(tmp)
+    fat = bot.workspace / "library" / "fat.epub"
+    fat.parent.mkdir(parents=True, exist_ok=True)
+    fat.write_bytes(b"PK\x03\x04" + b"x" * 50_000)
+    slim_out = bot.state_dir / "cache" / "slim" / "pretend.epub"
+
+    def fake_slim(src, cache_dir):
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        slim_out.write_bytes(b"PK\x03\x04" + b"x" * 5_000)
+        return {"path": slim_out, "before": 50_000, "after": 5_000,
+                "saved": 45_000, "used": True}
+
+    original_slim = suite.slim_book
+    uploaded = []
+    original_upload = suite.upload_book
+    original_name = suite.device_book_name
+    try:
+        suite.slim_book = fake_slim
+        token = bot.tokens.put({"path": str(fat), "title": "Fat", "author": "A"})
+        tg.sent.clear()
+        bot.handle(cb(f"bq:{token}"))
+        item = bot.queue.items()[0]
+        check("the queue entry still names the original",
+              item["path"] == str(fat), str(item))
+        check("... and carries the slim copy alongside it",
+              item["meta"].get("slim") == str(slim_out), str(item["meta"]))
+        check("... and the saving is reported when it is queued",
+              "Slimmed" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+
+        suite.upload_book = lambda host, path, name: uploaded.append(Path(path))
+        bot.device_host = lambda: ("10.0.0.5", {})
+        suite.device_book_name = lambda a, t, host=None: "A - Fat.epub"
+        bot.do_push(bot.user_id)
+        check("the push sends the slim copy, not the original",
+              uploaded == [slim_out], str(uploaded))
+        check("... and the original is untouched on the server",
+              fat.exists() and fat.stat().st_size == 50_004)
+
+        # A cache cleared between queueing and pushing must cost bytes, not a book.
+        uploaded.clear()
+        bot.queue.add("book", str(fat), label="Fat",
+                      meta={"title": "Fat", "author": "A", "slim": str(slim_out)})
+        slim_out.unlink()
+        bot.do_push(bot.user_id)
+        check("a slim copy that has been cleaned up falls back to the original",
+              uploaded == [fat], str(uploaded))
+    finally:
+        # Restoring every one of them matters: a stub left behind here made the
+        # book-naming checks two sections later fail against a name this
+        # section invented.
+        suite.slim_book = original_slim
+        suite.upload_book = original_upload
+        suite.device_book_name = original_name
+
 
 # -- 4. a push that finds nothing -----------------------------------------
 

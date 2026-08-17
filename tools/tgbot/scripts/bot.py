@@ -435,13 +435,30 @@ class Bot:
             book = self.tokens.get(rest)
             if not book:
                 return self.stale(chat)
-            self.queue.add("book", book["path"],
-                           label=book["title"][:40], meta=book)
-            return self.say(
-                chat,
-                f"📕 queued for the card — {len(self.queue)} waiting.\n"
-                f"It stays on the catalog either way.",
-                [[("📲 Push now", "push:ask"), ("🏠 Menu", "m:main")]])
+
+            def work():
+                # Slimmed at queue time, not at push time: this is the server's
+                # own work, and doing it now means the push is only bytes over
+                # the wire. The original is never touched — the catalog goes on
+                # serving the book you were given.
+                meta = dict(book)
+                slimmed = suite.slim_book(Path(book["path"]),
+                                          self.state_dir / "cache" / "slim")
+                note = ""
+                if slimmed["used"]:
+                    meta["slim"] = str(slimmed["path"])
+                    note = (f"\nSlimmed for the reader: "
+                            f"{human(slimmed['before'])} → "
+                            f"{human(slimmed['after'])}. The catalog keeps the "
+                            f"original.")
+                self.queue.add("book", book["path"],
+                               label=book["title"][:40], meta=meta)
+                self.say(
+                    chat,
+                    f"📕 queued for the card — {len(self.queue)} waiting."
+                    f"{note}\nIt stays on the catalog either way.",
+                    [[("📲 Push now", "push:ask"), ("🏠 Menu", "m:main")]])
+            return self.submit(chat, work)
 
         if head == "qdel":
             self.queue.remove(rest)
@@ -2000,9 +2017,16 @@ class Bot:
                     name = suite.device_book_name(meta.get("author", ""),
                                                   meta.get("title", item["label"]),
                                                   host=host)
-                    suite.upload_book(host, Path(item["path"]), name)
+                    # The slim copy if it survived since queueing, the original
+                    # otherwise — a cache that was cleared must cost a bigger
+                    # upload, never a missing book.
+                    slim = Path(meta["slim"]) if meta.get("slim") else None
+                    source = slim if slim and slim.exists() else Path(item["path"])
+                    suite.upload_book(host, source, name)
                     done.append(item)
-                    lines.append(f"✅ {html.escape(name)}")
+                    lines.append(f"✅ {html.escape(name)}"
+                                 + (f" ({human(source.stat().st_size)}, slimmed)"
+                                    if source is slim else ""))
                 except Exception as exc:
                     # Deliberately broad. A surprise in one item must not throw
                     # away the whole report — including the wallpapers that
