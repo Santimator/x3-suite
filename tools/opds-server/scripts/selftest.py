@@ -159,6 +159,21 @@ def main() -> int:
         root.mkdir()
         build_fixture_library(root)
 
+        # Every case below hands the scanner an explicit root, which is why the
+        # default one could point at a directory that does not exist — after
+        # this unit moved under tools/ — while every check here still passed
+        # and the catalog served nothing.
+        print("0. the default library root is inside the repo")
+        import config as server_config
+        all_ok &= check("REPO_ROOT holds AGENTS.md and epub-builder",
+                        (server_config.REPO_ROOT / "AGENTS.md").exists()
+                        and (server_config.REPO_ROOT / "epub-builder").is_dir(),
+                        str(server_config.REPO_ROOT))
+        all_ok &= check("the default root resolves to the repo's workspace/",
+                        server_config.load_config()["library_roots"]
+                        == [server_config.REPO_ROOT / "workspace"],
+                        str(server_config.load_config()["library_roots"]))
+
         print("1. library scan")
         books = library.scan([root], [])
         all_ok &= check(f"found {len(FIXTURES)} books", len(books) == len(FIXTURES),

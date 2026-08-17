@@ -1316,6 +1316,23 @@ def check_secrets_outside(tmp: Path) -> None:
     check("REPO_ROOT is the actual repo root",
           (conf.REPO_ROOT / "AGENTS.md").exists()
           and (conf.REPO_ROOT / "epub-builder").is_dir(), str(conf.REPO_ROOT))
+
+    # A config written before the move names tgbot/state, which is now outside
+    # everything systemd lets the bot write to — it fails as "Read-only file
+    # system" on a path that reads as perfectly normal.
+    stale_cfg = tmp / "stale.json"
+    stale_cfg.write_text(json.dumps({"telegram": {"user_id": 9},
+                                     "state_dir": "tgbot/state",
+                                     "workspace": "workspace"}))
+    loaded = conf.load(stale_cfg)
+    check("a config naming the old tgbot/state is corrected, not obeyed",
+          loaded["state_path"] == conf.REPO_ROOT / "tools" / "tgbot" / "state",
+          str(loaded["state_path"]))
+    check("... and says so at startup rather than silently",
+          any("moved to" in w for w in conf.warnings(loaded)),
+          str(conf.warnings(loaded)))
+    check("... while a path that exists is left exactly as written",
+          conf.load(stale_cfg)["workspace_path"] == conf.REPO_ROOT / "workspace")
     check("... so a default relative path lands in the repo, not beside it",
           conf.load(tmp / "nothing-here.json")["workspace_path"]
           == conf.REPO_ROOT / "workspace",

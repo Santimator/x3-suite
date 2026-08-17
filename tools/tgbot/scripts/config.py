@@ -105,6 +105,12 @@ def load(path: Path | None = None) -> dict:
     cfg["secrets_path"] = _secrets_dir(cfg)
 
     cfg["telegram"]["user_id"] = _resolve_user_id(cfg, path)
+    notes = []
+    for key in ("workspace", "state_dir"):
+        cfg[key], note = _relocate(str(cfg[key]))
+        if note:
+            notes.append(note)
+    cfg["_relocated"] = notes
     cfg["workspace_path"] = _abs(cfg["workspace"])
     cfg["state_path"] = _abs(cfg["state_dir"])
     return cfg
@@ -136,6 +142,31 @@ def _json_complaint(path: Path, text: str, exc: json.JSONDecodeError) -> str:
     return "\n".join(out)
 
 
+# Where each unit used to live, before the 2026-08 move into tools/. A config
+# written before then names the old place, and the old place is now outside
+# everything the systemd unit is allowed to write to — which surfaces as
+# "Read-only file system" on a path that looks perfectly reasonable.
+MOVED = ("tgbot/", "wallpaper-maker/", "opds-server/")
+
+
+def _relocate(value: str) -> tuple:
+    """(path, note). Rewrite a stale relative path into the unit's new home.
+
+    Corrected rather than refused: this is a service, and a bot that will not
+    start is worse than one that says what it fixed. The rewrite only happens
+    when the old path is gone *and* the new one exists, so a deliberate folder
+    of that name is never quietly redirected.
+    """
+    if Path(value).is_absolute() or not value.startswith(MOVED):
+        return value, None
+    if (REPO_ROOT / value).exists() or not (REPO_ROOT / "tools" / value).exists():
+        return value, None
+    return f"tools/{value}", (
+        f"config points at <code>{value}</code>, which moved to "
+        f"<code>tools/{value}</code> in 2026-08 — using the new path. "
+        f"Edit config.json to silence this.")
+
+
 def _abs(value: str) -> Path:
     p = Path(value)
     return p if p.is_absolute() else (REPO_ROOT / p)
@@ -155,7 +186,7 @@ def warnings(cfg: dict) -> list:
     Kept separate from loading so the checks can be read as a list and tested
     as one, and so a permissions grumble never stops a bot from starting.
     """
-    out = []
+    out = list(cfg.get("_relocated") or [])
     secrets = cfg.get("secrets_path")
     if secrets and inside(REPO_ROOT, secrets):
         out.append(f"secrets_dir ({secrets}) is inside the repo — anything with "

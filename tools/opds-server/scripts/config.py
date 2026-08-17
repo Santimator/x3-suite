@@ -24,7 +24,11 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 SERVER_DIR = Path(__file__).resolve().parent.parent   # tools/opds-server/
-REPO_ROOT = SERVER_DIR.parent
+# Two levels up, because this unit lives under tools/. It used to be one,
+# and when opds-server/ became tools/opds-server/ the default library root
+# quietly became tools/workspace — a directory that does not exist, so the
+# catalog served nothing and said nothing.
+REPO_ROOT = SERVER_DIR.parents[1]
 DEFAULT_CONFIG = SERVER_DIR / "config.json"
 
 DEFAULTS: Dict = {
