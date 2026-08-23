@@ -3405,24 +3405,31 @@ class Bot:
         # explicit "wallpaper" test because queues written before fonts and
         # books existed carry entries with no kind at all.
         walls = [i for i in live if i.get("kind") not in ("book", "font")]
-        # The reader is there and the work has started. Between here and the
-        # report is a quiet stretch with no output at all, so say what is about
-        # to happen and in what order before it starts.
-        parts = []
-        if walls:
-            parts.append(f"{len(walls)} wallpaper(s)")
-        if books:
-            parts.append(f"{len(books)} book(s)")
-        if fonts:
-            parts.append(f"{len(fonts)} font family(ies)")
-        self.say(chat, f"📲 Found it at <code>{html.escape(host)}</code>.\n"
-                       f"Sending {' and '.join(parts)} — keep the reader on that "
-                       f"screen.")
-
         lines = [f"📲 {host}"]
+        progress_message_id = None
+
+        def show_progress(current="", keyboard=None):
+            """Build the existing final report in place as files land."""
+            nonlocal progress_message_id
+            text = "\n".join(lines + ([current] if current else []))
+            try:
+                sent = self.panel(chat, progress_message_id, text, keyboard)
+                if sent and sent.get("message_id"):
+                    progress_message_id = sent["message_id"]
+            except Exception as exc:
+                # A status edit must never change whether a transfer succeeds.
+                log("push progress failed:", str(exc))
+
         done = []
 
         if walls:
+            try:
+                total = human(sum(Path(i["path"]).stat().st_size for i in walls))
+            except OSError:
+                total = ""
+            what = (html.escape(Path(walls[0]["path"]).name)
+                    if len(walls) == 1 else f"{len(walls)} wallpapers")
+            show_progress(f"📤 {what}" + (f" ({total})" if total else ""))
             report = suite.push([i["path"] for i in walls], host=host)
             landed = {r["name"] for r in report.get("items", []) if r.get("ok")}
             done += [i for i in walls if Path(i["path"]).name in landed]
@@ -3435,6 +3442,7 @@ class Bot:
                                 else f" — {html.escape(str(r.get('error'))[:80])}"))
             if report.get("sleep_mode_set"):
                 lines.append("Sleep screen set to Custom.")
+            show_progress()
 
         if books:
             lines.append("📕 SD root")
@@ -3457,6 +3465,12 @@ class Bot:
                         made = suite.slim_book(Path(item["path"]), slim_cache)
                         slim = made["path"] if made["used"] else None
                     source = slim or Path(item["path"])
+                    try:
+                        amount = human(source.stat().st_size)
+                    except OSError:
+                        amount = ""
+                    show_progress(f"📤 {html.escape(name)}"
+                                  + (f" ({amount})" if amount else ""))
                     suite.upload_book(host, source, name)
                     done.append(item)
                     lines.append(f"✅ {html.escape(name)}"
@@ -3473,6 +3487,7 @@ class Bot:
                     # the end of this method.
                     lines.append(f"❌ {html.escape(name)} — "
                                  f"{html.escape(str(exc)[:100])}")
+                show_progress()
 
         # Fonts last: a family is the slow item, and the quick things should
         # already be on the card by the time it starts. What a family *is* is
@@ -3485,8 +3500,11 @@ class Bot:
             if not family:
                 lines.append(f"❌ {html.escape(name)} — no longer in "
                              f"extras/fonts/")
+                show_progress()
                 continue
             try:
+                show_progress(f"📤 {html.escape(name)} "
+                              f"({human(family['bytes'])})")
                 landed, report = self.push_font_family(chat, host, family)
                 lines += report
                 if landed:
@@ -3497,6 +3515,7 @@ class Bot:
                 # items are still counting on.
                 lines.append(f"❌ {html.escape(name)} — "
                              f"{html.escape(str(exc)[:100])}")
+            show_progress()
 
         self.queue.remove_many(i["id"] for i in done)
         # Whatever is left in the cache now belongs to no queued book — pushed,
@@ -3511,7 +3530,7 @@ class Bot:
         lines.append(f"\n{remaining} still queued." if remaining
                      else "\nQueue empty. Leave the File Transfer screen and "
                           "let it sleep.")
-        self.say(chat, "\n".join(lines), [[("🏠 Menu", "m:main")]])
+        show_progress(keyboard=[[("🏠 Menu", "m:main")]])
 
 
 def main(argv=None) -> int:

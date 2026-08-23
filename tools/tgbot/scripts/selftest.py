@@ -453,6 +453,53 @@ def check_push_is_all_or_nothing(tmp: Path) -> None:
     finally:
         suite.push = original
 
+    print("\ntwo books build one live push report:")
+    bot, tg = make_bot(tmp)
+    for title in ("Alpha", "Beta"):
+        path = bot.workspace / f"{title}.epub"
+        path.write_bytes(b"PK\x03\x04")
+        bot.queue.add("book", str(path), title,
+                      meta={"author": "A", "title": title})
+
+    original_slim = suite.slim_book
+    original_upload = suite.upload_book
+    original_name = suite.device_book_name
+    during_upload = []
+    try:
+        bot.device_host = lambda: ("10.0.0.5", {})
+        suite.slim_book = lambda src, cache: {
+            "path": Path(src), "before": 4, "after": 4,
+            "saved": 0, "used": False,
+        }
+        suite.device_book_name = lambda author, title, host=None: f"{title}.epub"
+
+        def upload(host, path, name):
+            during_upload.append((name, tg.sent[-1]["text"]))
+
+        suite.upload_book = upload
+        bot.do_push(bot.user_id)
+
+        new_messages = [sent for sent in tg.sent if not sent.get("edited")]
+        edit_ids = {sent["edited"] for sent in tg.sent if sent.get("edited")}
+        check("the first book starts one progress message",
+              len(new_messages) == 1
+              and "📤 Alpha.epub" in during_upload[0][1], str(tg.sent))
+        check("the same message ticks the first book before starting the second",
+              "✅ Alpha.epub" in during_upload[1][1]
+              and "📤 Beta.epub" in during_upload[1][1]
+              and len(edit_ids) == 1, str(during_upload))
+        expected = ("📲 10.0.0.5\n📕 SD root\n✅ Alpha.epub\n✅ Beta.epub"
+                    "\n\nQueue empty. Leave the File Transfer screen and let it sleep.")
+        check("its last edit is exactly the existing final summary",
+              tg.sent[-1]["text"] == expected, tg.sent[-1]["text"])
+        check("progress does not change transfer order or queue draining",
+              [name for name, _ in during_upload] == ["Alpha.epub", "Beta.epub"]
+              and len(bot.queue) == 0, str(during_upload))
+    finally:
+        suite.slim_book = original_slim
+        suite.upload_book = original_upload
+        suite.device_book_name = original_name
+
     print("\na queued file that vanished from disk:")
     bot, tg = make_bot(tmp)
     bot.queue.add("wallpaper", str(bot.workspace / "never-existed.bmp"), "ghost")
