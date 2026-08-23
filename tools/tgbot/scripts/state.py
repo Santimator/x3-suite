@@ -35,9 +35,9 @@ def _write_atomic(path: Path, payload) -> None:
 class Queue:
     """Things waiting to be pushed to the device, in the order they arrived.
 
-    Only device-bound work belongs here. Books never do — the X3 pulls those
-    from the OPDS catalog by itself, so a book in a delivery queue would be a
-    category error waiting to become a duplicate on the SD card.
+    Only device-bound work belongs here. A book does only after the user asks
+    for a card copy; its metadata makes that pushed copy use the same filename
+    the OPDS client would, so the two delivery routes converge.
     """
 
     def __init__(self, path: Path):
@@ -86,6 +86,29 @@ class Queue:
     def remove_many(self, ids) -> None:
         ids = set(ids)
         _write_atomic(self.path, [i for i in self._read() if i["id"] not in ids])
+
+    def remap_books(self, replacements: dict) -> int:
+        """Follow catalog-only renames without losing queued device work.
+
+        `replacements` maps an old path to the freshly scanned book record at
+        its new path. The slim cache is content-addressed and remains valid;
+        only the original path and catalog metadata change.
+        """
+        items = self._read()
+        changed = 0
+        for item in items:
+            if item.get("kind") != "book" or item.get("path") not in replacements:
+                continue
+            book = replacements[item["path"]]
+            item["path"] = book["path"]
+            item["label"] = (book.get("title") or Path(book["path"]).stem)[:40]
+            meta = dict(item.get("meta") or {})
+            meta.update(book)
+            item["meta"] = meta
+            changed += 1
+        if changed:
+            _write_atomic(self.path, items)
+        return changed
 
 
 class Notes:

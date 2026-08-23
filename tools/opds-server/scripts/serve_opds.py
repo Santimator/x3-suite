@@ -241,6 +241,10 @@ class OpdsHandler(BaseHTTPRequestHandler):
             self._send_xml(self.authors_feed(), feeds.NAV_TYPE)
         elif len(tail) == 2 and tail[0] == "authors":
             self._author_feed(tail[1], page)
+        elif tail == ["series"]:
+            self._send_xml(self.series_feed(), feeds.NAV_TYPE)
+        elif len(tail) == 2 and tail[0] == "series":
+            self._series_books_feed(tail[1], page)
         elif tail == ["languages"]:
             self._send_xml(self.languages_feed(), feeds.NAV_TYPE)
         elif len(tail) == 2 and tail[0] == "languages":
@@ -266,6 +270,7 @@ class OpdsHandler(BaseHTTPRequestHandler):
         base = self.base_url()
         books = self.catalog.books()
         authors = library.group_by_author(books)
+        series = library.group_by_series(books)
         languages = library.group_by_language(books)
 
         sections = [
@@ -275,6 +280,8 @@ class OpdsHandler(BaseHTTPRequestHandler):
              f"{base}/opds/all", feeds.ACQ_TYPE),
             ("authors", "By author", f"{len(authors)} author(s)",
              f"{base}/opds/authors", feeds.NAV_TYPE),
+            ("series", "By series", f"{len(series)} series",
+             f"{base}/opds/series", feeds.NAV_TYPE),
             ("languages", "By language", f"{len(languages)} language(s)",
              f"{base}/opds/languages", feeds.NAV_TYPE),
         ]
@@ -319,6 +326,22 @@ class OpdsHandler(BaseHTTPRequestHandler):
             self_url=f"{base}/opds/languages", start_url=f"{base}/opds",
             base_url=base, entries=entries)
 
+    def series_feed(self) -> str:
+        base = self.base_url()
+        entries = [
+            feeds.navigation_entry(
+                title=name,
+                href=f"{base}/opds/series/{key}",
+                summary=(f"{len(group)} book(s)" + (f" · {alias}" if alias else "")),
+                entry_id=f"urn:x3:series:{key}",
+                kind_type=feeds.ACQ_TYPE)
+            for key, name, alias, group in library.group_by_series(self.catalog.books())
+        ]
+        return feeds.navigation_feed(
+            feed_id="urn:x3:catalog:series", title="By series",
+            self_url=f"{base}/opds/series", start_url=f"{base}/opds",
+            base_url=base, entries=entries)
+
     def _author_feed(self, key: str, page: int) -> None:
         for candidate, author, group in library.group_by_author(self.catalog.books()):
             if candidate == key:
@@ -336,6 +359,15 @@ class OpdsHandler(BaseHTTPRequestHandler):
                                  path=f"/opds/languages/{quote(code, safe='')}")
                 return
         self._send_text(HTTPStatus.NOT_FOUND, "no such language")
+
+    def _series_books_feed(self, key: str, page: int) -> None:
+        for candidate, name, alias, group in library.group_by_series(self.catalog.books()):
+            if candidate == key:
+                heading = f"{name} [{alias}]" if alias else name
+                self._send_books(f"series:{key}", heading, group, page,
+                                 path=f"/opds/series/{key}")
+                return
+        self._send_text(HTTPStatus.NOT_FOUND, "no such series")
 
     def _send_books(self, key: str, title: str, books: Sequence[library.Book], page: int,
                     path: Optional[str] = None, extra_query: str = "") -> None:
