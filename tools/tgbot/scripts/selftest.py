@@ -98,7 +98,9 @@ class FakeTelegram:
         Path(dest).write_bytes(b"pretend")
         return dest
 
-    def edit_message(self, *a, **kw):
+    def edit_message(self, chat_id, message_id, text, keyboard=None):
+        self.sent.append({"chat": chat_id, "text": text, "keyboard": keyboard,
+                          "edited": message_id})
         return {}
 
     def edit_markup(self, chat_id, message_id, keyboard):
@@ -581,7 +583,8 @@ def check_noisy_embedded_title(tmp: Path) -> None:
 
     bot.take_book(OWNER, source)
     check("the Lonesome Dove upload asks for its series alias",
-          source.exists() and bot.pending and bot.pending["kind"] == "seriesalias",
+          source.exists() and bot.pending
+          and bot.pending["kind"] == "seriesaliasgroup",
           str(tg.sent[-1]))
     bot.handle(msg("LoDove"))
 
@@ -590,9 +593,7 @@ def check_noisy_embedded_title(tmp: Path) -> None:
     report = tg.sent[-1]["text"]
     check("the typed alias returns through Telegram into the cleaned catalog name",
           expected.exists() and expected.read_bytes() == original and not source.exists()
-          and "<b>LoDove 01 - Lonesome Dove</b>" in report
-          and "catalog file: <code>LoDove 01 - Lonesome Dove - Larry McMurtry.epub</code>"
-          in report,
+          and "<code>LoDove 01 - Lonesome Dove - Larry McMurtry.epub</code>" in report,
           report)
     check("the redundant author/series title is gone rather than merely hidden",
           "McMurtry, Larry - Lonesome Dove 01" not in report
@@ -631,11 +632,13 @@ def check_series_workflow(tmp: Path) -> None:
     buttons = [b for row in (tg.sent[-1]["keyboard"] or []) for b in row]
     accept = next((data for label, data in buttons if label == "Use LOTR"), "")
     check("the first volume asks instead of pretending its alias is intelligent",
-          bool(accept) and first.exists() and bot.pending["kind"] == "seriesalias",
+          bool(accept) and first.exists()
+          and bot.pending["kind"] == "seriesaliasgroup",
           str(tg.sent[-1]))
     bot.handle(msg("TOO-LONG"))
     check("an invalid typed alias asks again and still does not move the upload",
-          first.exists() and bot.pending and bot.pending["kind"] == "seriesalias",
+          first.exists() and bot.pending
+          and bot.pending["kind"] == "seriesaliasgroup",
           str(tg.sent[-1]))
     bot.handle(msg("LOTR"))
     one = bot.workspace / "library" / (
@@ -741,6 +744,164 @@ def check_series_workflow(tmp: Path) -> None:
         suite.device_book_name_candidates = original_names
         suite.device.list_dir = original_list
         suite.device.delete_many = original_delete
+
+
+def check_batched_series_ingest(tmp: Path) -> None:
+    print("\nseveral uploaded series share one orderly conversation:")
+    bot, tg = make_bot(tmp)
+    alpha = []
+    beta = []
+    for number in range(1, 5):
+        path = bot.workspace / f"alpha-download-{number}.epub"
+        make_epub(path, f"Alpha Title {number}", "One Author", "Alpha Cycle", str(number))
+        alpha.append(path)
+        bot.take_book(OWNER, path)
+    for number in range(1, 6):
+        path = bot.workspace / f"beta-download-{number}.epub"
+        make_epub(path, f"Beta Title {number}", "Two Author", "Beta Cycle", str(number))
+        beta.append(path)
+        bot.take_book(OWNER, path)
+    standalone = bot.workspace / "standalone-download.epub"
+    make_epub(standalone, "A Standalone", "Solo Author")
+    bot.take_book(OWNER, standalone)
+
+    check("four plus five uploads become two series questions, not nine",
+          len(bot.alias_groups) == 2
+          and len(bot.alias_groups["alpha cycle"]["books"]) == 4
+          and len(bot.alias_groups["beta cycle"]["books"]) == 5,
+          str(bot.alias_groups))
+    check("only the first series owns the next plain-text reply",
+          bot.pending == {"kind": "seriesaliasgroup", "key": "alpha cycle"}
+          and bot.active_alias_group == "alpha cycle", str(bot.pending))
+    check("the live question grows to show all four matching volumes",
+          any(sent.get("edited") and "4 staged book(s)" in sent["text"]
+              for sent in tg.sent), str(tg.sent[:5]))
+    check("a standalone book files normally while series answers are pending",
+          (bot.workspace / "library" / "A Standalone - Solo Author.epub").exists()
+          and bot.pending["key"] == "alpha cycle"
+          and "next plain-text reply still sets" in tg.sent[-1]["text"],
+          str(tg.sent[-1]))
+
+    bot.handle(msg("ALPHA"))
+    check("one answer files every Alpha volume",
+          all((bot.workspace / "library" /
+               f"ALPHA {number:02d} - Alpha Title {number} - One Author.epub").exists()
+              for number in range(1, 5))
+          and all(not path.exists() for path in alpha))
+    check("the next series is asked only after Alpha is resolved",
+          bot.pending == {"kind": "seriesaliasgroup", "key": "beta cycle"}
+          and "Beta Cycle" in tg.sent[-1]["text"], str(tg.sent[-2:]))
+
+    bot.handle(msg("BETA"))
+    check("the second answer files all five Beta volumes and closes the queue",
+          all((bot.workspace / "library" /
+               f"BETA {number:02d} - Beta Title {number} - Two Author.epub").exists()
+              for number in range(1, 6))
+          and all(not path.exists() for path in beta)
+          and not bot.alias_groups and bot.pending is None)
+    summaries = [sent["text"] for sent in tg.sent if "Catalog only" in sent["text"]]
+    check("each series gets one compact completion summary",
+          len(summaries) == 2 and "filed: 4" in summaries[0]
+          and "filed: 5" in summaries[1], str(summaries))
+
+
+def check_metadata_editor(tmp: Path) -> None:
+    print("\nthe bot is a thin UI over the catalog metadata editor:")
+    bot, tg = make_bot(tmp)
+    catalog = bot.workspace / "library"
+    source = make_epub(catalog / "ugly-download-name.epub", "Bad title", "Bad Author")
+
+    original_library = suite.library
+
+    def local_library():
+        rc, out, err = suite.run([
+            suite.PY, "tools/opds-server/scripts/library.py", "--json",
+            "--root", str(catalog)], timeout=120)
+        if rc:
+            raise suite.SuiteError(err or out)
+        return json.loads(out)
+
+    try:
+        suite.library = local_library
+        book = local_library()["books"][0]
+        token = bot.tokens.put(book)
+        bot.handle(cb(f"lib:f:{token}"))
+        metadata_button = next(
+            data for row in tg.sent[-1]["keyboard"] for label, data in row
+            if label == "📝 Metadata")
+        bot.handle(cb(metadata_button))
+        labels = {label for row in tg.sent[-1]["keyboard"] for label, _ in row}
+        check("the book card exposes the five useful fields as a fixed list",
+              {"✏️ Title", "✏️ Author", "✏️ Series", "✏️ Series position",
+               "✏️ Language"}.issubset(labels), str(labels))
+        check("the values shown are the embedded values, not filename guesses",
+              "Title: <code>Bad title</code>" in tg.sent[-1]["text"]
+              and "Author: <code>Bad Author</code>" in tg.sent[-1]["text"],
+              tg.sent[-1]["text"])
+
+        edit_series = next(
+            data for row in tg.sent[-1]["keyboard"] for label, data in row
+            if label == "✏️ Series")
+        bot.handle(cb(edit_series))
+        bot.handle(msg("Chronicles"))
+        check("creating series metadata pauses for the human short name",
+              bot.pending and bot.pending["kind"] == "bookmetaalias"
+              and "no short catalog name" in tg.sent[-1]["text"],
+              str(tg.sent[-1]))
+        bot.handle(msg("TOO-LONG"))
+        check("an invalid metadata alias keeps the same answer wired for retry",
+              source.exists() and bot.pending
+              and bot.pending["kind"] == "bookmetaalias"
+              and "Send another short name" in tg.sent[-1]["text"],
+              str(tg.sent[-1]))
+        bot.handle(msg("CHRON"))
+        apply = next(
+            data for row in tg.sent[-1]["keyboard"] for label, data in row
+            if label == "✓ Write it")
+        check("the bot previews the exact edit before touching the EPUB",
+              source.exists() and "Confirm metadata edit" in tg.sent[-1]["text"],
+              tg.sent[-1]["text"])
+
+        slim = bot.state_dir / "cache" / "slim" / "old.epub"
+        slim.parent.mkdir(parents=True, exist_ok=True)
+        slim.write_bytes(b"old slim metadata")
+        bot.queue.add("book", str(source), label="Bad title", meta={
+            **book, "slim": str(slim),
+        })
+        bot.handle(cb(apply))
+        edited = catalog / "CHRON - Bad title - Bad Author.epub"
+        values = suite.book_metadata(edited, catalog).get("metadata", {})
+        queued = bot.queue.items()[0]
+        check("confirming writes series metadata and its canonical filename",
+              edited.exists() and not source.exists()
+              and values.get("series") == "Chronicles", str(values))
+        check("a queued card copy follows the edit and drops its stale slim cache",
+              Path(queued["path"]) == edited
+              and queued.get("meta", {}).get("series") == "Chronicles"
+              and "slim" not in queued.get("meta", {}), str(queued))
+        check("the explicit catalog edit still performs no device operation",
+              "Nothing was sent to or removed from the X3" in tg.sent[-1]["text"],
+              tg.sent[-1]["text"])
+
+        # Fill the previously empty position through the same fixed field list.
+        show = next(data for row in tg.sent[-1]["keyboard"] for label, data in row
+                    if label == "📝 Metadata")
+        bot.handle(cb(show))
+        edit_position = next(
+            data for row in tg.sent[-1]["keyboard"] for label, data in row
+            if label == "✏️ Series position")
+        bot.handle(cb(edit_position))
+        bot.handle(msg("2"))
+        apply_position = next(
+            data for row in tg.sent[-1]["keyboard"] for label, data in row
+            if label == "✓ Write it")
+        bot.handle(cb(apply_position))
+        positioned = catalog / "CHRON 02 - Bad title - Bad Author.epub"
+        check("an empty series position can be created and immediately re-files the book",
+              positioned.exists() and not edited.exists()
+              and suite.book_metadata(positioned, catalog)["metadata"]["series_index"] == "2")
+    finally:
+        suite.library = original_library
 
 
 # -- 5. buttons ------------------------------------------------------------
@@ -1684,6 +1845,8 @@ def main() -> int:
         check_book_delivery(tmp)
         check_noisy_embedded_title(tmp)
         check_series_workflow(tmp)
+        check_batched_series_ingest(tmp)
+        check_metadata_editor(tmp)
         check_wallpaper_collection(tmp)
         check_fonts(tmp)
         check_font_queue(tmp)

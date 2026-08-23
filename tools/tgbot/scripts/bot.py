@@ -90,6 +90,12 @@ class Bot:
         self.notes = Notes(self.state_dir / "notes.json")
         self.tokens = Tokens()
         self.pending = None           # what the next plain text message means
+        # Uploads that need human series aliases are grouped by the exact
+        # embedded series name.  Only ``active_alias_group`` owns the next
+        # plain-text reply; later series wait silently behind it instead of
+        # each upload overwriting ``pending``.
+        self.alias_groups = {}
+        self.active_alias_group = None
         # A contact sheet stays on screen while you tick things off it, so the
         # bot has to remember what each sheet message is showing. Keyed by
         # message id, in memory: a restart makes the buttons stale, which is
@@ -244,6 +250,8 @@ class Bot:
         elif cmd == "push":
             self.ask_push(chat)
         elif cmd == "cancel":
+            if self.pending and self.pending.get("kind") == "seriesaliasgroup":
+                return self.cancel_series_ingest(chat)
             self.pending = None
             self.menu(chat, "Dropped it.")
         else:
@@ -379,13 +387,27 @@ class Bot:
             src.rename(dest)
             return self.say(chat, f"✅ renamed to <code>{html.escape(dest.name)}</code>")
 
-        if job["kind"] == "seriesalias":
+        if job["kind"] == "seriesaliasgroup":
             return self.submit(
-                chat, lambda: self.finish_book_ingest(chat, Path(job["path"]), text))
+                chat, lambda: self.finish_series_ingest(chat, job["key"], text))
 
         if job["kind"] == "seriesaliaschange":
             return self.submit(
                 chat, lambda: self.change_series_alias(chat, job["series"], text))
+
+        if job["kind"] == "bookmetadata":
+            if text == "-" and job["field"] not in {"author", "series", "series_index"}:
+                return self.say(chat, "That field is required and cannot be cleared.")
+            value = "" if text == "-" else text
+            return self.submit(
+                chat, lambda: self.preview_book_metadata(
+                    chat, Path(job["path"]), {job["field"]: value}))
+
+        if job["kind"] == "bookmetaalias":
+            return self.submit(
+                chat, lambda: self.preview_book_metadata(
+                    chat, Path(job["path"]), job["updates"], alias=text,
+                    alias_prompt=(job["series"], job["suggestion"])))
 
     # -- menus -------------------------------------------------------------
 
@@ -459,15 +481,16 @@ class Bot:
 
         if head == "balias":                  # accept a deterministic suggestion
             if rest == "cancel":
-                self.pending = None
-                return self.menu(chat, "Left the upload untouched.")
+                return self.cancel_series_ingest(chat)
             job = self.tokens.get(rest)
             if not job:
                 return self.stale(chat)
+            if job.get("key") != self.active_alias_group:
+                return self.stale(chat)
             self.pending = None
             return self.submit(
-                chat, lambda: self.finish_book_ingest(
-                    chat, Path(job["path"]), job["alias"]))
+                chat, lambda: self.finish_series_ingest(
+                    chat, job["key"], job["alias"]))
 
         if head == "qdel":
             self.queue.remove(rest)
@@ -500,6 +523,8 @@ class Bot:
             return self.on_library_callback(chat, rest)
         if head == "ser":
             return self.on_series_callback(chat, rest)
+        if head == "bm":
+            return self.on_book_metadata_callback(chat, rest)
         if head == "in":
             path = self.tokens.get(rest)
             if not path:
@@ -638,40 +663,140 @@ class Bot:
         dest_dir.mkdir(parents=True, exist_ok=True)
         report = suite.ingest_book(path, dest_dir)
         if report.get("status") == "needs_alias":
-            suggestion = report.get("suggested_alias") or "SERIES"
-            self.pending = {"kind": "seriesalias", "path": str(path),
-                            "series": report.get("series", ""),
-                            "suggestion": suggestion}
-            token = self.tokens.put({"path": str(path), "alias": suggestion})
-            return self.say(
-                chat,
-                "📚 I found a new series in the book:\n\n"
-                f"<b>{html.escape(report.get('series', ''))}</b>"
-                + (f" · volume {html.escape(report.get('series_index', ''))}"
-                   if report.get("series_index") else "")
-                + "\n\nIts short name is a catalog convention, not something "
-                  "metadata can decide. I made a mechanical suggestion; accept "
-                  "it or send another name (maximum 6 characters). The catalog "
-                  "will remember it for the next volumes.",
-                [[(f"Use {suggestion}", f"balias:{token}")],
-                 [("✗ Cancel", "balias:cancel")]])
+            return self.stage_series_ingest(chat, path, report)
         self.report_book_ingest(chat, report)
 
-    def finish_book_ingest(self, chat, path: Path, alias: str) -> None:
-        report = suite.ingest_book(path, self.workspace / "library", alias)
-        if (report.get("status") == "conflict" and report.get("series")
-                and not report.get("series_alias") and not report.get("destination")):
-            suggestion = report.get("suggested_alias") or "SERIES"
-            self.pending = {"kind": "seriesalias", "path": str(path),
-                            "series": report["series"], "suggestion": suggestion}
-            token = self.tokens.put({"path": str(path), "alias": suggestion})
-            return self.say(
+    def stage_series_ingest(self, chat, path: Path, report: dict) -> None:
+        """Collect unresolved volumes and expose one textual question at a time.
+
+        This is Telegram's presentation of ingest_book's ``needs_alias``
+        result.  Alias suggestions, validation and filing remain entirely in
+        the catalog script; compare its ``tidy_interactive`` terminal UI.
+        """
+        series = report.get("series", "")
+        key = series.casefold()
+        group = self.alias_groups.setdefault(key, {
+            "series": series,
+            "suggestion": report.get("suggested_alias") or "SERIES",
+            "books": [],
+            "message_id": None,
+        })
+        if not any(item["path"] == str(path) for item in group["books"]):
+            group["books"].append({
+                "path": str(path),
+                "title": report.get("base_title") or report.get("title") or path.stem,
+                "series_index": report.get("series_index", ""),
+            })
+        if self.active_alias_group is None:
+            self.active_alias_group = key
+            return self.ask_series_alias(chat, key)
+        if self.active_alias_group == key:
+            return self.ask_series_alias(chat, key, refresh=True)
+        if len(group["books"]) == 1:
+            self.say(
                 chat,
-                f"⚠️ {html.escape(report.get('error', 'That short name did not work.'))}\n"
-                "Send another short name, or use the original suggestion.",
-                [[(f"Use {suggestion}", f"balias:{token}"),
-                  ("✗ Cancel", "balias:cancel")]])
-        self.report_book_ingest(chat, report)
+                f"📚 Staged <b>{html.escape(series)}</b>. I’ll ask for its short "
+                "name after the current series; no reply is expected yet.")
+
+    def _series_alias_question(self, group: dict, error: str = "") -> tuple:
+        books = sorted(group["books"], key=lambda item: (
+            item.get("series_index") == "", item.get("series_index", ""),
+            item.get("title", "").casefold()))
+        positions = ", ".join(item["series_index"] for item in books
+                              if item.get("series_index"))
+        suggestion = group["suggestion"]
+        token = self.tokens.put({"key": group["series"].casefold(),
+                                 "alias": suggestion})
+        lead = (f"⚠️ {html.escape(error)}\n\n" if error else "")
+        text = (
+            lead + f"📚 <b>{html.escape(group['series'])}</b> — "
+            f"{len(books)} staged book(s)"
+            + (f" · volumes {html.escape(positions)}" if positions else "")
+            + "\n\nSend one short name (maximum 6 characters). It applies to "
+              "every staged volume in this series. The suggestion is mechanical, "
+              "so you remain the one deciding it.")
+        keyboard = [[(f"Use {suggestion}", f"balias:{token}")],
+                    [("✗ Leave this series in the inbox", "balias:cancel")]]
+        return text, keyboard
+
+    def ask_series_alias(self, chat, key: str, *, refresh: bool = False,
+                         error: str = "") -> None:
+        group = self.alias_groups.get(key)
+        if not group:
+            return
+        self.active_alias_group = key
+        self.pending = {"kind": "seriesaliasgroup", "key": key}
+        text, keyboard = self._series_alias_question(group, error)
+        message_id = group.get("message_id")
+        if refresh and message_id:
+            try:
+                self.tg.edit_message(chat, message_id, text, keyboard)
+                return
+            except TelegramError:
+                pass
+        sent = self.say(chat, text, keyboard)
+        if sent and sent.get("message_id"):
+            group["message_id"] = sent["message_id"]
+
+    def _next_series_alias(self, chat) -> None:
+        self.active_alias_group = next(iter(self.alias_groups), None)
+        if self.active_alias_group is None:
+            self.pending = None
+            return
+        self.ask_series_alias(chat, self.active_alias_group)
+
+    def cancel_series_ingest(self, chat) -> None:
+        key = self.active_alias_group
+        group = self.alias_groups.pop(key, None) if key else None
+        self.pending = None
+        self.active_alias_group = None
+        if group:
+            self.say(chat, f"Left {len(group['books'])} "
+                          f"<b>{html.escape(group['series'])}</b> upload(s) untouched.")
+        self._next_series_alias(chat)
+
+    def finish_series_ingest(self, chat, key: str, alias: str) -> None:
+        group = self.alias_groups.get(key)
+        if not group or self.active_alias_group != key:
+            return self.stale(chat)
+        reports = []
+        for number, item in enumerate(list(group["books"])):
+            report = suite.ingest_book(
+                Path(item["path"]), self.workspace / "library",
+                alias if number == 0 else "")
+            if (number == 0 and report.get("status") == "conflict"
+                    and report.get("series") and not report.get("series_alias")
+                    and not report.get("destination")):
+                return self.ask_series_alias(
+                    chat, key, error=report.get("error", "That short name did not work."))
+            reports.append(report)
+
+        self.alias_groups.pop(key, None)
+        self.pending = None
+        self.active_alias_group = None
+        filed = [report for report in reports
+                 if report.get("status") in ("filed", "already_present")]
+        failed = [report for report in reports
+                  if report.get("status") not in ("filed", "already_present")]
+        already = sum(report.get("status") == "already_present" for report in filed)
+        lines = [f"📚 <b>{html.escape(group['series'])}</b> "
+                 f"[{html.escape(alias)}]",
+                 f"filed: {len(filed) - already}",
+                 f"already present: {already}"]
+        for report in filed[:10]:
+            destination = Path(report.get("destination") or report.get("source", "book"))
+            lines.append("· <code>" + html.escape(destination.name) + "</code>")
+        if len(filed) > 10:
+            lines.append(f"· …and {len(filed) - 10} more")
+        if failed:
+            lines.append("Left untouched:")
+            lines.extend("· " + html.escape(
+                (report.get("error") or Path(report.get("source", "book")).name)[:120])
+                         for report in failed)
+        lines.append("Catalog only — nothing was queued or sent to the X3.")
+        self.say(chat, "\n".join(lines),
+                 [[("📚 Series", "ser:list"), ("🏠 Menu", "m:main")]])
+        self._next_series_alias(chat)
 
     def report_book_ingest(self, chat, report: dict) -> None:
         status = report.get("status")
@@ -712,6 +837,10 @@ class Bot:
         lines.append("\nOn the catalog now — no push needed."
                      if suite.opds_up(self.cfg["opds_url"])
                      else "\n⚠️ Filed, but opds-server is not answering yet.")
+        if self.active_alias_group in self.alias_groups:
+            waiting = self.alias_groups[self.active_alias_group]["series"]
+            lines.append("\n↩️ Your next plain-text reply still sets the short "
+                         f"name for <b>{html.escape(waiting)}</b>.")
 
         book = {key: report.get(key, "") for key in (
             "title", "base_title", "author", "language", "series",
@@ -885,6 +1014,9 @@ class Bot:
                 chat, lambda: self.remove_series_from_device(chat, group, books))
 
         if action == "a":
+            if self.pending:
+                return self.say(
+                    chat, "Finish the current question first, or send /cancel.")
             self.pending = {"kind": "seriesaliaschange", "series": group["name"]}
             return self.say(
                 chat,
@@ -991,9 +1123,16 @@ class Bot:
             return self.say(
                 chat, f"<code>{html.escape(path.name)}</code>",
                 [[("📤 Send to device", f"bq:{send}")],
-                 [("✏️ Rename", f"lib:rn:{token}"), ("🗑 Delete", f"lib:rm:{token}")],
+                 [("📝 Metadata", f"lib:meta:{token}")],
+                 [("✏️ Rename file", f"lib:rn:{token}"),
+                  ("🗑 Delete", f"lib:rm:{token}")],
                  [("📚 Library", "m:lib")]])
+        if action == "meta":
+            return self.submit(chat, lambda: self.show_book_metadata(chat, path))
         if action == "rn":
+            if self.pending:
+                return self.say(
+                    chat, "Finish the current question first, or send /cancel.")
             self.pending = {"kind": "librename", "path": str(path)}
             return self.say(chat, "Send me the new filename.")
         if action == "rm":
@@ -1005,6 +1144,216 @@ class Bot:
                 return self.say(chat, "⚠️ that is outside the workspace.")
             path.unlink(missing_ok=True)
             return self.say(chat, "🗑 gone.", [[("📚 Library", "m:lib")]])
+
+    # -- catalog metadata -------------------------------------------------
+
+    META_LABELS = {
+        "title": "Title", "author": "Author", "series": "Series",
+        "series_index": "Series position", "language": "Language",
+    }
+    META_OPTIONAL = {"author", "series", "series_index"}
+
+    def show_book_metadata(self, chat, path: Path) -> None:
+        """Telegram view over the OPDS ingester's five-field editor.
+
+        Keep the conversational wording aligned with
+        ``ingest_book.edit_interactive``. This method must only display the
+        typed report and collect an answer; it must never duplicate metadata
+        validation or EPUB-writing rules from the catalog scripts.
+        """
+        catalog = self.workspace / "library"
+        report = suite.book_metadata(path, catalog)
+        if report.get("status") == "invalid":
+            return self.say(chat, "⚠️ " + html.escape(
+                report.get("error", "That book cannot be inspected.")),
+                [[("📚 Library", "m:lib")]])
+        values = report.get("metadata", {})
+        lines = ["📝 <b>Embedded metadata</b>",
+                 f"file: <code>{html.escape(Path(report['source']).name)}</code>",
+                 f"EPUB package: {html.escape(report.get('package_version', '?'))}", ""]
+        for field in ("title", "author", "series", "series_index", "language"):
+            lines.append(f"{self.META_LABELS[field]}: "
+                         f"<code>{html.escape(values.get(field) or 'empty')}</code>")
+        if values.get("series"):
+            lines.append("Short name: <code>" + html.escape(
+                report.get("series_alias") or "not set") + "</code>")
+        for warning in report.get("warnings", []):
+            lines.append("⚠️ " + html.escape(warning))
+
+        rows = []
+        if report.get("editable", True):
+            fields = list(self.META_LABELS)
+            for start in range(0, len(fields), 2):
+                row = []
+                for field in fields[start:start + 2]:
+                    token = self.tokens.put({"path": report["source"], "field": field,
+                                             "current": values.get(field, "")})
+                    row.append((f"✏️ {self.META_LABELS[field]}", f"bm:e:{token}"))
+                rows.append(row)
+            if report.get("status") == "needs_alias":
+                token = self.tokens.put({"path": report["source"], "updates": {}})
+                rows.append([("🏷 Set short series name", f"bm:a:{token}")])
+        back = self.tokens.put({
+            "path": report["source"], "title": report.get("title", ""),
+            "author": values.get("author", ""),
+        })
+        rows.append([("◀ Book", f"lib:f:{back}"), ("📚 Library", "m:lib")])
+        self.say(chat, "\n".join(lines), rows)
+
+    def on_book_metadata_callback(self, chat, rest: str) -> None:
+        action, _, token = rest.partition(":")
+        payload = self.tokens.get(token)
+        if not payload:
+            return self.stale(chat)
+        path = Path(payload["path"])
+        if (action in {"e", "c", "a", "pa", "apply"} and self.pending
+                and not self.pending.get("kind", "").startswith("bookmeta")):
+            return self.say(
+                chat, "Finish the current question first, or send /cancel.")
+        if action == "show":
+            if self.pending and self.pending.get("kind", "").startswith("bookmeta"):
+                self.pending = None
+            return self.submit(chat, lambda: self.show_book_metadata(chat, path))
+        if action == "e":
+            if self.pending:
+                return self.say(
+                    chat, "Finish the current question first, or send /cancel.")
+            field = payload["field"]
+            self.pending = {"kind": "bookmetadata", "path": str(path), "field": field}
+            current = payload.get("current") or "empty"
+            rows = []
+            if field in self.META_OPTIONAL and payload.get("current"):
+                clear = self.tokens.put({"path": str(path), "field": field})
+                rows.append([("Clear this field", f"bm:c:{clear}")])
+            back = self.tokens.put({"path": str(path)})
+            rows.append([("✗ Cancel", f"bm:show:{back}")])
+            return self.say(
+                chat,
+                f"Send the new <b>{html.escape(self.META_LABELS[field])}</b>.\n"
+                f"Current value: <code>{html.escape(current)}</code>\n\n"
+                "I will show the exact metadata and filename change before writing it.",
+                rows)
+        if action == "c":
+            self.pending = None
+            return self.submit(
+                chat, lambda: self.preview_book_metadata(
+                    chat, path, {payload["field"]: ""}))
+        if action == "a":
+            return self.submit(
+                chat, lambda: self.preview_book_metadata(
+                    chat, path, payload.get("updates", {})))
+        if action == "pa":
+            self.pending = None
+            return self.submit(
+                chat, lambda: self.preview_book_metadata(
+                    chat, path, payload.get("updates", {}), payload.get("alias", "")))
+        if action == "apply":
+            self.pending = None
+            return self.submit(
+                chat, lambda: self.apply_book_metadata(
+                    chat, path, payload.get("updates", {}), payload.get("alias", ""),
+                    payload.get("sha256", "")))
+
+    def preview_book_metadata(self, chat, path: Path, updates: dict,
+                              alias: str = "", alias_prompt=None) -> None:
+        report = suite.edit_book_metadata(
+            path, self.workspace / "library", updates, alias=alias, dry_run=True)
+        if report.get("status") == "needs_alias":
+            suggestion = report.get("suggested_alias") or "SERIES"
+            self.pending = {"kind": "bookmetaalias", "path": str(path),
+                            "updates": updates, "series": report.get("series", ""),
+                            "suggestion": suggestion}
+            token = self.tokens.put({"path": str(path), "updates": updates,
+                                     "alias": suggestion})
+            return self.say(
+                chat,
+                f"<b>{html.escape(report.get('series', 'This series'))}</b> has "
+                "no short catalog name yet. Send one (maximum 6 characters), "
+                "or accept the mechanical suggestion.",
+                [[(f"Use {suggestion}", f"bm:pa:{token}")],
+                 [("✗ Cancel", f"bm:show:{self.tokens.put({'path': str(path)})}")]])
+        if report.get("status") in {"invalid", "conflict", "error"}:
+            if alias_prompt:
+                series, suggestion = alias_prompt
+                self.pending = {"kind": "bookmetaalias", "path": str(path),
+                                "updates": updates, "series": series,
+                                "suggestion": suggestion}
+                token = self.tokens.put({"path": str(path), "updates": updates,
+                                         "alias": suggestion})
+                return self.say(
+                    chat,
+                    "⚠️ " + html.escape(
+                        report.get("error", "That short name did not work."))
+                    + "\nSend another short name.",
+                    [[(f"Use {suggestion}", f"bm:pa:{token}"),
+                      ("✗ Cancel", f"bm:show:{self.tokens.put({'path': str(path)})}")]])
+            return self.say(
+                chat, "⚠️ Nothing changed. "
+                + html.escape(report.get("error", "The edit is not valid.")),
+                [[("📝 Metadata", f"bm:show:{self.tokens.put({'path': str(path)})}")]])
+
+        lines = ["📝 <b>Confirm metadata edit</b>"]
+        for field in report.get("changed_fields", []):
+            before = report["metadata_before"].get(field) or "empty"
+            after = report["metadata_after"].get(field) or "empty"
+            lines.append(f"{self.META_LABELS[field]}: "
+                         f"<code>{html.escape(before)}</code> → "
+                         f"<code>{html.escape(after)}</code>")
+        if report.get("renames"):
+            lines.append("File: <code>" + html.escape(path.name) + "</code> → "
+                         "<code>" + html.escape(Path(report["destination"]).name)
+                         + "</code>")
+        if report.get("alias_changed"):
+            lines.append("Short series name: <code>" +
+                         html.escape(report.get("series_alias", "")) + "</code>")
+        if not report.get("changed_fields") and not report.get("renames") \
+                and not report.get("alias_changed"):
+            return self.say(
+                chat, "That already has the requested value — nothing to write.",
+                [[("📝 Metadata", f"bm:show:{self.tokens.put({'path': str(path)})}")]])
+        token = self.tokens.put({"path": str(path), "updates": updates, "alias": alias,
+                                 "sha256": report.get("sha256", "")})
+        back = self.tokens.put({"path": str(path)})
+        lines.append("\nOnly the catalog EPUB’s package metadata changes. "
+                     "Nothing is sent to the X3.")
+        self.say(chat, "\n".join(lines),
+                 [[("✓ Write it", f"bm:apply:{token}"),
+                   ("No", f"bm:show:{back}")]])
+
+    def apply_book_metadata(self, chat, path: Path, updates: dict,
+                            alias: str = "", expected_sha256: str = "") -> None:
+        report = suite.edit_book_metadata(
+            path, self.workspace / "library", updates, alias=alias,
+            expected_sha256=expected_sha256)
+        if report.get("status") not in {"updated", "no_change"}:
+            return self.say(
+                chat, "⚠️ Nothing changed. "
+                + html.escape(report.get("error", "The catalog changed since the preview.")),
+                [[("📚 Library", "m:lib")]])
+        destination = Path(report.get("destination") or path)
+        values = report.get("metadata_after", {})
+        fresh_book = {
+            "path": str(destination),
+            "title": report.get("title") or values.get("title") or destination.stem,
+            "base_title": report.get("base_title") or values.get("title", ""),
+            "author": values.get("author", ""),
+            "language": values.get("language", ""),
+            "series": values.get("series", ""),
+            "series_index": values.get("series_index", ""),
+            "series_alias": report.get("series_alias", ""),
+        }
+        followed = self.queue.remap_books(
+            {str(path): fresh_book}, invalidate_slim=True)
+        fields = ", ".join(self.META_LABELS.get(field, field)
+                           for field in report.get("changed_fields", [])) or "filename"
+        token = self.tokens.put({"path": str(destination)})
+        self.say(
+            chat,
+            f"✅ Updated {html.escape(fields)}.\n"
+            f"catalog file: <code>{html.escape(destination.name)}</code>"
+            + (f"\nrefreshed {followed} queued card copy/copies." if followed else "")
+            + "\nNothing was sent to or removed from the X3.",
+            [[("📝 Metadata", f"bm:show:{token}"), ("📚 Library", "m:lib")]])
 
     def show_queue(self, chat) -> None:
         items = self.queue.items()

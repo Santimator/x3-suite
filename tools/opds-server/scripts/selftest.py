@@ -43,6 +43,7 @@ sys.path.insert(0, str(REPO / "epub-builder" / "scripts"))
 
 import build_epub  # noqa: E402
 import crosspoint_client as cc  # noqa: E402
+import epub_metadata  # noqa: E402
 import feeds  # noqa: E402
 import ingest_book  # noqa: E402
 import library  # noqa: E402
@@ -116,11 +117,12 @@ def build_fixture_library(root: Path) -> None:
 
 
 def make_metadata_epub(path: Path, title: str, author: str, series: str,
-                       series_index: str) -> Path:
+                       series_index: str, *, version: str = "2.0",
+                       signed: bool = False) -> Path:
     """A small third-party-shaped EPUB for metadata-ingest regressions."""
     container = ('<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
                  '<rootfiles><rootfile full-path="content.opf"/></rootfiles></container>')
-    opf = ('<package xmlns="http://www.idpf.org/2007/opf"><metadata '
+    opf = (f'<package xmlns="http://www.idpf.org/2007/opf" version="{version}"><metadata '
            'xmlns:dc="http://purl.org/dc/elements/1.1/">'
            f'<dc:title>{title}</dc:title><dc:creator>{author}</dc:creator>'
            '<dc:language>en</dc:language>'
@@ -128,8 +130,13 @@ def make_metadata_epub(path: Path, title: str, author: str, series: str,
            f'<meta name="calibre:series_index" content="{series_index}"/>'
            '</metadata></package>')
     with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("mimetype", "application/epub+zip",
+                         compress_type=zipfile.ZIP_STORED)
         archive.writestr("META-INF/container.xml", container)
         archive.writestr("content.opf", opf)
+        archive.writestr("chapter.xhtml", "<html><body>Keep me exactly.</body></html>")
+        if signed:
+            archive.writestr("META-INF/signatures.xml", "<signatures/>")
     return path
 
 
@@ -356,6 +363,183 @@ def main() -> int:
                         and (catalog / "RINGS 01 - The Fellowship of the Ring - J. R. R. Tolkien.epub").exists()
                         and (catalog / "RINGS 02 - The Two Towers - J. R. R. Tolkien.epub").exists(),
                         str(changed))
+
+        print("1c. catalog audit and explicit metadata editing")
+        steward = tmp / "steward-catalog"
+        steward.mkdir()
+        volume_one = make_metadata_epub(
+            steward / "download-one.epub", "Master and Commander",
+            "Patrick O'Brian", "Aubrey-Maturin", "1")
+        volume_two = make_metadata_epub(
+            steward / "download-two.epub", "Post Captain",
+            "Patrick O'Brian", "Aubrey-Maturin", "2")
+        one_bytes, two_bytes = volume_one.read_bytes(), volume_two.read_bytes()
+        damaged = steward / "damaged.epub"
+        damaged.write_bytes(b"not a zip")
+        audit_report = ingest_book.audit(steward)
+        all_ok &= check("audit asks once for a series shared by two books",
+                        audit_report["status"] == "needs_alias"
+                        and len(audit_report["missing_series"]) == 1
+                        and audit_report["missing_series"][0]["count"] == 2,
+                        str(audit_report))
+        all_ok &= check("audit reports an unreadable book and leaves it untouched",
+                        len(audit_report["invalid"]) == 1
+                        and damaged.read_bytes() == b"not a zip", str(audit_report))
+        tidy_preview = ingest_book.reconcile(
+            steward, {"Aubrey-Maturin": "A-M"}, dry_run=True)
+        all_ok &= check("the whole tidy plan preflights before moving anything",
+                        tidy_preview["status"] == "dry_run"
+                        and tidy_preview["changed"] == 2
+                        and volume_one.exists() and volume_two.exists(),
+                        str(tidy_preview))
+        tidy_answers = iter(["A-M", "yes"])
+        tidy_prompts = []
+        tidy_report = ingest_book.tidy_interactive(
+            steward, input_fn=lambda prompt: (
+                tidy_prompts.append(prompt), next(tidy_answers))[1])
+        tidy_one = steward / "A-M 01 - Master and Commander - Patrick O'Brian.epub"
+        tidy_two = steward / "A-M 02 - Post Captain - Patrick O'Brian.epub"
+        all_ok &= check("tidy stores one alias and renames both readable volumes",
+                        tidy_report["status"] == "reconciled"
+                        and tidy_one.read_bytes() == one_bytes
+                        and tidy_two.read_bytes() == two_bytes
+                        and damaged.read_bytes() == b"not a zip", str(tidy_report))
+        all_ok &= check("the terminal wizard asks once for the series, then once to apply",
+                        len(tidy_prompts) == 2
+                        and tidy_prompts[0].startswith("Short name for Aubrey-Maturin")
+                        and tidy_prompts[1].startswith("Apply this catalog-only plan"),
+                        str(tidy_prompts))
+
+        editable = make_metadata_epub(
+            steward / "wrong-download-name.epub", "Old title", "Old Author", "", "",
+            version="3.0")
+        with zipfile.ZipFile(editable) as archive:
+            chapter_before = archive.read("chapter.xhtml")
+        updates = {"title": "The New Title", "author": "New Author",
+                   "series": "Earthsea Cycle", "series_index": "1",
+                   "language": "en-GB"}
+        edit_preview = epub_metadata.edit_metadata(
+            editable, steward, updates, alias="EARTH", dry_run=True)
+        all_ok &= check("metadata editing has a read-only exact preview",
+                        edit_preview["status"] == "dry_run"
+                        and set(edit_preview["changed_fields"]) == set(updates)
+                        and editable.exists(), str(edit_preview))
+        edit_report = epub_metadata.edit_metadata(
+            editable, steward, updates, alias="EARTH")
+        edited = steward / "EARTH 01 - The New Title - New Author.epub"
+        edited_meta = library.read_opf_metadata(edited)
+        with zipfile.ZipFile(edited) as archive:
+            edited_opf = archive.read("content.opf").decode("utf-8")
+            chapter_after = archive.read("chapter.xhtml")
+        all_ok &= check("an explicit edit changes all five catalog fields",
+                        edit_report["status"] == "updated" and edited.exists()
+                        and edited_meta == updates, f"{edit_report}; {edited_meta}")
+        all_ok &= check("EPUB 3 series metadata uses standard refinements plus compatibility fields",
+                        'property="belongs-to-collection"' in edited_opf
+                        and 'property="collection-type"' in edited_opf
+                        and 'property="group-position"' in edited_opf
+                        and 'name="calibre:series"' in edited_opf,
+                        edited_opf[:500])
+        all_ok &= check("editing preserves every non-OPF resource byte-for-byte",
+                        chapter_after == chapter_before)
+        all_ok &= check("the edited book is immediately canonical in the catalog",
+                        not ingest_book.audit(steward)["renames"])
+
+        builder_edit_dir = tmp / "builder-edit"
+        builder_edit_dir.mkdir()
+        builder_edit_source = builder_edit_dir / "builder-copy.epub"
+        shutil.copy2(root / "alcaldes" / "build" / "alcaldes.epub",
+                     builder_edit_source)
+        builder_edit = epub_metadata.edit_metadata(
+            builder_edit_source, builder_edit_dir,
+            {"title": "Los alcaldes revisados"})
+        builder_edited = builder_edit_dir / (
+            "Los alcaldes revisados - Tirso de Molina.epub")
+        builder_verify = verify_epub.verify_integrity(builder_edited)
+        all_ok &= check("an edited suite-built EPUB still passes the strict builder gate",
+                        builder_edit["status"] == "updated"
+                        and builder_verify["pass"], str(builder_verify))
+
+        signed = make_metadata_epub(
+            steward / "signed.epub", "Signed", "Author", "", "",
+            version="3.0", signed=True)
+        signed_bytes = signed.read_bytes()
+        refused = epub_metadata.edit_metadata(
+            signed, steward, {"title": "Changed"})
+        all_ok &= check("a signed EPUB is refused instead of silently invalidated",
+                        refused["status"] == "invalid" and signed.read_bytes() == signed_bytes,
+                        str(refused))
+        all_ok &= check("required title and language cannot be cleared",
+                        epub_metadata.edit_metadata(
+                            edited, steward, {"title": ""})["status"] == "invalid"
+                        and epub_metadata.edit_metadata(
+                            edited, steward, {"language": ""})["status"] == "invalid")
+
+        collision_source = make_metadata_epub(
+            steward / "collision-source.epub", "Before", "Clash", "", "",
+            version="3.0")
+        collision_bytes = collision_source.read_bytes()
+        collision_target = make_metadata_epub(
+            steward / "Taken - Clash.epub", "Taken", "Clash", "", "",
+            version="3.0")
+        target_bytes = collision_target.read_bytes()
+        collision_report = epub_metadata.edit_metadata(
+            collision_source, steward, {"title": "Taken"})
+        all_ok &= check("metadata filename collisions abort before any write",
+                        collision_report["status"] == "conflict"
+                        and collision_source.read_bytes() == collision_bytes
+                        and collision_target.read_bytes() == target_bytes,
+                        str(collision_report))
+
+        rollback_dir = tmp / "metadata-rollback"
+        rollback_dir.mkdir()
+        rollback_source = make_metadata_epub(
+            rollback_dir / "rollback.epub", "Rollback", "Author", "", "",
+            version="3.0")
+        rollback_bytes = rollback_source.read_bytes()
+        original_alias_writer = library.write_alias_document
+        try:
+            library.write_alias_document = lambda *args, **kwargs: (
+                _ for _ in ()).throw(OSError("simulated sidecar failure"))
+            rollback_report = epub_metadata.edit_metadata(
+                rollback_source, rollback_dir, {"series": "Rollback Cycle"},
+                alias="ROLL")
+        finally:
+            library.write_alias_document = original_alias_writer
+        all_ok &= check("a late sidecar failure restores the exact original EPUB",
+                        rollback_report["status"] == "error"
+                        and rollback_source.read_bytes() == rollback_bytes
+                        and not list(rollback_dir.glob(".*metadata*")),
+                        str(rollback_report))
+
+        race_source = make_metadata_epub(
+            steward / "race.epub", "Race", "Author", "", "", version="3.0")
+        race_preview = epub_metadata.edit_metadata(
+            race_source, steward, {"title": "Race changed"}, dry_run=True)
+        race_source.write_bytes(race_source.read_bytes() + b"external change")
+        race_bytes = race_source.read_bytes()
+        race_report = epub_metadata.edit_metadata(
+            race_source, steward, {"title": "Race changed"},
+            expected_sha256=race_preview["sha256"])
+        all_ok &= check("a book changed after preview is never overwritten",
+                        race_report["status"] == "invalid"
+                        and race_source.read_bytes() == race_bytes,
+                        str(race_report))
+
+        wizard_source = make_metadata_epub(
+            steward / "wizard-download.epub", "Wizard Book", "Old Name", "", "",
+            version="3.0")
+        wizard_answers = iter(["", "New Name", "", "", "", "yes"])
+        wizard_prompts = []
+        wizard_report = ingest_book.edit_interactive(
+            wizard_source, steward,
+            input_fn=lambda prompt: (
+                wizard_prompts.append(prompt), next(wizard_answers))[1])
+        all_ok &= check("the terminal metadata wizard uses the shared editor and confirmation",
+                        wizard_report["status"] == "updated"
+                        and (steward / "Wizard Book - New Name.epub").exists()
+                        and len(wizard_prompts) == 6,
+                        f"{wizard_report}; {wizard_prompts}")
 
         httpd, server_url = start_server(root)
         try:

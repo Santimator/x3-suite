@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""File an EPUB under catalog metadata instead of its download filename.
+"""File, audit and explicitly edit EPUBs under catalog metadata.
 
 This is the catalog's operation, not Telegram's. The bot calls it as a
 subprocess; a terminal and any future importer can call the same interface.
-EPUB bytes are never rewritten. Series aliases and canonical filenames are
-catalog-side presentation only.
+Ordinary ingest, alias changes and catalog tidying never rewrite EPUB bytes.
+The ``edit`` command is the deliberate exception: after a human confirms an
+edit, it changes only the OPF metadata and preserves the rest of the book.
 
 Examples:
   ingest_book.py --json inspect download.epub --library workspace/library
   ingest_book.py --json ingest download.epub --library workspace/library
   ingest_book.py --json ingest download.epub --library workspace/library --alias LOTR
-  ingest_book.py --json normalize --library workspace/library --dry-run
+  ingest_book.py audit --library workspace/library
+  ingest_book.py tidy --library workspace/library
+  ingest_book.py edit --library workspace/library
 """
 from __future__ import annotations
 
@@ -29,6 +32,7 @@ from typing import Dict, Iterable, List, Optional, Tuple
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import library  # noqa: E402
+import epub_metadata  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 VERIFY = REPO_ROOT / "epub-builder" / "scripts" / "verify_epub.py"
@@ -119,58 +123,38 @@ def inspect(source: Path, library_dir: Path) -> dict:
 
 
 def _read_alias_document(library_dir: Path) -> dict:
-    path = library_dir / library.ALIAS_FILE
-    if not path.exists():
-        return {"version": 1, "aliases": {}}
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise IngestError(f"cannot read {path.name}: {exc}") from exc
-    if not isinstance(data, dict) or not isinstance(data.get("aliases", {}), dict):
-        raise IngestError(f"{path.name} is not a valid alias document")
-    return {"version": 1, "aliases": dict(data.get("aliases", {}))}
+        return library.read_alias_document(library_dir)
+    except ValueError as exc:
+        raise IngestError(str(exc)) from exc
 
 
 def _write_alias_document(library_dir: Path, data: dict) -> None:
-    library_dir.mkdir(parents=True, exist_ok=True)
-    path = library_dir / library.ALIAS_FILE
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-                   encoding="utf-8")
-    os.replace(tmp, path)
+    library.write_alias_document(library_dir, data)
 
 
 def _updated_alias_document(library_dir: Path, series: str, alias: str) -> dict:
-    series = library._clean(series)
-    if not series:
-        raise IngestError("the full series name cannot be empty")
     try:
-        alias = library.validate_alias(alias)
+        return library.with_alias(_read_alias_document(library_dir), series, alias)
     except ValueError as exc:
         raise IngestError(str(exc)) from exc
-    data = _read_alias_document(library_dir)
-    aliases = data["aliases"]
-    existing_key = next((name for name in aliases if str(name).casefold() == series.casefold()), None)
-    collision = next((name for name, used in aliases.items()
-                      if str(used).casefold() == alias.casefold()
-                      and str(name).casefold() != series.casefold()), None)
-    if collision:
-        raise IngestError(f"{alias!r} already means {collision!r}")
-    if existing_key and existing_key != series:
-        aliases.pop(existing_key)
-    aliases[series] = alias
-    return data
 
 
-def _rename_plan(books: Iterable[library.Book], alias_override: Optional[Tuple[str, str]] = None
+def _rename_plan(books: Iterable[library.Book], alias_override=None
                  ) -> Tuple[List[Tuple[Path, Path]], List[str]]:
     plan: List[Tuple[Path, Path]] = []
     missing = set()
-    override_name, override_alias = alias_override or ("", "")
+    if isinstance(alias_override, dict):
+        overrides = {str(name).casefold(): str(alias)
+                     for name, alias in alias_override.items()}
+    elif alias_override:
+        overrides = {str(alias_override[0]).casefold(): str(alias_override[1])}
+    else:
+        overrides = {}
     for book in books:
         alias = book.series_alias
-        if book.series and book.series.casefold() == override_name.casefold():
-            alias = override_alias
+        if book.series and book.series.casefold() in overrides:
+            alias = overrides[book.series.casefold()]
         if book.series and not alias:
             missing.add(book.series)
             continue
@@ -361,16 +345,338 @@ def normalize(library_dir: Path, *, dry_run: bool = False) -> dict:
     }
 
 
+def _readable_catalog_books(library_dir: Path) -> Tuple[List[library.Book], list]:
+    """Return scanner records for readable EPUBs plus untouched failures."""
+    library_dir = Path(library_dir).resolve()
+    scanned = {str(Path(book.path).resolve()): book
+               for book in library.scan([library_dir], [])}
+    readable_books, invalid = [], []
+    if not library_dir.is_dir():
+        return readable_books, invalid
+    for path in sorted(library_dir.rglob("*.epub")):
+        if path.is_symlink():
+            invalid.append({"path": str(path),
+                            "error": "symbolic links are not modified by catalog tidy"})
+            continue
+        if not path.is_file():
+            continue
+        resolved = path.resolve()
+        ok, problem = _epub_readable(resolved)
+        if not ok:
+            invalid.append({"path": str(resolved), "error": problem})
+            continue
+        book = scanned.get(str(resolved))
+        if book is not None:
+            readable_books.append(book)
+    return readable_books, invalid
+
+
+def audit(library_dir: Path) -> dict:
+    """Read-only catalog audit: canonical names, aliases and unsafe cases."""
+    library_dir = Path(library_dir).resolve()
+    books, invalid = _readable_catalog_books(library_dir)
+    metadata_warnings = []
+    for book in books:
+        raw = library.read_opf_metadata(Path(book.path))
+        missing_fields = [field for field in ("title", "language")
+                          if not raw.get(field)]
+        if missing_fields:
+            metadata_warnings.append({
+                "path": book.path,
+                "warning": "missing required OPF " + ", ".join(missing_fields),
+            })
+    plan, missing = _rename_plan(books)
+    rename_error = ""
+    try:
+        _preflight(plan)
+    except IngestError as exc:
+        rename_error = str(exc)
+
+    alias_error = ""
+    try:
+        alias_doc = _read_alias_document(library_dir)
+        used_aliases = list(alias_doc["aliases"].values())
+    except IngestError as exc:
+        alias_error = str(exc)
+        used_aliases = list(library.load_aliases(library_dir).values())
+
+    missing_groups = []
+    for series in missing:
+        group = [book for book in books if book.series.casefold() == series.casefold()]
+        suggestion = library.suggest_alias(series, used_aliases)
+        used_aliases.append(suggestion)
+        missing_groups.append({
+            "series": series,
+            "suggested_alias": suggestion,
+            "count": len(group),
+            "books": [{"path": book.path, "title": book.base_title,
+                       "series_index": book.series_index} for book in group],
+        })
+
+    by_digest: Dict[str, list] = {}
+    for book in books:
+        path = Path(book.path)
+        try:
+            by_digest.setdefault(_digest(path), []).append(str(path))
+        except OSError:
+            pass
+    duplicates = [{"sha256": digest, "paths": paths}
+                  for digest, paths in by_digest.items() if len(paths) > 1]
+
+    rename_sources = {str(source.resolve()) for source, _ in plan}
+    pending_paths = {book["path"] for group in missing_groups for book in group["books"]}
+    correct = sum(1 for book in books
+                  if str(Path(book.path).resolve()) not in rename_sources
+                  and str(Path(book.path).resolve()) not in pending_paths)
+    if alias_error or rename_error:
+        status = "conflict"
+    elif missing_groups:
+        status = "needs_alias"
+    elif plan:
+        status = "needs_changes"
+    elif invalid or duplicates or metadata_warnings:
+        status = "issues"
+    else:
+        status = "clean"
+    return {
+        "status": status,
+        "library": str(library_dir),
+        "count": len(books) + len(invalid),
+        "readable": len(books),
+        "correct": correct,
+        "invalid": invalid,
+        "metadata_warnings": metadata_warnings,
+        "duplicates": duplicates,
+        "missing_series": missing_groups,
+        "missing_aliases": [group["series"] for group in missing_groups],
+        "renames": [{"from": str(source), "to": str(dest)} for source, dest in plan],
+        "alias_error": alias_error,
+        "rename_error": rename_error,
+    }
+
+
+def reconcile(library_dir: Path, aliases: Optional[Dict[str, str]] = None,
+              *, dry_run: bool = False, expected_renames: Optional[list] = None) -> dict:
+    """Apply a preflighted alias batch and canonicalize readable books only."""
+    library_dir = Path(library_dir).resolve()
+    aliases = aliases or {}
+    try:
+        before = _read_alias_document(library_dir)
+        after = before
+        for series, alias in aliases.items():
+            after = library.with_alias(after, series, alias)
+        books, invalid = _readable_catalog_books(library_dir)
+        overrides = {series: library.alias_for(series, after["aliases"])
+                     for series in aliases}
+        plan, missing = _rename_plan(books, overrides)
+        _preflight(plan)
+        serialized_plan = [{"from": str(source), "to": str(dest)}
+                           for source, dest in plan]
+        if expected_renames is not None and serialized_plan != expected_renames:
+            raise IngestError(
+                "the catalog changed after the preview; run the tidy audit again")
+        if not dry_run:
+            _apply_renames(plan)
+            try:
+                if after != before:
+                    _write_alias_document(library_dir, after)
+            except Exception:
+                _apply_renames((dest, source) for source, dest in reversed(plan))
+                raise
+    except (IngestError, OSError, ValueError) as exc:
+        return {"status": "conflict", "error": str(exc), "changed": 0,
+                "aliases_changed": 0, "missing_aliases": [], "renames": []}
+    return {
+        "status": "dry_run" if dry_run else "reconciled",
+        "changed": len(plan),
+        "aliases_changed": sum(
+            1 for name, value in after["aliases"].items()
+            if library.alias_for(name, before["aliases"]) != value),
+        "missing_aliases": missing,
+        "invalid": invalid,
+        "renames": serialized_plan,
+    }
+
+
+def tidy_interactive(library_dir: Path, *, input_fn=None) -> dict:
+    """Human terminal UI over ``audit`` and ``reconcile``.
+
+    Keep this prompt sequence aligned with Bot's queued alias conversation in
+    ``tools/tgbot/scripts/bot.py``.  Both are deliberately thin interfaces;
+    every decision and mutation remains in the functions above.
+    """
+    input_fn = input_fn or input
+    first = audit(library_dir)
+    print(f"Checked {first['count']} EPUB(s): {first['correct']} already canonical, "
+          f"{len(first['renames'])} rename(s), "
+          f"{len(first['missing_series'])} series alias(es) needed.")
+    for item in first["invalid"]:
+        print(f"  unreadable, left untouched: {item['path']} ({item['error']})")
+    for item in first["metadata_warnings"]:
+        print(f"  metadata warning, left untouched: {item['path']} "
+              f"({item['warning']})")
+    for group in first["duplicates"]:
+        print("  duplicate bytes, left untouched: " + ", ".join(group["paths"]))
+    if first.get("alias_error") or first.get("rename_error"):
+        return {"status": "conflict",
+                "error": first.get("alias_error") or first.get("rename_error")}
+
+    answers: Dict[str, str] = {}
+    working = _read_alias_document(Path(library_dir).resolve())
+    for group in first["missing_series"]:
+        while True:
+            volumes = ", ".join(
+                book["series_index"] or "?" for book in group["books"][:8])
+            prompt = (f"Short name for {group['series']} ({group['count']} book(s)"
+                      + (f", volumes {volumes}" if volumes else "")
+                      + f") [{group['suggested_alias']}] — '-' skips: ")
+            answer = input_fn(prompt).strip()
+            if answer == "-":
+                break
+            answer = answer or group["suggested_alias"]
+            try:
+                working = library.with_alias(working, group["series"], answer)
+            except ValueError as exc:
+                print(f"  {exc}")
+                continue
+            answers[group["series"]] = answer
+            break
+
+    preview = reconcile(library_dir, answers, dry_run=True)
+    if preview.get("status") == "conflict":
+        return preview
+    print(f"Plan: store {preview['aliases_changed']} alias(es) and rename "
+          f"{preview['changed']} file(s).")
+    for rename in preview["renames"]:
+        print(f"  {Path(rename['from']).name} -> {Path(rename['to']).name}")
+    if preview["missing_aliases"]:
+        print("Still skipped: " + ", ".join(preview["missing_aliases"]))
+    if not preview["aliases_changed"] and not preview["changed"]:
+        return {**preview, "status": "no_change"}
+    if input_fn("Apply this catalog-only plan? [y/N] ").strip().casefold() not in {
+            "y", "yes"}:
+        return {**preview, "status": "cancelled"}
+    return reconcile(library_dir, answers, expected_renames=preview["renames"])
+
+
+def _choose_book(library_dir: Path, input_fn) -> Optional[Path]:
+    books, _ = _readable_catalog_books(library_dir)
+    if not books:
+        print("No readable EPUBs in the catalog.")
+        return None
+    for number, book in enumerate(books, 1):
+        print(f"{number:>3}. {book.title} — {book.author or 'unknown'}")
+    while True:
+        answer = input_fn("Book number (empty cancels): ").strip()
+        if not answer:
+            return None
+        try:
+            return Path(books[int(answer) - 1].path)
+        except (ValueError, IndexError):
+            print("  Choose one of the listed numbers.")
+
+
+def edit_interactive(source: Optional[Path], library_dir: Path, *,
+                     dry_run: bool = False, input_fn=None) -> dict:
+    """Terminal metadata wizard over the same typed editor Telegram calls.
+
+    If this conversational surface changes, review Bot.show_book_metadata and
+    Bot.on_book_metadata_callback too; neither layer may acquire metadata rules
+    of its own.
+    """
+    input_fn = input_fn or input
+    library_dir = Path(library_dir).resolve()
+    source = Path(source).resolve() if source else _choose_book(library_dir, input_fn)
+    if source is None:
+        return {"status": "cancelled"}
+    report = epub_metadata.inspect_metadata(source, library_dir)
+    if report.get("status") == "invalid":
+        return report
+    current = report["metadata"]
+    labels = {
+        "title": "Title", "author": "Author", "series": "Series",
+        "series_index": "Series position", "language": "Language",
+    }
+    updates = {}
+    print(f"Editing {source.name} (EPUB {report['package_version']})")
+    print("Enter keeps the current value; '-' clears an optional value.")
+    for field in epub_metadata.EDITABLE_FIELDS:
+        shown = current[field] or "(empty)"
+        while True:
+            answer = input_fn(f"{labels[field]} [{shown}]: ")
+            if answer == "":
+                break
+            if answer.strip() == "-":
+                if field not in epub_metadata.OPTIONAL_FIELDS:
+                    print("  That field is required and cannot be cleared.")
+                    continue
+                updates[field] = ""
+            else:
+                updates[field] = answer
+            break
+
+    alias = ""
+    preview = epub_metadata.edit_metadata(
+        source, library_dir, updates, dry_run=True)
+    if preview.get("status") == "needs_alias":
+        while True:
+            alias = input_fn(
+                f"Short name for {preview['series']} "
+                f"[{preview['suggested_alias']}]: ").strip() or preview["suggested_alias"]
+            preview = epub_metadata.edit_metadata(
+                source, library_dir, updates, alias=alias, dry_run=True)
+            if preview.get("status") != "conflict":
+                break
+            print(f"  {preview.get('error', 'that alias cannot be used')}")
+    if preview.get("status") in {"invalid", "conflict", "error"}:
+        return preview
+    for field in preview.get("changed_fields", []):
+        before = preview["metadata_before"][field] or "(empty)"
+        after = preview["metadata_after"][field] or "(empty)"
+        print(f"  {labels[field]}: {before} -> {after}")
+    if preview.get("renames"):
+        print(f"  File: {source.name} -> {Path(preview['destination']).name}")
+    if dry_run:
+        return preview
+    if not preview.get("changed_fields") and not preview.get("renames") and not alias:
+        return {**preview, "status": "no_change"}
+    if input_fn("Write this metadata and canonical filename? [y/N] ").strip().casefold() \
+            not in {"y", "yes"}:
+        return {**preview, "status": "cancelled"}
+    return epub_metadata.edit_metadata(
+        source, library_dir, updates, alias=alias,
+        expected_sha256=preview.get("sha256", ""))
+
+
 def _print_human(report: dict) -> None:
     print(report.get("status", "unknown"))
     if report.get("error"):
         print("  " + report["error"])
+    if "count" in report:
+        print(f"  {report.get('correct', 0)} of {report['count']} already canonical")
+    if report.get("metadata"):
+        for field in epub_metadata.EDITABLE_FIELDS:
+            print(f"  {field}: {report['metadata'].get(field) or '(empty)'}")
+    if report.get("metadata_after"):
+        for field in epub_metadata.EDITABLE_FIELDS:
+            print(f"  {field}: {report['metadata_after'].get(field) or '(empty)'}")
+    if report.get("destination"):
+        print(f"  file: {report.get('source')} -> {report['destination']}")
     if report.get("series"):
         print(f"  series: {report['series']} [{report.get('series_alias') or '?'}]")
     for rename in report.get("renames", []):
         print(f"  {rename['from']} -> {rename['to']}")
     if report.get("missing_aliases"):
         print("  aliases still needed: " + ", ".join(report["missing_aliases"]))
+    for item in report.get("invalid", []):
+        print(f"  unreadable, untouched: {item['path']} ({item['error']})")
+    for item in report.get("metadata_warnings", []):
+        print(f"  metadata warning: {item['path']} ({item['warning']})")
+    for group in report.get("duplicates", []):
+        print("  duplicate bytes, untouched: " + ", ".join(group["paths"]))
+    for group in report.get("missing_series", []):
+        print(f"  alias needed: {group['series']} "
+              f"[{group['suggested_alias']}] ({group['count']} book(s))")
 
 
 def main(argv=None) -> int:
@@ -397,6 +703,30 @@ def main(argv=None) -> int:
     normal_ap.add_argument("--library", type=Path, required=True)
     normal_ap.add_argument("--dry-run", action="store_true")
 
+    audit_ap = sub.add_parser("audit", help="verify the catalog without changing it")
+    audit_ap.add_argument("--library", type=Path, required=True)
+
+    tidy_ap = sub.add_parser(
+        "tidy", help="ask once per missing series alias, then apply one catalog plan")
+    tidy_ap.add_argument("--library", type=Path, required=True)
+
+    metadata_ap = sub.add_parser("metadata", help="show the editable metadata for one book")
+    metadata_ap.add_argument("source", type=Path)
+    metadata_ap.add_argument("--library", type=Path, required=True)
+
+    edit_ap = sub.add_parser(
+        "edit", help="edit title, author, series, position and language")
+    edit_ap.add_argument("source", type=Path, nargs="?")
+    edit_ap.add_argument("--library", type=Path, required=True)
+    edit_ap.add_argument(
+        "--set-json", default="",
+        help="non-interactive field object used by steward interfaces")
+    edit_ap.add_argument("--alias", default="", help="confirmed alias for a new series")
+    edit_ap.add_argument(
+        "--expect-sha256", default="",
+        help="refuse if the EPUB changed after a prior preview")
+    edit_ap.add_argument("--dry-run", action="store_true")
+
     args = ap.parse_args(argv)
     try:
         if args.command == "inspect":
@@ -405,8 +735,31 @@ def main(argv=None) -> int:
             report = ingest(args.source, args.library, args.alias)
         elif args.command == "set-alias":
             report = set_alias(args.library, args.series, args.alias, dry_run=args.dry_run)
-        else:
+        elif args.command == "normalize":
             report = normalize(args.library, dry_run=args.dry_run)
+        elif args.command == "audit":
+            report = audit(args.library)
+        elif args.command == "tidy":
+            if args.json:
+                raise IngestError("tidy is an interactive terminal command; use audit for JSON")
+            report = tidy_interactive(args.library)
+        elif args.command == "metadata":
+            report = epub_metadata.inspect_metadata(args.source, args.library)
+        elif args.set_json:
+            if args.source is None:
+                raise IngestError("non-interactive metadata editing requires a source path")
+            try:
+                updates = json.loads(args.set_json)
+            except json.JSONDecodeError as exc:
+                raise IngestError(f"--set-json is not valid JSON: {exc}") from exc
+            report = epub_metadata.edit_metadata(
+                args.source, args.library, updates, alias=args.alias,
+                dry_run=args.dry_run, expected_sha256=args.expect_sha256)
+        elif args.json:
+            raise IngestError("interactive edit cannot be combined with --json")
+        else:
+            report = edit_interactive(
+                args.source, args.library, dry_run=args.dry_run)
     except (IngestError, OSError) as exc:
         report = {"status": "error", "error": str(exc)}
 
