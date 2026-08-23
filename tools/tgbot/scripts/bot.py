@@ -40,6 +40,7 @@ import sys
 import threading
 import time
 import traceback
+import unicodedata
 from datetime import datetime
 from pathlib import Path
 
@@ -54,6 +55,8 @@ from telegram import GETFILE_LIMIT, Telegram, TelegramError
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
 MATS = [("≈ waves", "waves"), ("▣ edges", "edges"),
         ("◌ blur", "blur"), ("— white", "none")]
+NAV_PAGE = 7
+ALPHABET_THRESHOLD = 7
 
 
 def log(*parts) -> None:
@@ -179,6 +182,45 @@ class Bot:
         except TelegramError as exc:
             log("SEND LOST:", exc, "|", text[:120].replace("\n", " "))
             return None
+
+    def panel(self, chat, message_id, text: str, keyboard=None):
+        """Render a text navigator in place when it came from a button.
+
+        Telegram inline keyboards are a small UI, not a stream of status
+        messages.  Library, metadata and device navigation therefore edit the
+        message whose button was pressed.  A command or a free-standing result
+        has no message id and starts a new panel; an old/media message that
+        Telegram refuses to edit falls back to the same safe send path.
+        """
+        if message_id:
+            try:
+                self.tg.edit_message(chat, message_id, text, keyboard)
+                return {"message_id": message_id}
+            except TelegramError as exc:
+                log("panel edit failed:", exc, "— sending a fresh panel")
+        return self.say(chat, text, keyboard)
+
+    @staticmethod
+    def initial_bucket(label: str) -> str:
+        """A compact A-Z navigator, with accents folded and everything else #."""
+        folded = unicodedata.normalize("NFKD", label or "")
+        first = next((char.upper() for char in folded
+                      if not unicodedata.combining(char) and char.isalnum()), "#")
+        return first if "A" <= first <= "Z" else "#"
+
+    def alphabet_rows(self, labels: list[str], selected: str,
+                      callback) -> list:
+        """Only show buckets which contain something; six fit comfortably."""
+        buckets = sorted({self.initial_bucket(label) for label in labels},
+                         key=lambda value: (value == "#", value))
+        rows = []
+        for start in range(0, len(buckets), 6):
+            rows.append([
+                (("✓ " if bucket == selected else "") + bucket,
+                 callback("" if bucket == selected else bucket))
+                for bucket in buckets[start:start + 6]
+            ])
+        return rows
 
     # -- the gate ----------------------------------------------------------
 
@@ -397,7 +439,17 @@ class Bot:
 
         if job["kind"] == "seriesaliaschange":
             return self.submit(
-                chat, lambda: self.change_series_alias(chat, job["series"], text))
+                chat, lambda: self.change_series_alias(
+                    chat, job["series"], text,
+                    message_id=job.get("message_id"),
+                    library_state=job.get("library_state")))
+
+        if job["kind"] == "seriesnamechange":
+            return self.submit(
+                chat, lambda: self.preview_series_name(
+                    chat, job["series"], text,
+                    message_id=job.get("message_id"),
+                    library_state=job.get("library_state")))
 
         if job["kind"] == "bookmetadata":
             if text == "-" and job["field"] not in {"author", "series", "series_index"}:
@@ -405,20 +457,49 @@ class Bot:
             value = "" if text == "-" else text
             return self.submit(
                 chat, lambda: self.preview_book_metadata(
-                    chat, Path(job["path"]), {job["field"]: value}))
+                    chat, Path(job["path"]), {job["field"]: value},
+                    message_id=job.get("message_id"),
+                    back_book=job.get("back_book")))
 
         if job["kind"] == "bookmetaalias":
             return self.submit(
                 chat, lambda: self.preview_book_metadata(
                     chat, Path(job["path"]), job["updates"], alias=text,
-                    alias_prompt=(job["series"], job["suggestion"])))
+                    alias_prompt=(job["series"], job["suggestion"]),
+                    message_id=job.get("message_id"),
+                    back_book=job.get("back_book")))
+
+        if job["kind"] == "bookseriesname":
+            return self.submit(
+                chat, lambda: self.accept_book_series_name(
+                    chat, Path(job["path"]), text, job.get("back_book") or {},
+                    message_id=job.get("message_id")))
+
+        if job["kind"] == "bookseriesalias":
+            return self.submit(
+                chat, lambda: self.accept_book_series_alias(
+                    chat, Path(job["path"]), job["series"], text,
+                    job.get("back_book") or {}, message_id=job.get("message_id")))
+
+        if job["kind"] == "bookseriesposition":
+            position = "" if text == "-" else text
+            retry = {"path": job["path"], "series": job["series"],
+                     "alias": job.get("alias", ""),
+                     "back_book": job.get("back_book") or {}}
+            return self.submit(
+                chat, lambda: self.preview_book_metadata(
+                    chat, Path(job["path"]),
+                    {"series": job["series"], "series_index": position},
+                    alias=job.get("alias", ""),
+                    message_id=job.get("message_id"),
+                    back_book=job.get("back_book"), retry_position=retry))
 
     # -- menus -------------------------------------------------------------
 
-    def menu(self, chat, text: str = "Menu") -> None:
+    def menu(self, chat, text: str = "Menu", message_id=None) -> None:
         # Three collections on the server, then the ways in and out of it.
         # The queue is an outbox, so it is 📤 rather than a second 🖼.
-        self.say(chat, text, [
+        self.panel(chat, message_id, text, [
             [("📚 Library", "m:lib"), ("🖼 Wallpapers", "m:wl")],
             [("🔤 Fonts", "m:fo"), ("📥 Inbox", "m:in")],
             [("📲 Device", "m:dev"), ("📤 Queue", "m:q")],
@@ -428,18 +509,21 @@ class Bot:
     def on_callback(self, cb: dict) -> None:
         data = cb.get("data") or ""
         chat = cb["message"]["chat"]["id"]
+        message_id = (cb.get("message") or {}).get("message_id")
         self.tg.answer_callback(cb["id"])
         head, _, rest = data.partition(":")
 
         if head == "m":
-            return {"lib": lambda: self.submit(chat, lambda: self.show_library(chat)),
+            return {"lib": lambda: self.submit(
+                        chat, lambda: self.show_library(chat, message_id=message_id)),
                     "q": lambda: self.show_queue(chat),
                     "in": lambda: self.show_inbox(chat),
-                    "dev": lambda: self.show_device(chat),
+                    "dev": lambda: self.show_device(chat, message_id=message_id),
                     "fo": lambda: self.show_fonts(chat),
                     "wl": lambda: self.show_wallpapers(chat),
                     "st": lambda: self.submit(chat, lambda: self.show_status(chat)),
-                    "main": lambda: self.menu(chat)}.get(rest, lambda: None)()
+                    "main": lambda: self.menu(chat, message_id=message_id)}.get(
+                        rest, lambda: None)()
 
         if head == "fo":
             return self.on_font_callback(chat, rest)
@@ -522,13 +606,15 @@ class Bot:
 
         if head == "dev":
             return self.on_device_callback(
-                chat, rest, (cb.get("message") or {}).get("message_id"))
+                chat, rest, message_id)
         if head == "lib":
-            return self.on_library_callback(chat, rest)
+            return self.on_library_callback(chat, rest, message_id)
         if head == "ser":
-            return self.on_series_callback(chat, rest)
+            return self.on_series_callback(chat, rest, message_id)
+        if head == "srn":
+            return self.on_series_rename_callback(chat, rest, message_id)
         if head == "bm":
-            return self.on_book_metadata_callback(chat, rest)
+            return self.on_book_metadata_callback(chat, rest, message_id)
         if head == "in":
             path = self.tokens.get(rest)
             if not path:
@@ -916,15 +1002,21 @@ class Bot:
 
     # -- views -------------------------------------------------------------
 
-    def show_library(self, chat, page: int = 0) -> None:
+    def show_library(self, chat, page: int = 0, *, message_id=None,
+                     state: dict | None = None) -> None:
         try:
             lib = suite.library()
         except suite.SuiteError as exc:
-            return self.say(chat, f"⚠️ {exc}")
+            return self.panel(chat, message_id, f"⚠️ {exc}")
         books = lib.get("books", [])
         if not books:
-            return self.say(chat, "No books yet. Send me an EPUB.",
-                            [[("🏠 Menu", "m:main")]])
+            return self.panel(chat, message_id, "No books yet. Send me an EPUB.",
+                              [[("🏠 Menu", "m:main")]])
+
+        state = dict(state or {"kind": "all", "initial": "", "page": page})
+        kind = state.get("kind") if state.get("kind") in {
+            "all", "series", "standalone"} else "all"
+        initial = state.get("initial", "")
 
         groups = lib.get("series", [])
         grouped_ids = {book_id for group in groups
@@ -934,30 +1026,61 @@ class Bot:
         for group in groups:
             label = f"📚 {group['name']} · {group['count']}"
             entries.append((group["name"].casefold(), 0, label,
-                            "series", group["key"]))
+                            "series", group["key"], group["name"]))
         for book in standalone:
             title = book.get("base_title") or book.get("title") or Path(book["path"]).stem
             author = book.get("author") or "?"
             label = f"📖 {title[:32]} · {author[:14]}"
             # The whole record, not just the path: sending it to the card later
             # needs the author and title the catalog knows it by.
-            entries.append((title.casefold(), 1, label, "book", book))
+            entries.append((title.casefold(), 1, label, "book", book, title))
         entries.sort(key=lambda entry: (entry[0], entry[1]))
 
-        page_size = 18
-        last_page = max(0, (len(entries) - 1) // page_size)
-        page = max(0, min(page, last_page))
-        start = page * page_size
-        rows = []
-        for _, _, label, kind, payload in entries[start:start + page_size]:
+        entry_kind = {"series": "series", "standalone": "book"}.get(kind)
+        typed = [entry for entry in entries
+                 if kind == "all" or entry[3] == entry_kind]
+        buckets = {self.initial_bucket(entry[5]) for entry in typed}
+        if initial not in buckets:
+            initial = ""
+        filtered = [entry for entry in typed
+                    if not initial or self.initial_bucket(entry[5]) == initial]
+        last_page = max(0, (len(filtered) - 1) // NAV_PAGE)
+        page = max(0, min(int(state.get("page", 0)), last_page))
+        state = {"kind": kind, "initial": initial, "page": page}
+
+        def view(**changes):
+            target = {**state, **changes}
+            return f"lib:v:{self.tokens.put(target)}"
+
+        rows = [[
+            (("✓ " if kind == value else "") + label, view(kind=value, page=0))
+            for value, label in (("all", "All"), ("series", "Series"),
+                                 ("standalone", "Standalone"))
+        ]]
+        if len(typed) > ALPHABET_THRESHOLD:
+            rows.extend(self.alphabet_rows(
+                [entry[5] for entry in typed], initial,
+                lambda bucket: view(initial=bucket, page=0)))
+
+        start = page * NAV_PAGE
+        for _, _, label, entry_kind, payload, _ in filtered[start:start + NAV_PAGE]:
+            context = dict(state)
+            if entry_kind == "series":
+                payload = {"key": payload, "page": 0,
+                           "library_state": context}
+            else:
+                payload = {**payload, "_library_state": context}
             token = self.tokens.put(payload)
-            callback = f"ser:f:{token}" if kind == "series" else f"lib:f:{token}"
+            callback = (f"ser:f:{token}" if entry_kind == "series"
+                        else f"lib:f:{token}")
             rows.append([(label[:52], callback)])
         navigation = []
         if page:
-            navigation.append(("‹ Previous", f"lib:p:{page - 1}"))
+            navigation.append(("‹", view(page=page - 1)))
+        if last_page:
+            navigation.append((f"{page + 1}/{last_page + 1}", "lib:nop:"))
         if page < last_page:
-            navigation.append(("Next ›", f"lib:p:{page + 1}"))
+            navigation.append(("›", view(page=page + 1)))
         if navigation:
             rows.append(navigation)
         rows.append([("🏠 Menu", "m:main")])
@@ -966,9 +1089,12 @@ class Bot:
             summary += " · " + counted(len(groups), "series", "series")
             if standalone:
                 summary += " · " + counted(len(standalone), "standalone book")
+        shown = {"all": "All", "series": "Series",
+                 "standalone": "Standalone"}[kind]
+        summary += f"\nShowing: {shown}" + (f" · {initial}" if initial else "")
         if last_page:
             summary += f"\nPage {page + 1} of {last_page + 1}"
-        self.say(chat, summary, rows)
+        self.panel(chat, message_id, summary, rows)
 
     def series_group(self, key: str) -> tuple:
         lib = suite.library()
@@ -979,22 +1105,28 @@ class Bot:
         return group, [by_id[book_id] for book_id in group.get("book_ids", [])
                        if book_id in by_id]
 
-    def on_series_callback(self, chat, rest: str) -> None:
-        if self.pending and self.pending.get("kind") == "seriesaliaschange":
+    def on_series_callback(self, chat, rest: str, message_id=None) -> None:
+        if self.pending and self.pending.get("kind") in {
+                "seriesaliaschange", "seriesnamechange"}:
             self.pending = None
         if rest == "list":
             # Compatibility for buttons sent before the unified library view.
-            return self.submit(chat, lambda: self.show_library(chat))
+            return self.submit(
+                chat, lambda: self.show_library(chat, message_id=message_id))
         action, _, token = rest.partition(":")
         payload = self.tokens.get(token)
         if not payload:
             return self.stale(chat)
         key = payload.get("key") if isinstance(payload, dict) else payload
         page = payload.get("page", 0) if isinstance(payload, dict) else 0
+        library_state = (payload.get("library_state", {})
+                         if isinstance(payload, dict) else {})
+        again_payload = {"key": key, "page": page,
+                         "library_state": library_state}
         try:
             group, books = self.series_group(key)
         except suite.SuiteError as exc:
-            return self.say(chat, f"⚠️ {exc}")
+            return self.panel(chat, message_id, f"⚠️ {exc}")
         if not group:
             return self.stale(chat)
 
@@ -1003,74 +1135,99 @@ class Bot:
             action = "f"
 
         if action == "f":
-            page_size = 12
-            last_page = max(0, (len(books) - 1) // page_size)
+            last_page = max(0, (len(books) - 1) // NAV_PAGE)
             page = max(0, min(page, last_page))
-            start = page * page_size
+            start = page * NAV_PAGE
             lines = [f"📚 <b>{html.escape(group['name'])}</b>",
                      f"short name: <code>{html.escape(group.get('alias') or 'not set')}</code>",
                      counted(len(books), "book")]
             if last_page:
                 lines.append(f"Page {page + 1} of {last_page + 1}")
             rows = []
-            for book in books[start:start + page_size]:
+            for book in books[start:start + NAV_PAGE]:
                 position = (f"{book.get('series_index')} · "
                             if book.get("series_index") else "")
                 title = (book.get("base_title") or book.get("title")
                          or Path(book["path"]).stem)
-                contextual = {**book, "_series_key": key, "_series_page": page}
+                contextual = {**book, "_series_key": key, "_series_page": page,
+                              "_library_state": library_state}
                 rows.append([(("📖 " + position + title)[:52],
                               f"lib:f:{self.tokens.put(contextual)}")])
             navigation = []
             if page:
-                previous = self.tokens.put({"key": key, "page": page - 1})
+                previous = self.tokens.put({"key": key, "page": page - 1,
+                                            "library_state": library_state})
                 navigation.append(("‹ Previous", f"ser:f:{previous}"))
             if page < last_page:
-                following = self.tokens.put({"key": key, "page": page + 1})
+                following = self.tokens.put({"key": key, "page": page + 1,
+                                             "library_state": library_state})
                 navigation.append(("Next ›", f"ser:f:{following}"))
             if navigation:
                 rows.append(navigation)
-            again = self.tokens.put(key)
+            again = self.tokens.put(again_payload)
+            library_back = (f"lib:v:{self.tokens.put(library_state)}"
+                            if library_state else "m:lib")
             rows.extend([
-                [(f"📤 Queue all {len(books)}", f"ser:q:{again}")],
+                [(f"📤 Add all {len(books)} to X3", f"ser:q:{again}")],
+                [("✏️ Change series name", f"ser:n:{again}")],
                 [("✏️ Change short name", f"ser:a:{again}")],
-                [("🗑 Remove all from X3", f"ser:rm:{again}")],
-                [("📚 Library", "m:lib")],
+                [("📚 Library", library_back)],
             ])
-            return self.say(
-                chat, "\n".join(lines), rows)
+            return self.panel(chat, message_id, "\n".join(lines), rows)
 
         if action == "q":
-            self.say(chat, f"Preparing {counted(len(books), 'book')} for the reader…")
-            return self.submit(chat, lambda: self.queue_series(chat, group, books))
-
-        if action == "rm":
-            again = self.tokens.put(key)
-            return self.say(
-                chat,
-                f"Remove every <b>{html.escape(group['name'])}</b> volume found "
-                "on the X3?\n\nThe catalog originals stay exactly where they are.",
-                [[("Yes, remove from X3", f"ser:rm!:{again}"),
-                  ("No", f"ser:f:{again}")]])
-
-        if action == "rm!":
-            self.say(chat, "📡 Listening for the reader…")
+            self.panel(chat, message_id,
+                       f"Preparing {counted(len(books), 'book')} for the queue…")
             return self.submit(
-                chat, lambda: self.remove_series_from_device(chat, group, books))
+                chat, lambda: self.queue_series(
+                    chat, group, books, message_id=message_id,
+                    library_state=library_state))
+
+        if action in {"rm", "rm!"}:
+            # Compatibility for series cards already sitting in chat. Device
+            # deletion now belongs exclusively to the connected-device view.
+            again = self.tokens.put({"key": key, "page": page,
+                                     "library_state": library_state})
+            return self.panel(
+                chat, message_id,
+                "Removing books belongs in <b>Device</b>, where the X3 is "
+                "connected and its actual contents are visible.",
+                [[("📲 Device", "m:dev"),
+                  ("◀ Series", f"ser:f:{again}")]])
+
+        if action == "n":
+            if self.pending:
+                return self.panel(
+                    chat, message_id,
+                    "Finish the current question first, or send /cancel.")
+            self.pending = {
+                "kind": "seriesnamechange", "series": group["name"],
+                "message_id": message_id, "library_state": library_state,
+            }
+            return self.panel(
+                chat, message_id,
+                f"Send the new full name for <b>{html.escape(group['name'])}</b>.\n\n"
+                "Every volume will be previewed together before anything is written.",
+                [[("✗ Cancel", f"ser:f:{self.tokens.put({**again_payload})}")]])
 
         if action == "a":
             if self.pending:
-                return self.say(
-                    chat, "Finish the current question first, or send /cancel.")
-            self.pending = {"kind": "seriesaliaschange", "series": group["name"]}
-            return self.say(
+                return self.panel(
+                    chat, message_id,
+                    "Finish the current question first, or send /cancel.")
+            self.pending = {"kind": "seriesaliaschange", "series": group["name"],
+                            "message_id": message_id,
+                            "library_state": library_state}
+            return self.panel(
                 chat,
+                message_id,
                 f"Send the new short name for <b>{html.escape(group['name'])}</b> "
                 "(maximum 6 characters). This renames all of its catalog files "
                 "together; their EPUB bytes do not change.",
-                [[("✗ Cancel", f"ser:f:{self.tokens.put(key)}")]])
+                [[("✗ Cancel", f"ser:f:{self.tokens.put(again_payload)}")]])
 
-    def queue_series(self, chat, group: dict, books: list) -> None:
+    def queue_series(self, chat, group: dict, books: list, *, message_id=None,
+                     library_state: dict | None = None) -> None:
         queued = skipped = 0
         saved = 0
         failed = []
@@ -1093,46 +1250,21 @@ class Bot:
         if failed:
             lines.append("Could not prepare:\n" + "\n".join(
                 f"· {html.escape(detail[:100])}" for detail in failed))
-        self.say(chat, "\n".join(lines),
-                 [[("📲 Push now", "push:ask"), ("📤 Queue", "m:q")],
-                  [("📚 Library", "m:lib")]])
+        library_back = (f"lib:v:{self.tokens.put(library_state)}"
+                        if library_state else "m:lib")
+        self.panel(chat, message_id, "\n".join(lines),
+                   [[("📲 Push now", "push:ask"), ("📤 Queue", "m:q")],
+                    [("📚 Library", library_back)]])
 
-    def remove_series_from_device(self, chat, group: dict, books: list) -> None:
-        try:
-            host, _ = self.device_host()
-        except suite.DeviceError as exc:
-            return self.no_reader(chat, str(exc))
-        candidates = suite.device_book_name_candidates(books, host)
-        present = {entry.get("name") for entry in suite.device.list_dir(host, "/")
-                   if not entry.get("isDirectory")}
-        matched = [[name for name in names if name in present] for names in candidates]
-        targets = ["/" + name for name in dict.fromkeys(
-            name for names in matched for name in names)]
-        if not targets:
-            return self.say(
-                chat,
-                f"No <b>{html.escape(group['name'])}</b> volumes were found at "
-                "the X3 root. The catalog was not touched.",
-                [[("📚 Library", "m:lib"), ("🏠 Menu", "m:main")]])
-        ok, detail = suite.device.delete_many(host, targets)
-        if not ok:
-            return self.say(chat, "⚠️ The X3 refused the bulk removal: "
-                            f"{html.escape(detail[:200])}",
-                            [[("📚 Library", "m:lib")]])
-        self.say(
-            chat,
-            f"🗑 Removed {len(targets)} <b>{html.escape(group['name'])}</b> "
-            f"book file(s) from the X3; "
-            f"{sum(not names for names in matched)} volume(s) were not there.\n"
-            "Catalog originals and the delivery queue were not touched.",
-            [[("📚 Library", "m:lib"), ("🏠 Menu", "m:main")]])
-
-    def change_series_alias(self, chat, series: str, alias: str) -> None:
+    def change_series_alias(self, chat, series: str, alias: str, *,
+                            message_id=None,
+                            library_state: dict | None = None) -> None:
         report = suite.set_series_alias(self.workspace / "library", series, alias)
         if report.get("status") not in ("alias_set", "dry_run"):
-            return self.say(chat, "⚠️ Short name not changed: "
-                            f"{html.escape(report.get('error', 'unknown error'))}",
-                            [[("📚 Library", "m:lib")]])
+            return self.panel(
+                chat, message_id, "⚠️ Short name not changed: "
+                f"{html.escape(report.get('error', 'unknown error'))}",
+                [[("📚 Library", "m:lib")]])
         try:
             lib = suite.library()
         except suite.SuiteError:
@@ -1144,22 +1276,166 @@ class Bot:
             if book:
                 replacements[str(Path(rename["from"]))] = book
         followed = self.queue.remap_books(replacements)
-        self.say(
-            chat,
+        group = next((item for item in lib.get("series", [])
+                      if item.get("name", "").casefold() == series.casefold()), None)
+        rows = [[("📚 Library", f"lib:v:{self.tokens.put(library_state)}"
+                  if library_state else "m:lib")]]
+        if group:
+            rows.insert(0, [("◀ Series", f"ser:f:{self.tokens.put({
+                'key': group['key'], 'page': 0,
+                'library_state': library_state or {},
+            })}")])
+        self.panel(
+            chat, message_id,
             f"✅ <b>{html.escape(series)}</b> now uses "
             f"<code>{html.escape(report['series_alias'])}</code>. "
             f"Renamed {report.get('changed', 0)} catalog file(s)"
             + (f" and updated {followed} queued path(s)." if followed else "."),
-            [[("📚 Library", "m:lib"), ("🏠 Menu", "m:main")]])
+            rows)
 
-    def on_library_callback(self, chat, rest: str) -> None:
+    def preview_series_name(self, chat, series: str, new_name: str, *,
+                            merge: bool = False, message_id=None,
+                            library_state: dict | None = None) -> None:
+        report = suite.rename_series(
+            self.workspace / "library", series, new_name,
+            merge=merge, dry_run=True)
+        if report.get("status") == "needs_merge":
+            token = self.tokens.put({
+                "series": series, "new_name": report.get("target_series", new_name),
+                "library_state": library_state or {},
+            })
+            return self.panel(
+                chat, message_id,
+                f"<b>{html.escape(report.get('target_series', new_name))}</b> already "
+                f"exists with {counted(report.get('target_count', 0), 'book')}.\n\n"
+                f"Merge the {counted(report.get('count', 0), 'book')} from "
+                f"<b>{html.escape(series)}</b> into it?",
+                [[("Merge series", f"srn:merge:{token}"),
+                  ("No", "m:lib")]])
+        if report.get("status") in {"invalid", "conflict", "error"}:
+            try:
+                group, _ = self.series_group(next(
+                    item["key"] for item in suite.library().get("series", [])
+                    if item.get("name", "").casefold() == series.casefold()))
+            except (StopIteration, suite.SuiteError):
+                group = None
+            rows = [[("📚 Library", "m:lib")]]
+            if group:
+                rows.insert(0, [("◀ Series", f"ser:f:{self.tokens.put({
+                    'key': group['key'], 'page': 0,
+                    'library_state': library_state or {},
+                })}")])
+            return self.panel(
+                chat, message_id,
+                "⚠️ Series name not changed: "
+                + html.escape(report.get("error", "The rename is not valid.")), rows)
+        if report.get("status") == "no_change":
+            return self.panel(
+                chat, message_id, "That is already the series name.",
+                [[("📚 Library", "m:lib")]])
+
+        lines = ["📝 <b>Confirm series change</b>",
+                 f"<code>{html.escape(report.get('series_before', series))}</code> → "
+                 f"<code>{html.escape(report.get('series', new_name))}</code>",
+                 counted(report.get("count", 0), "book")]
+        if report.get("merge"):
+            lines.append("The destination series’ short name will be used.")
+        for item in report.get("books", [])[:NAV_PAGE]:
+            position = (item.get("series_index") + " · "
+                        if item.get("series_index") else "")
+            lines.append("· " + html.escape(position + item.get("title", "")))
+        if report.get("count", 0) > NAV_PAGE:
+            lines.append(f"… and {report['count'] - NAV_PAGE} more")
+        token = self.tokens.put({
+            "series": series, "new_name": report.get("series", new_name),
+            "merge": bool(report.get("merge")),
+            "expected_sha256s": report.get("expected_sha256s", {}),
+            "library_state": library_state or {},
+        })
+        self.panel(
+            chat, message_id, "\n".join(lines),
+            [[("✓ Merge" if report.get("merge") else "✓ Rename",
+              f"srn:apply:{token}"),
+              ("No", "m:lib")]])
+
+    def on_series_rename_callback(self, chat, rest: str, message_id=None) -> None:
         action, _, token = rest.partition(":")
+        payload = self.tokens.get(token)
+        if not isinstance(payload, dict):
+            return self.stale(chat)
+        if action == "merge":
+            return self.submit(
+                chat, lambda: self.preview_series_name(
+                    chat, payload["series"], payload["new_name"], merge=True,
+                    message_id=message_id,
+                    library_state=payload.get("library_state")))
+        if action != "apply":
+            return self.stale(chat)
+        self.panel(chat, message_id, "Updating every volume…")
+        return self.submit(
+            chat, lambda: self.apply_series_name(
+                chat, payload, message_id=message_id))
+
+    def apply_series_name(self, chat, payload: dict, *, message_id=None) -> None:
+        report = suite.rename_series(
+            self.workspace / "library", payload["series"], payload["new_name"],
+            merge=payload.get("merge", False),
+            expected_sha256s=payload.get("expected_sha256s", {}))
+        if report.get("status") not in {"renamed", "no_change"}:
+            return self.panel(
+                chat, message_id,
+                "⚠️ Series name not changed: "
+                + html.escape(report.get("error", "The catalog changed.")),
+                [[("📚 Library", "m:lib")]])
+        try:
+            lib = suite.library()
+        except suite.SuiteError:
+            lib = {"books": [], "series": []}
+        fresh = {str(Path(book["path"])): book for book in lib.get("books", [])}
+        replacements = {}
+        for item in report.get("books", []):
+            book = fresh.get(str(Path(item["to"])))
+            if book:
+                replacements[str(Path(item["from"]))] = book
+        followed = self.queue.remap_books(replacements, invalidate_slim=True)
+        group = next((item for item in lib.get("series", [])
+                      if item.get("name", "").casefold()
+                      == report.get("series", "").casefold()), None)
+        rows = []
+        if group:
+            rows.append([("📚 Open series", f"ser:f:{self.tokens.put({
+                'key': group['key'], 'page': 0,
+                'library_state': payload.get('library_state', {}),
+            })}")])
+        rows.append([("📚 Library", f"lib:v:{self.tokens.put(payload.get('library_state', {}))}"
+                     if payload.get("library_state") else "m:lib")])
+        verb = "Merged" if report.get("merge") else "Renamed"
+        note = f"\nUpdated {followed} queued book(s)." if followed else ""
+        self.panel(
+            chat, message_id,
+            f"✅ {verb} {counted(report.get('count', 0), 'book')} under "
+            f"<b>{html.escape(report.get('series', payload['new_name']))}</b>."
+            + note, rows)
+
+    def on_library_callback(self, chat, rest: str, message_id=None) -> None:
+        action, _, token = rest.partition(":")
+        if action == "nop":
+            return
+        if action == "v":
+            state = self.tokens.get(token)
+            if not isinstance(state, dict):
+                return self.stale(chat)
+            return self.submit(
+                chat, lambda: self.show_library(
+                    chat, message_id=message_id, state=state))
         if action == "p":
             try:
                 page = int(token)
             except ValueError:
                 return self.stale(chat)
-            return self.submit(chat, lambda: self.show_library(chat, page))
+            return self.submit(
+                chat, lambda: self.show_library(
+                    chat, page, message_id=message_id))
         book = self.tokens.get(token)
         if not book:
             return self.stale(chat)
@@ -1171,36 +1447,50 @@ class Bot:
             send = self.tokens.put({"path": str(path),
                                     "title": book.get("title") or path.stem,
                                     "author": book.get("author") or ""})
-            back = [("📚 Library", "m:lib")]
+            library_state = book.get("_library_state") or {}
+            library_back = (f"lib:v:{self.tokens.put(library_state)}"
+                            if library_state else "m:lib")
+            back = [("📚 Library", library_back)]
             if book.get("_series_key"):
                 series_token = self.tokens.put({
-                    "key": book["_series_key"], "page": book.get("_series_page", 0)})
+                    "key": book["_series_key"], "page": book.get("_series_page", 0),
+                    "library_state": library_state})
                 back = [("◀ Series", f"ser:f:{series_token}"),
-                        ("📚 Library", "m:lib")]
-            return self.say(
-                chat, f"<code>{html.escape(path.name)}</code>",
+                        ("📚 Library", library_back)]
+            return self.panel(
+                chat, message_id, f"<code>{html.escape(path.name)}</code>",
                 [[("📤 Send to device", f"bq:{send}")],
                  [("📝 Metadata", f"lib:meta:{token}")],
                  [("✏️ Rename file", f"lib:rn:{token}"),
                   ("🗑 Delete", f"lib:rm:{token}")],
                  back])
         if action == "meta":
-            return self.submit(chat, lambda: self.show_book_metadata(chat, path, book))
+            return self.submit(
+                chat, lambda: self.show_book_metadata(
+                    chat, path, book, message_id=message_id))
         if action == "rn":
             if self.pending:
-                return self.say(
-                    chat, "Finish the current question first, or send /cancel.")
+                return self.panel(
+                    chat, message_id,
+                    "Finish the current question first, or send /cancel.")
             self.pending = {"kind": "librename", "path": str(path)}
-            return self.say(chat, "Send me the new filename.")
+            return self.panel(chat, message_id, "Send me the new filename.")
         if action == "rm":
-            return self.say(chat, f"Delete <code>{html.escape(path.name)}</code> "
-                                  f"from the server?",
-                            [[("Yes, delete", f"lib:rm!:{token}"), ("No", "m:lib")]])
+            return self.panel(
+                chat, message_id,
+                f"Delete <code>{html.escape(path.name)}</code> from the server?",
+                [[("Yes, delete", f"lib:rm!:{token}"),
+                  ("No", f"lib:f:{token}")]])
         if action == "rm!":
             if not inside(self.workspace, path):
-                return self.say(chat, "⚠️ that is outside the workspace.")
+                return self.panel(
+                    chat, message_id, "⚠️ that is outside the workspace.")
             path.unlink(missing_ok=True)
-            return self.say(chat, "🗑 gone.", [[("📚 Library", "m:lib")]])
+            library_state = book.get("_library_state") or {}
+            library_back = (f"lib:v:{self.tokens.put(library_state)}"
+                            if library_state else "m:lib")
+            return self.panel(chat, message_id, "🗑 gone.",
+                              [[("📚 Library", library_back)]])
 
     # -- catalog metadata -------------------------------------------------
 
@@ -1210,7 +1500,8 @@ class Bot:
     }
     META_OPTIONAL = {"author", "series", "series_index"}
 
-    def show_book_metadata(self, chat, path: Path, back_book: dict = None) -> None:
+    def show_book_metadata(self, chat, path: Path, back_book: dict = None,
+                           *, message_id=None) -> None:
         """Telegram view over the OPDS ingester's five-field editor.
 
         Keep the conversational wording aligned with
@@ -1221,10 +1512,15 @@ class Bot:
         catalog = self.workspace / "library"
         report = suite.book_metadata(path, catalog)
         if report.get("status") == "invalid":
-            return self.say(chat, "⚠️ " + html.escape(
-                report.get("error", "That book cannot be inspected.")),
+            return self.panel(
+                chat, message_id, "⚠️ " + html.escape(
+                    report.get("error", "That book cannot be inspected.")),
                 [[("📚 Library", "m:lib")]])
         values = report.get("metadata", {})
+        back_book = back_book or {
+            "path": report["source"], "title": report.get("title", ""),
+            "author": values.get("author", ""),
+        }
         lines = ["📝 <b>Embedded metadata</b>",
                  f"file: <code>{html.escape(Path(report['source']).name)}</code>",
                  f"EPUB package: {html.escape(report.get('package_version', '?'))}", ""]
@@ -1239,53 +1535,286 @@ class Bot:
 
         rows = []
         if report.get("editable", True):
-            fields = list(self.META_LABELS)
+            fields = ["title", "author", "language"]
             for start in range(0, len(fields), 2):
                 row = []
                 for field in fields[start:start + 2]:
                     token = self.tokens.put({"path": report["source"], "field": field,
-                                             "current": values.get(field, "")})
+                                             "current": values.get(field, ""),
+                                             "back_book": back_book})
                     row.append((f"✏️ {self.META_LABELS[field]}", f"bm:e:{token}"))
                 rows.append(row)
+            series_action = "↔ Change series" if values.get("series") \
+                else "➕ Add to series"
+            picker = self.tokens.put({"path": report["source"],
+                                      "back_book": back_book})
+            rows.append([(series_action, f"bm:s:{picker}")])
+            if values.get("series"):
+                position = self.tokens.put({
+                    "path": report["source"], "field": "series_index",
+                    "current": values.get("series_index", ""),
+                    "back_book": back_book,
+                })
+                rows.append([("✏️ Series position", f"bm:e:{position}")])
             if report.get("status") == "needs_alias":
-                token = self.tokens.put({"path": report["source"], "updates": {}})
+                token = self.tokens.put({"path": report["source"], "updates": {},
+                                         "back_book": back_book})
                 rows.append([("🏷 Set short series name", f"bm:a:{token}")])
-        back = self.tokens.put(back_book or {
-            "path": report["source"], "title": report.get("title", ""),
-            "author": values.get("author", ""),
-        })
+        back = self.tokens.put(back_book)
         rows.append([("◀ Book", f"lib:f:{back}"), ("📚 Library", "m:lib")])
-        self.say(chat, "\n".join(lines), rows)
+        self.panel(chat, message_id, "\n".join(lines), rows)
 
-    def on_book_metadata_callback(self, chat, rest: str) -> None:
+    def show_series_picker(self, chat, path: Path, back_book: dict = None,
+                           *, message_id=None, state: dict | None = None) -> None:
+        """Choose existing series metadata without making the user retype it."""
+        report = suite.book_metadata(path, self.workspace / "library")
+        if report.get("status") == "invalid":
+            return self.panel(
+                chat, message_id,
+                "⚠️ " + html.escape(report.get("error", "Book not readable.")))
+        current = report.get("metadata", {}).get("series", "")
+        try:
+            groups = suite.library().get("series", [])
+        except suite.SuiteError as exc:
+            return self.panel(chat, message_id, f"⚠️ {exc}")
+        groups = sorted(groups, key=lambda group: group.get("name", "").casefold())
+        state = dict(state or {"initial": "", "page": 0})
+        initial = state.get("initial", "")
+        buckets = {self.initial_bucket(group.get("name", "")) for group in groups}
+        if initial not in buckets:
+            initial = ""
+        filtered = [group for group in groups
+                    if not initial
+                    or self.initial_bucket(group.get("name", "")) == initial]
+        last_page = max(0, (len(filtered) - 1) // NAV_PAGE)
+        page = max(0, min(int(state.get("page", 0)), last_page))
+        state = {"initial": initial, "page": page}
+        base = {"path": str(path), "back_book": back_book or {"path": str(path)}}
+
+        def view(**changes):
+            return f"bm:sv:{self.tokens.put({**base, 'state': {**state, **changes}})}"
+
+        rows = []
+        if len(groups) > ALPHABET_THRESHOLD:
+            rows.extend(self.alphabet_rows(
+                [group.get("name", "") for group in groups], initial,
+                lambda bucket: view(initial=bucket, page=0)))
+        start = page * NAV_PAGE
+        for group in filtered[start:start + NAV_PAGE]:
+            payload = {**base, "series": group.get("name", ""),
+                       "alias": group.get("alias", "")}
+            mark = "✓ " if group.get("name", "").casefold() == current.casefold() else ""
+            rows.append([((mark + group.get("name", ""))[:52],
+                          f"bm:sp:{self.tokens.put(payload)}")])
+        navigation = []
+        if page:
+            navigation.append(("‹", view(page=page - 1)))
+        if last_page:
+            navigation.append((f"{page + 1}/{last_page + 1}", "bm:nop:"))
+        if page < last_page:
+            navigation.append(("›", view(page=page + 1)))
+        if navigation:
+            rows.append(navigation)
+        rows.append([("＋ New series", f"bm:sn:{self.tokens.put(base)}")])
+        if current:
+            rows.append([("✕ Remove from series", f"bm:sr:{self.tokens.put(base)}")])
+        rows.append([("◀ Metadata", f"bm:show:{self.tokens.put(base)}")])
+        shown = f" · {initial}" if initial else ""
+        page_line = f"\nPage {page + 1} of {last_page + 1}" if last_page else ""
+        self.panel(
+            chat, message_id,
+            f"📚 <b>Choose a series</b>{shown}{page_line}\n"
+            + (f"Current: <code>{html.escape(current)}</code>" if current
+               else "This book is currently standalone."),
+            rows)
+
+    def accept_book_series_name(self, chat, path: Path, series: str,
+                                back_book: dict, *, message_id=None) -> None:
+        series = " ".join((series or "").split())
+        if not series:
+            self.pending = {"kind": "bookseriesname", "path": str(path),
+                            "back_book": back_book, "message_id": message_id}
+            return self.panel(chat, message_id,
+                              "That name was empty. Send the full series name.")
+        try:
+            groups = suite.library().get("series", [])
+        except suite.SuiteError as exc:
+            return self.panel(chat, message_id, f"⚠️ {exc}")
+        existing = next(
+            (group for group in groups
+             if group.get("name", "").casefold() == series.casefold()), None)
+        if existing:
+            canonical = existing.get("name", series)
+            if existing.get("alias"):
+                return self.ask_series_position(
+                    chat, path, canonical, existing["alias"], back_book,
+                    message_id=message_id)
+            series = canonical
+        self.ask_series_alias_for_book(
+            chat, path, series, back_book, message_id=message_id)
+
+    def ask_series_alias_for_book(self, chat, path: Path, series: str,
+                                  back_book: dict, *, message_id=None) -> None:
+        preview = suite.edit_book_metadata(
+            path, self.workspace / "library",
+            {"series": series, "series_index": ""}, dry_run=True)
+        if preview.get("status") == "needs_alias":
+            suggestion = preview.get("suggested_alias") or "SERIES"
+            self.pending = {
+                "kind": "bookseriesalias", "path": str(path), "series": series,
+                "back_book": back_book, "message_id": message_id,
+                "suggestion": suggestion,
+            }
+            accept = self.tokens.put({
+                "path": str(path), "series": series, "alias": suggestion,
+                "back_book": back_book,
+            })
+            return self.panel(
+                chat, message_id,
+                f"Send the short name for <b>{html.escape(series)}</b> "
+                "(maximum 6 characters), or accept the mechanical suggestion.",
+                [[(f"Use {suggestion}", f"bm:sa:{accept}")],
+                 [("✗ Cancel", f"bm:s:{self.tokens.put({'path': str(path), 'back_book': back_book})}")]])
+        if preview.get("status") in {"invalid", "conflict", "error"}:
+            return self.panel(
+                chat, message_id,
+                "⚠️ " + html.escape(preview.get("error", "That series is not valid.")),
+                [[("◀ Series", f"bm:s:{self.tokens.put({'path': str(path), 'back_book': back_book})}")]])
+        alias = preview.get("series_alias", "")
+        self.ask_series_position(
+            chat, path, series, alias, back_book, message_id=message_id)
+
+    def accept_book_series_alias(self, chat, path: Path, series: str, alias: str,
+                                 back_book: dict, *, message_id=None) -> None:
+        preview = suite.edit_book_metadata(
+            path, self.workspace / "library",
+            {"series": series, "series_index": ""}, alias=alias, dry_run=True)
+        if preview.get("status") in {"invalid", "conflict", "error", "needs_alias"}:
+            suggestion = preview.get("suggested_alias") or alias or "SERIES"
+            self.pending = {
+                "kind": "bookseriesalias", "path": str(path), "series": series,
+                "back_book": back_book, "message_id": message_id,
+                "suggestion": suggestion,
+            }
+            return self.panel(
+                chat, message_id,
+                "⚠️ " + html.escape(preview.get("error", "That short name did not work."))
+                + "\nSend another short name.",
+                [[(f"Use {suggestion}", f"bm:sa:{self.tokens.put({'path': str(path), 'series': series, 'alias': suggestion, 'back_book': back_book})}")],
+                 [("✗ Cancel", f"bm:s:{self.tokens.put({'path': str(path), 'back_book': back_book})}")]])
+        self.pending = None
+        self.ask_series_position(
+            chat, path, series, preview.get("series_alias") or alias, back_book,
+            message_id=message_id)
+
+    def ask_series_position(self, chat, path: Path, series: str, alias: str,
+                            back_book: dict, *, message_id=None) -> None:
+        payload = {"path": str(path), "series": series, "alias": alias,
+                   "back_book": back_book}
+        self.pending = {"kind": "bookseriesposition", **payload,
+                        "message_id": message_id}
+        self.panel(
+            chat, message_id,
+            f"What is this book’s position in <b>{html.escape(series)}</b>?\n\n"
+            "Send a number such as <code>1</code> or <code>1.5</code>.",
+            [[("No position", f"bm:px:{self.tokens.put(payload)}")],
+             [("✗ Cancel", f"bm:s:{self.tokens.put({'path': str(path), 'back_book': back_book})}")]])
+
+    def on_book_metadata_callback(self, chat, rest: str, message_id=None) -> None:
         action, _, token = rest.partition(":")
+        if action == "nop":
+            return
         payload = self.tokens.get(token)
         if not payload:
             return self.stale(chat)
         path = Path(payload["path"])
-        if (action in {"e", "c", "a", "pa", "apply"} and self.pending
-                and not self.pending.get("kind", "").startswith("bookmeta")):
-            return self.say(
-                chat, "Finish the current question first, or send /cancel.")
+        back_book = payload.get("back_book") or {"path": str(path)}
+        if (action in {"e", "c", "a", "pa", "apply", "s", "sv", "sp",
+                       "sn", "sr", "sa", "px"} and self.pending
+                and not self.pending.get("kind", "").startswith("book")):
+            return self.panel(
+                chat, message_id,
+                "Finish the current question first, or send /cancel.")
         if action == "show":
-            if self.pending and self.pending.get("kind", "").startswith("bookmeta"):
+            if self.pending and self.pending.get("kind", "").startswith("book"):
                 self.pending = None
-            return self.submit(chat, lambda: self.show_book_metadata(chat, path))
+            return self.submit(
+                chat, lambda: self.show_book_metadata(
+                    chat, path, back_book, message_id=message_id))
+        if action == "s":
+            if self.pending and self.pending.get("kind", "").startswith("book"):
+                self.pending = None
+            return self.submit(
+                chat, lambda: self.show_series_picker(
+                    chat, path, back_book, message_id=message_id))
+        if action == "sv":
+            return self.submit(
+                chat, lambda: self.show_series_picker(
+                    chat, path, back_book, message_id=message_id,
+                    state=payload.get("state", {})))
+        if action == "sp":
+            series = payload.get("series", "")
+            if not series:
+                return self.stale(chat)
+            if payload.get("alias"):
+                return self.ask_series_position(
+                    chat, path, series, payload["alias"], back_book,
+                    message_id=message_id)
+            return self.submit(
+                chat, lambda: self.ask_series_alias_for_book(
+                    chat, path, series, back_book, message_id=message_id))
+        if action == "sn":
+            self.pending = {
+                "kind": "bookseriesname", "path": str(path),
+                "back_book": back_book, "message_id": message_id,
+            }
+            return self.panel(
+                chat, message_id, "Send the full name of the new series.",
+                [[("✗ Cancel", f"bm:s:{self.tokens.put({'path': str(path), 'back_book': back_book})}")]])
+        if action == "sr":
+            self.pending = None
+            return self.submit(
+                chat, lambda: self.preview_book_metadata(
+                    chat, path, {"series": "", "series_index": ""},
+                    message_id=message_id, back_book=back_book))
+        if action == "sa":
+            self.pending = None
+            return self.submit(
+                chat, lambda: self.accept_book_series_alias(
+                    chat, path, payload.get("series", ""),
+                    payload.get("alias", ""), back_book,
+                    message_id=message_id))
+        if action == "px":
+            self.pending = None
+            return self.submit(
+                chat, lambda: self.preview_book_metadata(
+                    chat, path,
+                    {"series": payload.get("series", ""), "series_index": ""},
+                    alias=payload.get("alias", ""), message_id=message_id,
+                    back_book=back_book, retry_position=payload))
         if action == "e":
             if self.pending:
-                return self.say(
-                    chat, "Finish the current question first, or send /cancel.")
+                return self.panel(
+                    chat, message_id,
+                    "Finish the current question first, or send /cancel.")
             field = payload["field"]
-            self.pending = {"kind": "bookmetadata", "path": str(path), "field": field}
+            if field == "series":       # buttons from before the picker existed
+                return self.submit(
+                    chat, lambda: self.show_series_picker(
+                        chat, path, back_book, message_id=message_id))
+            self.pending = {"kind": "bookmetadata", "path": str(path),
+                            "field": field, "message_id": message_id,
+                            "back_book": back_book}
             current = payload.get("current") or "empty"
             rows = []
             if field in self.META_OPTIONAL and payload.get("current"):
-                clear = self.tokens.put({"path": str(path), "field": field})
+                clear = self.tokens.put({"path": str(path), "field": field,
+                                         "back_book": back_book})
                 rows.append([("Clear this field", f"bm:c:{clear}")])
-            back = self.tokens.put({"path": str(path)})
+            back = self.tokens.put({"path": str(path), "back_book": back_book})
             rows.append([("✗ Cancel", f"bm:show:{back}")])
-            return self.say(
-                chat,
+            return self.panel(
+                chat, message_id,
                 f"Send the new <b>{html.escape(self.META_LABELS[field])}</b>.\n"
                 f"Current value: <code>{html.escape(current)}</code>\n\n"
                 "I will show the exact metadata and filename change before writing it.",
@@ -1294,60 +1823,81 @@ class Bot:
             self.pending = None
             return self.submit(
                 chat, lambda: self.preview_book_metadata(
-                    chat, path, {payload["field"]: ""}))
+                    chat, path, {payload["field"]: ""}, message_id=message_id,
+                    back_book=back_book))
         if action == "a":
             return self.submit(
                 chat, lambda: self.preview_book_metadata(
-                    chat, path, payload.get("updates", {})))
+                    chat, path, payload.get("updates", {}), message_id=message_id,
+                    back_book=back_book))
         if action == "pa":
             self.pending = None
             return self.submit(
                 chat, lambda: self.preview_book_metadata(
-                    chat, path, payload.get("updates", {}), payload.get("alias", "")))
+                    chat, path, payload.get("updates", {}), payload.get("alias", ""),
+                    message_id=message_id, back_book=back_book))
         if action == "apply":
             self.pending = None
             return self.submit(
                 chat, lambda: self.apply_book_metadata(
                     chat, path, payload.get("updates", {}), payload.get("alias", ""),
-                    payload.get("sha256", "")))
+                    payload.get("sha256", ""), message_id=message_id,
+                    back_book=back_book))
 
     def preview_book_metadata(self, chat, path: Path, updates: dict,
-                              alias: str = "", alias_prompt=None) -> None:
+                              alias: str = "", alias_prompt=None, *,
+                              message_id=None, back_book: dict = None,
+                              retry_position: dict = None) -> None:
         report = suite.edit_book_metadata(
             path, self.workspace / "library", updates, alias=alias, dry_run=True)
+        back_book = back_book or {"path": str(path)}
         if report.get("status") == "needs_alias":
             suggestion = report.get("suggested_alias") or "SERIES"
             self.pending = {"kind": "bookmetaalias", "path": str(path),
                             "updates": updates, "series": report.get("series", ""),
-                            "suggestion": suggestion}
+                            "suggestion": suggestion, "message_id": message_id,
+                            "back_book": back_book}
             token = self.tokens.put({"path": str(path), "updates": updates,
-                                     "alias": suggestion})
-            return self.say(
-                chat,
+                                     "alias": suggestion,
+                                     "back_book": back_book})
+            return self.panel(
+                chat, message_id,
                 f"<b>{html.escape(report.get('series', 'This series'))}</b> has "
                 "no short catalog name yet. Send one (maximum 6 characters), "
                 "or accept the mechanical suggestion.",
                 [[(f"Use {suggestion}", f"bm:pa:{token}")],
-                 [("✗ Cancel", f"bm:show:{self.tokens.put({'path': str(path)})}")]])
+                 [("✗ Cancel", f"bm:show:{self.tokens.put({'path': str(path), 'back_book': back_book})}")]])
         if report.get("status") in {"invalid", "conflict", "error"}:
+            if retry_position:
+                self.pending = {"kind": "bookseriesposition", **retry_position,
+                                "message_id": message_id}
+                return self.panel(
+                    chat, message_id,
+                    "⚠️ " + html.escape(
+                        report.get("error", "That position is not valid."))
+                    + "\nSend a number such as 1 or 1.5.",
+                    [[("No position", f"bm:px:{self.tokens.put(retry_position)}")],
+                     [("✗ Cancel", f"bm:s:{self.tokens.put({'path': str(path), 'back_book': back_book})}")]])
             if alias_prompt:
                 series, suggestion = alias_prompt
                 self.pending = {"kind": "bookmetaalias", "path": str(path),
                                 "updates": updates, "series": series,
-                                "suggestion": suggestion}
+                                "suggestion": suggestion, "message_id": message_id,
+                                "back_book": back_book}
                 token = self.tokens.put({"path": str(path), "updates": updates,
-                                         "alias": suggestion})
-                return self.say(
-                    chat,
+                                         "alias": suggestion,
+                                         "back_book": back_book})
+                return self.panel(
+                    chat, message_id,
                     "⚠️ " + html.escape(
                         report.get("error", "That short name did not work."))
                     + "\nSend another short name.",
                     [[(f"Use {suggestion}", f"bm:pa:{token}"),
-                      ("✗ Cancel", f"bm:show:{self.tokens.put({'path': str(path)})}")]])
-            return self.say(
-                chat, "⚠️ Nothing changed. "
+                      ("✗ Cancel", f"bm:show:{self.tokens.put({'path': str(path), 'back_book': back_book})}")]])
+            return self.panel(
+                chat, message_id, "⚠️ Nothing changed. "
                 + html.escape(report.get("error", "The edit is not valid.")),
-                [[("📝 Metadata", f"bm:show:{self.tokens.put({'path': str(path)})}")]])
+                [[("📝 Metadata", f"bm:show:{self.tokens.put({'path': str(path), 'back_book': back_book})}")]])
 
         lines = ["📝 <b>Confirm metadata edit</b>"]
         for field in report.get("changed_fields", []):
@@ -1365,24 +1915,27 @@ class Bot:
                          html.escape(report.get("series_alias", "")) + "</code>")
         if not report.get("changed_fields") and not report.get("renames") \
                 and not report.get("alias_changed"):
-            return self.say(
-                chat, "That already has the requested value — nothing to write.",
-                [[("📝 Metadata", f"bm:show:{self.tokens.put({'path': str(path)})}")]])
+            return self.panel(
+                chat, message_id,
+                "That already has the requested value — nothing to write.",
+                [[("📝 Metadata", f"bm:show:{self.tokens.put({'path': str(path), 'back_book': back_book})}")]])
         token = self.tokens.put({"path": str(path), "updates": updates, "alias": alias,
-                                 "sha256": report.get("sha256", "")})
-        back = self.tokens.put({"path": str(path)})
-        self.say(chat, "\n".join(lines),
-                 [[("✓ Write it", f"bm:apply:{token}"),
-                   ("No", f"bm:show:{back}")]])
+                                 "sha256": report.get("sha256", ""),
+                                 "back_book": back_book})
+        back = self.tokens.put({"path": str(path), "back_book": back_book})
+        self.panel(chat, message_id, "\n".join(lines),
+                   [[("✓ Write it", f"bm:apply:{token}"),
+                     ("No", f"bm:show:{back}")]])
 
     def apply_book_metadata(self, chat, path: Path, updates: dict,
-                            alias: str = "", expected_sha256: str = "") -> None:
+                            alias: str = "", expected_sha256: str = "", *,
+                            message_id=None, back_book: dict = None) -> None:
         report = suite.edit_book_metadata(
             path, self.workspace / "library", updates, alias=alias,
             expected_sha256=expected_sha256)
         if report.get("status") not in {"updated", "no_change"}:
-            return self.say(
-                chat, "⚠️ Nothing changed. "
+            return self.panel(
+                chat, message_id, "⚠️ Nothing changed. "
                 + html.escape(report.get("error", "The catalog changed since the preview.")),
                 [[("📚 Library", "m:lib")]])
         destination = Path(report.get("destination") or path)
@@ -1401,13 +1954,14 @@ class Bot:
             {str(path): fresh_book}, invalidate_slim=True)
         fields = ", ".join(self.META_LABELS.get(field, field)
                            for field in report.get("changed_fields", [])) or "filename"
-        token = self.tokens.put({"path": str(destination)})
+        token = self.tokens.put({"path": str(destination),
+                                 "back_book": {"path": str(destination)}})
         queued_note = ""
         if followed:
             noun = "copy" if followed == 1 else "copies"
             queued_note = f"\nUpdated {followed} queued {noun}."
-        self.say(
-            chat,
+        self.panel(
+            chat, message_id,
             f"✅ Updated {html.escape(fields)}.\n"
             f"catalog file: <code>{html.escape(destination.name)}</code>"
             + queued_note,
@@ -2081,14 +2635,16 @@ class Bot:
 
     # -- the device --------------------------------------------------------
 
-    def show_device(self, chat) -> None:
-        self.say(chat, "📲 The reader answers only while it is on "
-                       "<b>Home → File Transfer → Join a Network</b>.",
-                 [[("🔎 Find it", "dev:st:"), ("📂 Browse", "dev:ls0:")],
-                  [("🖼 Wallpapers", "dev:wp:"), ("🔤 Fonts", "dev:fo:")],
-                  [("📤 Push queue", "push:ask")],
-                  [("📍 Set its address", "dev:addr:")],
-                  [("🏠 Menu", "m:main")]])
+    def show_device(self, chat, *, message_id=None) -> None:
+        self.panel(
+            chat, message_id,
+            "📲 The reader answers only while it is on "
+            "<b>Home → File Transfer → Join a Network</b>.",
+            [[("🔎 Find it", "dev:st:"), ("📂 Browse", "dev:ls0:")],
+             [("🖼 Wallpapers", "dev:wp:"), ("🔤 Fonts", "dev:fo:")],
+             [("📤 Push queue", "push:ask")],
+             [("📍 Set its address", "dev:addr:")],
+             [("🏠 Menu", "m:main")]])
 
     def device_host(self):
         host, info = suite.device.find_device(None)
@@ -2117,16 +2673,41 @@ class Bot:
                 "works too. I will check it answers before keeping it.")
 
         if action == "ls0":
-            return self.submit(chat, lambda: self.browse(chat, "/"))
+            return self.submit(
+                chat, lambda: self.browse(chat, "/", message_id=msg_id))
         if action == "ls":
             path = self.tokens.get(token)
             if path is None:
                 return self.stale(chat)
-            return self.submit(chat, lambda: self.browse(chat, path))
+            return self.submit(
+                chat, lambda: self.browse(chat, path, message_id=msg_id))
+        if action == "sf":
+            payload = self.tokens.get(token)
+            if not isinstance(payload, dict):
+                return self.stale(chat)
+            return self.submit(
+                chat, lambda: self.show_device_series(
+                    chat, payload["path"], payload["key"], payload.get("page", 0),
+                    message_id=msg_id))
+        if action == "srm":
+            payload = self.tokens.get(token)
+            if not isinstance(payload, dict):
+                return self.stale(chat)
+            return self.submit(
+                chat, lambda: self.confirm_device_series_removal(
+                    chat, payload, message_id=msg_id))
+        if action == "srm!":
+            payload = self.tokens.get(token)
+            if not isinstance(payload, dict):
+                return self.stale(chat)
+            self.panel(chat, msg_id, "Removing the series from the X3…")
+            return self.submit(
+                chat, lambda: self.remove_device_series(
+                    chat, payload, message_id=msg_id))
         if action == "wp":
             def work():
                 host, _ = self.device_host()
-                self.browse(chat, suite.sleep_dir(host))
+                self.browse(chat, suite.sleep_dir(host), message_id=msg_id)
             return self.submit(chat, work)
         if action == "fo":
             return self.submit(chat, lambda: self.show_device_fonts(chat))
@@ -2161,7 +2742,11 @@ class Bot:
                 self.picked ^= {payload["path"]}
             self.tg.edit_markup(chat, msg_id,
                                 self.browse_keyboard(path, entries,
-                                                     action != "pdone"))
+                                                     action != "pdone",
+                                                     series_groups=listing.get(
+                                                         "series_groups", []),
+                                                     grouped_names=listing.get(
+                                                         "grouped_names", set())))
             return
 
         if action == "rmpick":
@@ -2332,16 +2917,22 @@ class Bot:
         full = payload["path"]
 
         if action == "f":
+            back_callback = f"dev:ls:{self.tokens.put(parent)}"
+            if payload.get("_device_series_key"):
+                back_callback = f"dev:sf:{self.tokens.put({
+                    'path': parent, 'key': payload['_device_series_key'],
+                    'page': payload.get('_device_series_page', 0),
+                })}"
             rows = [[("✏️ Rename", f"dev:rn:{token}"),
                      ("📦 Move to…", f"dev:mv:{token}")],
                     [("🗑 Delete", f"dev:rm:{token}"),
                      ("⬇️ Pull to server", f"dev:get:{token}")],
-                    [("📂 Back", f"dev:ls:{self.tokens.put(parent)}")]]
+                    [("📂 Back", back_callback)]]
             if name.lower().endswith(".bmp"):
                 rows.insert(0, [("👁 Preview", f"dev:see:{token}")])
-            return self.say(
-                chat, f"<code>{html.escape(name)}</code>\n{human(payload['size'])}",
-                rows)
+            return self.panel(
+                chat, msg_id,
+                f"<code>{html.escape(name)}</code>\n{human(payload['size'])}", rows)
 
         if action == "see":
             def work():
@@ -2366,16 +2957,22 @@ class Bot:
             return self.submit(chat, work)
 
         if action == "rm":
-            return self.say(chat, f"Delete <code>{html.escape(name)}</code> "
-                                  f"from the reader?",
-                            [[("Yes, delete", f"dev:rm!:{token}"),
-                              ("No", f"dev:f:{token}")]])
+            return self.panel(
+                chat, msg_id,
+                f"Delete <code>{html.escape(name)}</code> from the reader?",
+                [[("Yes, delete", f"dev:rm!:{token}"),
+                  ("No", f"dev:f:{token}")]])
         if action == "rm!":
             def work():
                 host, _ = self.device_host()
                 ok = suite.device.delete(host, full)
-                self.say(chat, "🗑 gone." if ok else "⚠️ the reader refused.")
-                self.browse(chat, parent)
+                if not ok:
+                    return self.panel(chat, msg_id, "⚠️ the reader refused.")
+                if payload.get("_device_series_key"):
+                    return self.show_device_series(
+                        chat, parent, payload["_device_series_key"],
+                        payload.get("_device_series_page", 0), message_id=msg_id)
+                self.browse(chat, parent, message_id=msg_id)
             return self.submit(chat, work)
 
         if action not in ("get",):
@@ -2446,7 +3043,158 @@ class Bot:
         parts = [p for p in path.strip("/").split("/") if p]
         return parts[1] if len(parts) == 2 and parts[0].lower() == "fonts" else None
 
-    def browse(self, chat, path: str) -> None:
+    def device_series_groups(self, host: str, path: str,
+                             entries: list) -> tuple[list, set]:
+        """Group only exact catalog/device filename matches.
+
+        `/api/files` exposes names, sizes and an EPUB flag, but no embedded
+        metadata.  Guessing an alias-looking prefix would eventually put an
+        unrelated book under a destructive series action.  The safe virtual
+        folders are therefore the intersection of the live listing and names
+        the catalog knows the current X3 filename setting would produce.
+        """
+        epub_entries = {entry.get("name", ""): entry for entry in entries
+                        if not entry.get("isDirectory")
+                        and (entry.get("isEpub")
+                             or entry.get("name", "").lower().endswith(".epub"))}
+        if not epub_entries:
+            return [], set()
+        try:
+            lib = suite.library()
+        except suite.SuiteError:
+            return [], set()
+        by_id = {book.get("id"): book for book in lib.get("books", [])}
+        ordered = []
+        for group in lib.get("series", []):
+            for order, book_id in enumerate(group.get("book_ids", [])):
+                book = by_id.get(book_id)
+                if book:
+                    ordered.append((group, order, book))
+        if not ordered:
+            return [], set()
+        candidates = suite.device_book_name_candidates(
+            [item[2] for item in ordered], host)
+        owners = {}
+        for (group, order, book), names in zip(ordered, candidates):
+            identity = (group.get("key"), order, book.get("id"))
+            for name in names:
+                owners.setdefault(name, set()).add(identity)
+
+        grouped = {}
+        used = set()
+        for name, entry in epub_entries.items():
+            matches = owners.get(name, set())
+            # More than one catalog volume mapping to the same SD name is
+            # genuinely ambiguous (not least in title-only mode), so it stays
+            # an ordinary file instead of acquiring a bulk-delete button.
+            if len(matches) != 1:
+                continue
+            key, order, book_id = next(iter(matches))
+            book = by_id.get(book_id)
+            group = next((value for value in lib.get("series", [])
+                          if value.get("key") == key), None)
+            if not book or not group:
+                continue
+            bucket = grouped.setdefault(key, {"key": key, "name": group.get("name", ""),
+                                               "alias": group.get("alias", ""),
+                                               "files": []})
+            bucket["files"].append({"entry": entry, "book": book, "order": order})
+            used.add(name)
+        result = []
+        for group in grouped.values():
+            group["files"].sort(key=lambda item: (item["order"],
+                                                   item["entry"].get("name", "")))
+            result.append(group)
+        result.sort(key=lambda group: group["name"].casefold())
+        return result, used
+
+    def device_series_group(self, host: str, path: str, key: str) -> tuple[dict | None, list]:
+        entries = sorted(suite.device.list_dir(host, path),
+                         key=lambda entry: entry.get("name", "").lower())
+        groups, _ = self.device_series_groups(host, path, entries)
+        group = next((value for value in groups if value.get("key") == key), None)
+        return group, group.get("files", []) if group else []
+
+    def show_device_series(self, chat, path: str, key: str, page: int = 0,
+                           *, message_id=None) -> None:
+        host, _ = self.device_host()
+        group, files = self.device_series_group(host, path, key)
+        if not group:
+            return self.panel(
+                chat, message_id,
+                "That series is no longer in this device listing.",
+                [[("📂 Back", f"dev:ls:{self.tokens.put(path)}")]])
+        last_page = max(0, (len(files) - 1) // NAV_PAGE)
+        page = max(0, min(page, last_page))
+        rows = []
+        for item in files[page * NAV_PAGE:(page + 1) * NAV_PAGE]:
+            entry, book = item["entry"], item["book"]
+            name = entry.get("name", "")
+            full = f"{path.rstrip('/')}/{name}"
+            payload = {"parent": path, "name": name, "path": full,
+                       "size": entry.get("size", 0),
+                       "_device_series_key": key, "_device_series_page": page}
+            position = (book.get("series_index") + " · "
+                        if book.get("series_index") else "")
+            title = book.get("base_title") or book.get("title") or name
+            rows.append([(("📕 " + position + title)[:52],
+                          f"dev:f:{self.tokens.put(payload)}")])
+        navigation = []
+        if page:
+            navigation.append(("‹", f"dev:sf:{self.tokens.put({'path': path, 'key': key, 'page': page - 1})}"))
+        if last_page:
+            navigation.append((f"{page + 1}/{last_page + 1}", "dev:nop:"))
+        if page < last_page:
+            navigation.append(("›", f"dev:sf:{self.tokens.put({'path': path, 'key': key, 'page': page + 1})}"))
+        if navigation:
+            rows.append(navigation)
+        current = self.tokens.put({"path": path, "key": key, "page": page})
+        rows.append([(f"🗑 Remove all {len(files)} from X3", f"dev:srm:{current}")])
+        rows.append([("📂 Back", f"dev:ls:{self.tokens.put(path)}")])
+        lines = [f"📚 <b>{html.escape(group['name'])}</b>",
+                 f"on the X3: {counted(len(files), 'book file')}"]
+        if last_page:
+            lines.append(f"Page {page + 1} of {last_page + 1}")
+        self.panel(chat, message_id, "\n".join(lines), rows)
+
+    def confirm_device_series_removal(self, chat, payload: dict, *,
+                                      message_id=None) -> None:
+        host, _ = self.device_host()
+        group, files = self.device_series_group(
+            host, payload["path"], payload["key"])
+        if not group or not files:
+            return self.panel(chat, message_id, "Nothing from that series is here now.",
+                              [[("📂 Browse", f"dev:ls:{self.tokens.put(payload['path'])}")]])
+        token = self.tokens.put(payload)
+        self.panel(
+            chat, message_id,
+            f"Remove all {counted(len(files), 'book')} in "
+            f"<b>{html.escape(group['name'])}</b> from the X3?",
+            [[("Yes, remove all", f"dev:srm!:{token}"),
+              ("No", f"dev:sf:{token}")]])
+
+    def remove_device_series(self, chat, payload: dict, *, message_id=None) -> None:
+        host, _ = self.device_host()
+        group, files = self.device_series_group(
+            host, payload["path"], payload["key"])
+        if not group or not files:
+            return self.panel(chat, message_id, "Nothing from that series is here now.",
+                              [[("📂 Browse", f"dev:ls:{self.tokens.put(payload['path'])}")]])
+        targets = [f"{payload['path'].rstrip('/')}/{item['entry']['name']}"
+                   for item in files]
+        ok, detail = suite.device.delete_many(host, targets)
+        if not ok:
+            return self.panel(
+                chat, message_id,
+                "⚠️ The X3 refused the removal: " + html.escape(detail[:200]),
+                [[("◀ Series", f"dev:sf:{self.tokens.put(payload)}")]])
+        self.panel(
+            chat, message_id,
+            f"🗑 Removed {counted(len(targets), 'book')} in "
+            f"<b>{html.escape(group['name'])}</b> from the X3.",
+            [[("📂 Browse", f"dev:ls:{self.tokens.put(payload['path'])}")]])
+
+    def browse(self, chat, path: str, *, message_id=None) -> None:
         """List a folder on the SD card.
 
         Every name that comes back is carried in a token and sent straight back
@@ -2458,13 +3206,21 @@ class Bot:
         entries = sorted(suite.device.list_dir(host, path),
                          key=lambda e: (not e.get("isDirectory"),
                                         e.get("name", "").lower()))
-        sent = self.say(chat, f"📂 <code>{html.escape(path)}</code> — "
-                              f"{len(entries)} item(s)",
-                        self.browse_keyboard(path, entries))
+        series_groups, grouped_names = self.device_series_groups(host, path, entries)
+        sent = self.panel(chat, message_id,
+                          f"📂 <code>{html.escape(path)}</code> — "
+                          f"{len(entries)} item(s)",
+                          self.browse_keyboard(
+                              path, entries, series_groups=series_groups,
+                              grouped_names=grouped_names))
         # Remembered by message id, like a contact sheet, so ☑ Pick several can
         # swap this listing's buttons in place instead of sending it again.
-        if sent and sent.get("message_id"):
-            self.listings[sent["message_id"]] = {"path": path, "entries": entries}
+        panel_id = message_id or ((sent or {}).get("message_id"))
+        if panel_id:
+            self.listings[panel_id] = {
+                "path": path, "entries": entries,
+                "series_groups": series_groups, "grouped_names": grouped_names,
+            }
 
     def show_move_picker(self, chat, path: str) -> None:
         """Walk the card looking for somewhere to put what you picked.
@@ -2529,7 +3285,8 @@ class Bot:
         self.browse(chat, dest if moved else back)
 
     def browse_keyboard(self, path: str, entries: list,
-                        picking: bool = False) -> list:
+                        picking: bool = False, *, series_groups: list = None,
+                        grouped_names: set = None) -> list:
         """The buttons under a folder listing, in either of its two moods.
 
         Browsing: a folder navigates and carries its own delete, a file opens.
@@ -2538,6 +3295,8 @@ class Bot:
         in that folder" is a single gesture rather than nine.
         """
         rows = []
+        series_groups = series_groups or []
+        grouped_names = grouped_names or set()
         for entry in entries:
             name = entry.get("name", "")
             child = f"{path.rstrip('/')}/{name}"
@@ -2547,6 +3306,8 @@ class Bot:
                 rows.append([(f"📁 {name[:28]}", f"dev:ls:{self.tokens.put(child)}"),
                              ("🗑", f"dev:dirrm:{self.tokens.put(child)}")])
                 continue
+            if not picking and name in grouped_names:
+                continue
             token = self.tokens.put({"parent": path, "name": name, "path": child,
                                      "size": entry.get("size", 0)})
             if picking:
@@ -2555,6 +3316,16 @@ class Bot:
             else:
                 icon = "📕" if entry.get("isEpub") else "📄"
                 rows.append([(f"{icon} {name[:32]}", f"dev:f:{token}")])
+
+        if not picking:
+            folder_rows = [row for row in rows
+                           if row and row[0][0].startswith("📁")]
+            file_rows = [row for row in rows if row not in folder_rows]
+            series_rows = [[
+                ((f"📚 {group['name']} · {len(group['files'])}")[:52],
+                 f"dev:sf:{self.tokens.put({'path': path, 'key': group['key'], 'page': 0})}")
+            ] for group in series_groups]
+            rows = folder_rows + series_rows + file_rows
 
         files = [e for e in entries if not e.get("isDirectory")]
         if picking:

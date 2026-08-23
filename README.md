@@ -187,7 +187,7 @@ books on this device.
 Serves EPUBs under `workspace/` as an OPDS catalog the X3 browses directly.
 Build a book and it's on the reader by the next page turn. Series metadata gets
 a **By series** view; Telegram-filed books use a confirmed compact alias such
-as `LOTR 01 - Title` while preserving the full series name. Stdlib only.
+as `LOTR 1 - Title` while preserving the full series name. Stdlib only.
 
 ```bash
 python3 tools/opds-server/scripts/serve_opds.py     # serve workspace/ on :6737
@@ -378,7 +378,7 @@ Transfer â†’ Join a Network. If the reader isn't there, the queue is untouched â
 so you can send pictures all week and push once. A font family queues the same
 way, as one entry: it goes across, is verified against `CHECKSUMS.tsv` and
 selected, or it stays queued. Books normally arrive through the catalog; an
-explicit **Also send to device** (or **Queue all** on a series) puts a slimmed
+explicit **Also send to device** (or **Add all to X3** on a series) puts a slimmed
 reader copy in the same queue while the catalog original remains untouched.
 
 It is **optional by construction**. Nothing else in the repo imports it, and if

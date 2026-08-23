@@ -484,13 +484,29 @@ metadata edit, the next library view naturally folds the book into its series.
 The old separate **Browse by series** callback remains as a compatibility route
 to this unified view, but no longer appears as another mode in the UI.
 
-A series card also offers **Queue all**, **Change short name**, and **Remove all
-from X3**. Queue all reuses the exact same slimmer and queue path as one book
-and skips volumes already queued. Remove all resolves the device's current OPDS
-filename format, deletes only exact SD-root matches, and explicitly leaves both
-catalog originals and the queue untouched. Changing the short name renames the
-series together without rewriting bytes and updates any queued paths so a later
-push does not go stale.
+The index has **All**, **Series** and **Standalone** filters. When a result set
+has more than seven entries it gains only the alphabet initials that actually
+occur, and every list pages seven rows at a time. Button navigation edits one
+Telegram message in place; only answers that genuinely need text create a new
+user message.
+
+A server-side series card offers exactly **Add all to X3**, **Change series
+name**, and **Change short name**. Add all reuses the exact same slimmer and
+queue path as one book and skips volumes already queued. Changing the short
+name renames the catalog files together without rewriting bytes and updates
+queued paths so a later push does not go stale. Changing the full name uses the
+OPDS metadata engine to rewrite every volume transactionally; merging with an
+existing series requires a second, explicit confirmation. There is deliberately
+no remove-from-X3 action while browsing the server catalog: that view does not
+claim to know the disconnected reader's contents.
+
+**📲 Device** groups exact catalog matches on the connected X3 into the same
+virtual series rows without creating folders on its SD card. Files whose names
+cannot be matched deterministically remain standalone rather than being
+guessed into a series. The device-side series card offers **Remove all from
+X3**, deleting only the files present in that live group. It does not change the
+catalog or the queue. Thus the two views mirror intent cleanly: Library adds;
+Device removes.
 
 An individual book card also has **📝 Metadata**. It displays the raw embedded
 title, author, series, series position and language and offers those five
@@ -501,6 +517,13 @@ feeds it back with the edit. The bot does not parse or write OPF XML itself:
 `suite.py` calls the same typed `ingest_book.py metadata/edit` commands used by
 the terminal wizard. Keep the UI here and the wizard there in conversational
 sync; all validation and mutation stay in the OPDS scripts.
+
+For a standalone book that menu says **Add to series**; for a book already in a
+series it says **Change series**. The picker offers existing series, a new
+series, and—when applicable—removing the membership. Existing aliases are
+reused; a new series asks for its short alias; either route always asks for the
+volume position, including a **No position** choice. The picker uses the same
+seven-row pagination and active-initial alphabet as the library.
 
 An explicit metadata edit rewrites the catalog EPUB's OPF and nothing else in
 the archive, then renames the file canonically. A queued book follows the new

@@ -468,3 +468,232 @@ def edit_metadata(source: Path, library_dir: Path, updates: dict, *,
         return {"status": "error", "source": str(source), "error": detail}
     tmp.unlink(missing_ok=True)
     return report
+
+
+def rename_series(library_dir: Path, current_name: str, new_name: str, *,
+                  merge: bool = False, dry_run: bool = False,
+                  expected_sha256s: dict | None = None) -> dict:
+    """Rename one embedded series across all of its volumes as one operation.
+
+    Every rewritten EPUB is prepared and validated before an original moves.
+    The originals then sit at private backup paths until every new book and the
+    alias sidecar are in place.  This is deliberately a catalog operation: a
+    terminal, Telegram, or another steward gets the same preview/apply seam.
+    """
+    library_dir = Path(library_dir).resolve()
+    current_name = library._clean(current_name)
+    requested_name = library._clean(new_name)
+    if not current_name or not requested_name:
+        return {"status": "invalid",
+                "error": "both the current and new series names are required"}
+
+    books = library.scan([library_dir], [])
+    source_books = [book for book in books
+                    if book.series.casefold() == current_name.casefold()]
+    if not source_books:
+        return {"status": "invalid", "series": current_name,
+                "error": f"no catalog books belong to {current_name!r}"}
+    canonical_current = source_books[0].series
+
+    try:
+        alias_before = library.read_alias_document(library_dir)
+    except ValueError as exc:
+        return {"status": "conflict", "series": canonical_current,
+                "error": str(exc)}
+    aliases = alias_before["aliases"]
+    source_alias = library.alias_for(canonical_current, aliases)
+    if not source_alias:
+        return {"status": "conflict", "series": canonical_current,
+                "error": "set this series' short name before renaming it"}
+
+    same_identity = requested_name.casefold() == canonical_current.casefold()
+    target_books = [book for book in books
+                    if book.series.casefold() == requested_name.casefold()
+                    and book.series.casefold() != canonical_current.casefold()]
+    target_key = next((name for name in aliases
+                       if name.casefold() == requested_name.casefold()
+                       and name.casefold() != canonical_current.casefold()), "")
+    target_exists = bool(target_books or target_key)
+    canonical_target = (target_books[0].series if target_books else target_key) \
+        if target_exists else requested_name
+    target_alias = (library.alias_for(canonical_target, aliases)
+                    if target_exists else source_alias)
+    if target_exists and not merge:
+        return {
+            "status": "needs_merge", "series": canonical_current,
+            "target_series": canonical_target, "series_alias": target_alias,
+            "count": len(source_books), "target_count": len(target_books),
+            "error": f"{canonical_target!r} already exists",
+        }
+    if target_exists and not target_alias:
+        return {"status": "conflict", "series": canonical_current,
+                "target_series": canonical_target,
+                "error": "the destination series has no short name"}
+
+    alias_after = {"version": 1, "aliases": dict(aliases)}
+    old_key = next((name for name in alias_after["aliases"]
+                    if name.casefold() == canonical_current.casefold()), "")
+    if old_key:
+        alias_after["aliases"].pop(old_key)
+    if not target_exists:
+        try:
+            alias_after = library.with_alias(
+                alias_after, canonical_target, source_alias)
+        except ValueError as exc:
+            return {"status": "conflict", "series": canonical_current,
+                    "error": str(exc)}
+
+    items = []
+    for book in source_books:
+        source = Path(book.path).resolve()
+        if not _inside(library_dir, source):
+            return {"status": "invalid", "series": canonical_current,
+                    "error": f"{source.name!r} is outside the catalog"}
+        try:
+            package = _load_package(source)
+            if package["signed"]:
+                raise MetadataError(
+                    f"{source.name!r} is signed; editing would invalidate its signature")
+            current = _metadata_values(source)
+            if current["series"].casefold() != canonical_current.casefold():
+                raise MetadataError(
+                    f"{source.name!r} changed series while the catalog was scanned")
+            if len(_series_elements(package["metadata_element"])) > 1:
+                raise MetadataError(
+                    f"{source.name!r} declares more than one series; refusing to guess")
+            digest = _digest(source)
+        except MetadataError as exc:
+            return {"status": "invalid", "series": canonical_current,
+                    "error": str(exc)}
+        proposed = dict(current)
+        proposed["series"] = canonical_target
+        display_title = library.catalog_title(
+            book.base_title, target_alias, proposed["series_index"])
+        destination = source.with_name(
+            library.canonical_filename(display_title, proposed["author"]))
+        items.append({
+            "source": source, "destination": destination, "package": package,
+            "before": current, "after": proposed, "sha256": digest,
+            "base_title": book.base_title, "title": display_title,
+        })
+
+    sources = {item["source"] for item in items}
+    destinations = {}
+    for item in items:
+        destination = item["destination"]
+        previous = destinations.get(destination)
+        if previous and previous != item["source"]:
+            return {"status": "conflict", "series": canonical_current,
+                    "error": f"two volumes would both become {destination.name!r}"}
+        destinations[destination] = item["source"]
+        if destination.exists() and destination not in sources:
+            return {"status": "conflict", "series": canonical_current,
+                    "error": f"refusing to overwrite existing {destination.name!r}"}
+
+    actual_hashes = {str(item["source"]): item["sha256"] for item in items}
+    if expected_sha256s is not None:
+        expected = {str(Path(path).resolve()): str(digest)
+                    for path, digest in expected_sha256s.items()}
+        if expected != actual_hashes:
+            return {"status": "conflict", "series": canonical_current,
+                    "error": "the series changed after the preview; open it again"}
+
+    report = {
+        "status": "dry_run" if dry_run else "renamed",
+        "series_before": canonical_current, "series": canonical_target,
+        "series_alias": target_alias, "merge": bool(target_exists),
+        "count": len(items), "target_count": len(target_books),
+        "expected_sha256s": actual_hashes,
+        "alias_changed": alias_after != alias_before,
+        "renames": [
+            {"from": str(item["source"]), "to": str(item["destination"])}
+            for item in items if item["source"] != item["destination"]
+        ],
+        "books": [
+            {"from": str(item["source"]), "to": str(item["destination"]),
+             "title": item["base_title"],
+             "series_index": item["after"]["series_index"],
+             "sha256": item["sha256"]}
+            for item in items
+        ],
+    }
+    if same_identity and canonical_target == canonical_current:
+        return {**report, "status": "no_change"}
+    if dry_run:
+        return report
+
+    for item in items:
+        nonce = uuid.uuid4().hex[:8]
+        item["tmp"] = item["source"].with_name(
+            f".{item['source'].name}.series-{os.getpid()}-{nonce}")
+        item["backup"] = item["source"].with_name(
+            f".{item['source'].name}.series-backup-{os.getpid()}-{nonce}")
+
+    prepared = []
+    try:
+        for item in items:
+            metadata = item["package"]["metadata_element"]
+            _replace_series(metadata, canonical_target,
+                            item["after"]["series_index"],
+                            item["package"]["version"].startswith("3"))
+            if item["package"]["version"].startswith("3"):
+                _touch_modified(metadata)
+            opf = _serialize_package(
+                item["package"]["package"], item["package"]["opf_bytes"])
+            _rewrite_epub(item["source"], item["package"], opf, item["tmp"])
+            _validate_rewrite(item["tmp"], item["after"])
+            prepared.append(item)
+    except Exception as exc:
+        for item in items:
+            item["tmp"].unlink(missing_ok=True)
+        return {"status": "error", "series": canonical_current,
+                "error": f"could not prepare the complete series: {exc}"}
+
+    backed_up, placed = [], []
+    try:
+        for item in items:
+            os.replace(item["source"], item["backup"])
+            backed_up.append(item)
+        for item in items:
+            os.replace(item["tmp"], item["destination"])
+            placed.append(item)
+        if alias_after != alias_before:
+            library.write_alias_document(library_dir, alias_after)
+    except Exception as exc:
+        rollback_errors = []
+        try:
+            if alias_after != alias_before:
+                library.write_alias_document(library_dir, alias_before)
+        except Exception as rollback_exc:
+            rollback_errors.append(f"alias sidecar: {rollback_exc}")
+        for item in reversed(placed):
+            try:
+                if item["destination"].exists():
+                    os.replace(item["destination"], item["tmp"])
+            except OSError as rollback_exc:
+                rollback_errors.append(str(rollback_exc))
+        for item in reversed(backed_up):
+            try:
+                if item["backup"].exists() and not item["source"].exists():
+                    os.replace(item["backup"], item["source"])
+            except OSError as rollback_exc:
+                rollback_errors.append(str(rollback_exc))
+        if not rollback_errors:
+            for item in items:
+                item["tmp"].unlink(missing_ok=True)
+        detail = str(exc)
+        if rollback_errors:
+            detail += "; recovery copies kept: " + "; ".join(rollback_errors)
+        return {"status": "error", "series": canonical_current, "error": detail}
+
+    warnings = []
+    for item in items:
+        try:
+            item["backup"].unlink()
+        except OSError as exc:
+            warnings.append(f"recovery copy remains at {item['backup']}: {exc}")
+        item["tmp"].unlink(missing_ok=True)
+    library._META_CACHE.clear()
+    if warnings:
+        report["warnings"] = warnings
+    return report
