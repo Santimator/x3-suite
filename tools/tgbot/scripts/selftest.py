@@ -597,6 +597,7 @@ def check_noisy_embedded_title(tmp: Path) -> None:
           report)
     check("the redundant author/series title is gone rather than merely hidden",
           "McMurtry, Larry - Lonesome Dove 01" not in report
+          and "on the SD card" not in report
           and not any("McMurtry, Larry" in path.name
                       for path in (bot.workspace / "library").glob("*.epub")),
           report)
@@ -685,6 +686,17 @@ def check_series_workflow(tmp: Path) -> None:
         bot.handle(cb("ser:list"))
         open_series = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
                            if data.startswith("ser:f:"))
+        bot.handle(cb(open_series))
+        edit_books = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
+                          if data.startswith("ser:m:"))
+        bot.handle(cb(edit_books))
+        series_book = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
+                           if data.startswith("bm:show:"))
+        bot.handle(cb(series_book))
+        labels = {label for row in tg.sent[-1]["keyboard"] for label, _ in row}
+        check("every series volume can open the shared metadata editor",
+              {"✏️ Title", "✏️ Author", "✏️ Series", "✏️ Series position",
+               "✏️ Language"}.issubset(labels), str(labels))
         bot.handle(cb(open_series))
         queue_all = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
                          if data.startswith("ser:q:"))
@@ -799,10 +811,12 @@ def check_batched_series_ingest(tmp: Path) -> None:
               for number in range(1, 6))
           and all(not path.exists() for path in beta)
           and not bot.alias_groups and bot.pending is None)
-    summaries = [sent["text"] for sent in tg.sent if "Catalog only" in sent["text"]]
+    summaries = [sent["text"] for sent in tg.sent
+                 if "filed: 4" in sent["text"] or "filed: 5" in sent["text"]]
     check("each series gets one compact completion summary",
           len(summaries) == 2 and "filed: 4" in summaries[0]
-          and "filed: 5" in summaries[1], str(summaries))
+          and "filed: 5" in summaries[1]
+          and all("X3" not in summary for summary in summaries), str(summaries))
 
 
 def check_metadata_editor(tmp: Path) -> None:
@@ -859,7 +873,8 @@ def check_metadata_editor(tmp: Path) -> None:
             data for row in tg.sent[-1]["keyboard"] for label, data in row
             if label == "✓ Write it")
         check("the bot previews the exact edit before touching the EPUB",
-              source.exists() and "Confirm metadata edit" in tg.sent[-1]["text"],
+              source.exists() and "Confirm metadata edit" in tg.sent[-1]["text"]
+              and "X3" not in tg.sent[-1]["text"],
               tg.sent[-1]["text"])
 
         slim = bot.state_dir / "cache" / "slim" / "old.epub"
@@ -879,8 +894,10 @@ def check_metadata_editor(tmp: Path) -> None:
               Path(queued["path"]) == edited
               and queued.get("meta", {}).get("series") == "Chronicles"
               and "slim" not in queued.get("meta", {}), str(queued))
-        check("the explicit catalog edit still performs no device operation",
-              "Nothing was sent to or removed from the X3" in tg.sent[-1]["text"],
+        check("the catalog-edit result stays concise and server-focused",
+              "✅ Updated Series." in tg.sent[-1]["text"]
+              and "catalog file:" in tg.sent[-1]["text"]
+              and "X3" not in tg.sent[-1]["text"],
               tg.sent[-1]["text"])
 
         # Fill the previously empty position through the same fixed field list.
