@@ -74,6 +74,10 @@ def human(n: float) -> str:
     return f"{n / 1024 ** 2:.1f} MB"
 
 
+def counted(n: int, singular: str, plural: str = "") -> str:
+    return f"{n} {singular if n == 1 else (plural or singular + 's')}"
+
+
 class Bot:
     """The handlers. Deliberately constructible with a fake Telegram and a
     temporary workspace, which is how `selftest.py` exercises the whitelist,
@@ -794,7 +798,7 @@ class Bot:
                 (report.get("error") or Path(report.get("source", "book")).name)[:120])
                          for report in failed)
         self.say(chat, "\n".join(lines),
-                 [[("📚 Series", "ser:list"), ("🏠 Menu", "m:main")]])
+                 [[("📚 Library", "m:lib"), ("🏠 Menu", "m:main")]])
         self._next_series_alias(chat)
 
     def report_book_ingest(self, chat, report: dict) -> None:
@@ -912,7 +916,7 @@ class Bot:
 
     # -- views -------------------------------------------------------------
 
-    def show_library(self, chat) -> None:
+    def show_library(self, chat, page: int = 0) -> None:
         try:
             lib = suite.library()
         except suite.SuiteError as exc:
@@ -921,34 +925,50 @@ class Bot:
         if not books:
             return self.say(chat, "No books yet. Send me an EPUB.",
                             [[("🏠 Menu", "m:main")]])
-        rows = []
-        if lib.get("series"):
-            rows.append([("📚 Browse by series", "ser:list")])
-        for book in books[:20]:
+
+        groups = lib.get("series", [])
+        grouped_ids = {book_id for group in groups
+                       for book_id in group.get("book_ids", [])}
+        standalone = [book for book in books if book.get("id") not in grouped_ids]
+        entries = []
+        for group in groups:
+            label = f"📚 {group['name']} · {group['count']}"
+            entries.append((group["name"].casefold(), 0, label,
+                            "series", group["key"]))
+        for book in standalone:
+            title = book.get("base_title") or book.get("title") or Path(book["path"]).stem
+            author = book.get("author") or "?"
+            label = f"📖 {title[:32]} · {author[:14]}"
             # The whole record, not just the path: sending it to the card later
             # needs the author and title the catalog knows it by.
-            token = self.tokens.put(book)
-            label = f"{book['title'][:28]} · {(book['author'] or '?')[:14]}"
-            rows.append([(label, f"lib:f:{token}")])
-        rows.append([("🏠 Menu", "m:main")])
-        self.say(chat, f"📚 {len(books)} book(s) the catalog would serve:", rows)
+            entries.append((title.casefold(), 1, label, "book", book))
+        entries.sort(key=lambda entry: (entry[0], entry[1]))
 
-    def show_series(self, chat) -> None:
-        try:
-            groups = suite.library().get("series", [])
-        except suite.SuiteError as exc:
-            return self.say(chat, f"⚠️ {exc}")
-        if not groups:
-            return self.say(chat, "No books carry series metadata yet.",
-                            [[("📚 Library", "m:lib")]])
+        page_size = 18
+        last_page = max(0, (len(entries) - 1) // page_size)
+        page = max(0, min(page, last_page))
+        start = page * page_size
         rows = []
-        for group in groups[:30]:
-            token = self.tokens.put(group["key"])
-            alias = f" [{group['alias']}]" if group.get("alias") else ""
-            rows.append([(f"{group['name'][:28]}{alias} · {group['count']}",
-                          f"ser:f:{token}")])
-        rows.append([("📚 All books", "m:lib"), ("🏠 Menu", "m:main")])
-        self.say(chat, f"📚 {len(groups)} series:", rows)
+        for _, _, label, kind, payload in entries[start:start + page_size]:
+            token = self.tokens.put(payload)
+            callback = f"ser:f:{token}" if kind == "series" else f"lib:f:{token}"
+            rows.append([(label[:52], callback)])
+        navigation = []
+        if page:
+            navigation.append(("‹ Previous", f"lib:p:{page - 1}"))
+        if page < last_page:
+            navigation.append(("Next ›", f"lib:p:{page + 1}"))
+        if navigation:
+            rows.append(navigation)
+        rows.append([("🏠 Menu", "m:main")])
+        summary = f"📚 <b>Library</b>\n{counted(len(books), 'book')} total"
+        if groups:
+            summary += " · " + counted(len(groups), "series", "series")
+            if standalone:
+                summary += " · " + counted(len(standalone), "standalone book")
+        if last_page:
+            summary += f"\nPage {page + 1} of {last_page + 1}"
+        self.say(chat, summary, rows)
 
     def series_group(self, key: str) -> tuple:
         lib = suite.library()
@@ -963,7 +983,8 @@ class Bot:
         if self.pending and self.pending.get("kind") == "seriesaliaschange":
             self.pending = None
         if rest == "list":
-            return self.submit(chat, lambda: self.show_series(chat))
+            # Compatibility for buttons sent before the unified library view.
+            return self.submit(chat, lambda: self.show_library(chat))
         action, _, token = rest.partition(":")
         payload = self.tokens.get(token)
         if not payload:
@@ -977,54 +998,50 @@ class Bot:
         if not group:
             return self.stale(chat)
 
-        if action == "f":
-            lines = [f"📚 <b>{html.escape(group['name'])}</b>",
-                     f"short name: <code>{html.escape(group.get('alias') or 'not set')}</code>", ""]
-            for book in books[:16]:
-                position = f"{book.get('series_index')}. " if book.get("series_index") else ""
-                lines.append(f"· {html.escape(position + book.get('base_title', book['title']))}")
-            if len(books) > 16:
-                lines.append(f"· …and {len(books) - 16} more")
-            again = self.tokens.put(key)
-            return self.say(
-                chat, "\n".join(lines),
-                [[(f"📤 Queue all {len(books)}", f"ser:q:{again}")],
-                 [("📝 Book metadata", f"ser:m:{again}")],
-                 [("✏️ Change short name", f"ser:a:{again}")],
-                 [("🗑 Remove all from X3", f"ser:rm:{again}")],
-                 [("📚 Series", "ser:list")]])
-
         if action == "m":
+            # Compatibility for the short-lived separate metadata picker.
+            action = "f"
+
+        if action == "f":
             page_size = 12
             last_page = max(0, (len(books) - 1) // page_size)
             page = max(0, min(page, last_page))
             start = page * page_size
+            lines = [f"📚 <b>{html.escape(group['name'])}</b>",
+                     f"short name: <code>{html.escape(group.get('alias') or 'not set')}</code>",
+                     counted(len(books), "book")]
+            if last_page:
+                lines.append(f"Page {page + 1} of {last_page + 1}")
             rows = []
             for book in books[start:start + page_size]:
                 position = (f"{book.get('series_index')} · "
                             if book.get("series_index") else "")
                 title = (book.get("base_title") or book.get("title")
                          or Path(book["path"]).stem)
-                label = "📝 " + position + title
-                book_token = self.tokens.put({"path": book["path"]})
-                rows.append([(label[:52], f"bm:show:{book_token}")])
+                contextual = {**book, "_series_key": key, "_series_page": page}
+                rows.append([(("📖 " + position + title)[:52],
+                              f"lib:f:{self.tokens.put(contextual)}")])
             navigation = []
             if page:
                 previous = self.tokens.put({"key": key, "page": page - 1})
-                navigation.append(("‹ Previous", f"ser:m:{previous}"))
+                navigation.append(("‹ Previous", f"ser:f:{previous}"))
             if page < last_page:
                 following = self.tokens.put({"key": key, "page": page + 1})
-                navigation.append(("Next ›", f"ser:m:{following}"))
+                navigation.append(("Next ›", f"ser:f:{following}"))
             if navigation:
                 rows.append(navigation)
-            rows.append([("◀ Series", f"ser:f:{self.tokens.put(key)}")])
-            heading = f"📝 <b>{html.escape(group['name'])}</b> — choose a book"
-            if last_page:
-                heading += f"\nPage {page + 1} of {last_page + 1}"
-            return self.say(chat, heading, rows)
+            again = self.tokens.put(key)
+            rows.extend([
+                [(f"📤 Queue all {len(books)}", f"ser:q:{again}")],
+                [("✏️ Change short name", f"ser:a:{again}")],
+                [("🗑 Remove all from X3", f"ser:rm:{again}")],
+                [("📚 Library", "m:lib")],
+            ])
+            return self.say(
+                chat, "\n".join(lines), rows)
 
         if action == "q":
-            self.say(chat, f"Preparing {len(books)} book(s) for the reader…")
+            self.say(chat, f"Preparing {counted(len(books), 'book')} for the reader…")
             return self.submit(chat, lambda: self.queue_series(chat, group, books))
 
         if action == "rm":
@@ -1078,7 +1095,7 @@ class Bot:
                 f"· {html.escape(detail[:100])}" for detail in failed))
         self.say(chat, "\n".join(lines),
                  [[("📲 Push now", "push:ask"), ("📤 Queue", "m:q")],
-                  [("📚 Series", "ser:list")]])
+                  [("📚 Library", "m:lib")]])
 
     def remove_series_from_device(self, chat, group: dict, books: list) -> None:
         try:
@@ -1096,26 +1113,26 @@ class Bot:
                 chat,
                 f"No <b>{html.escape(group['name'])}</b> volumes were found at "
                 "the X3 root. The catalog was not touched.",
-                [[("📚 Series", "ser:list"), ("🏠 Menu", "m:main")]])
+                [[("📚 Library", "m:lib"), ("🏠 Menu", "m:main")]])
         ok, detail = suite.device.delete_many(host, targets)
         if not ok:
             return self.say(chat, "⚠️ The X3 refused the bulk removal: "
                             f"{html.escape(detail[:200])}",
-                            [[("📚 Series", "ser:list")]])
+                            [[("📚 Library", "m:lib")]])
         self.say(
             chat,
             f"🗑 Removed {len(targets)} <b>{html.escape(group['name'])}</b> "
             f"book file(s) from the X3; "
             f"{sum(not names for names in matched)} volume(s) were not there.\n"
             "Catalog originals and the delivery queue were not touched.",
-            [[("📚 Series", "ser:list"), ("🏠 Menu", "m:main")]])
+            [[("📚 Library", "m:lib"), ("🏠 Menu", "m:main")]])
 
     def change_series_alias(self, chat, series: str, alias: str) -> None:
         report = suite.set_series_alias(self.workspace / "library", series, alias)
         if report.get("status") not in ("alias_set", "dry_run"):
             return self.say(chat, "⚠️ Short name not changed: "
                             f"{html.escape(report.get('error', 'unknown error'))}",
-                            [[("📚 Series", "ser:list")]])
+                            [[("📚 Library", "m:lib")]])
         try:
             lib = suite.library()
         except suite.SuiteError:
@@ -1133,10 +1150,16 @@ class Bot:
             f"<code>{html.escape(report['series_alias'])}</code>. "
             f"Renamed {report.get('changed', 0)} catalog file(s)"
             + (f" and updated {followed} queued path(s)." if followed else "."),
-            [[("📚 Series", "ser:list"), ("🏠 Menu", "m:main")]])
+            [[("📚 Library", "m:lib"), ("🏠 Menu", "m:main")]])
 
     def on_library_callback(self, chat, rest: str) -> None:
         action, _, token = rest.partition(":")
+        if action == "p":
+            try:
+                page = int(token)
+            except ValueError:
+                return self.stale(chat)
+            return self.submit(chat, lambda: self.show_library(chat, page))
         book = self.tokens.get(token)
         if not book:
             return self.stale(chat)
@@ -1148,15 +1171,21 @@ class Bot:
             send = self.tokens.put({"path": str(path),
                                     "title": book.get("title") or path.stem,
                                     "author": book.get("author") or ""})
+            back = [("📚 Library", "m:lib")]
+            if book.get("_series_key"):
+                series_token = self.tokens.put({
+                    "key": book["_series_key"], "page": book.get("_series_page", 0)})
+                back = [("◀ Series", f"ser:f:{series_token}"),
+                        ("📚 Library", "m:lib")]
             return self.say(
                 chat, f"<code>{html.escape(path.name)}</code>",
                 [[("📤 Send to device", f"bq:{send}")],
                  [("📝 Metadata", f"lib:meta:{token}")],
                  [("✏️ Rename file", f"lib:rn:{token}"),
                   ("🗑 Delete", f"lib:rm:{token}")],
-                 [("📚 Library", "m:lib")]])
+                 back])
         if action == "meta":
-            return self.submit(chat, lambda: self.show_book_metadata(chat, path))
+            return self.submit(chat, lambda: self.show_book_metadata(chat, path, book))
         if action == "rn":
             if self.pending:
                 return self.say(
@@ -1181,7 +1210,7 @@ class Bot:
     }
     META_OPTIONAL = {"author", "series", "series_index"}
 
-    def show_book_metadata(self, chat, path: Path) -> None:
+    def show_book_metadata(self, chat, path: Path, back_book: dict = None) -> None:
         """Telegram view over the OPDS ingester's five-field editor.
 
         Keep the conversational wording aligned with
@@ -1221,7 +1250,7 @@ class Bot:
             if report.get("status") == "needs_alias":
                 token = self.tokens.put({"path": report["source"], "updates": {}})
                 rows.append([("🏷 Set short series name", f"bm:a:{token}")])
-        back = self.tokens.put({
+        back = self.tokens.put(back_book or {
             "path": report["source"], "title": report.get("title", ""),
             "author": values.get("author", ""),
         })

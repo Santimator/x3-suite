@@ -457,7 +457,7 @@ the next text reply, all of its staged volumes take that one answer, and the
 next distinct series is asked afterwards. Standalone books and other file types
 continue through their normal routes while those questions wait. The alias is
 then remembered for later volumes. The result is both a canonical catalog
-filename and a compact OPDS title such as `LOTR 01 - The Fellowship of the
+filename and a compact OPDS title such as `LOTR 1 - The Fellowship of the
 Ring`; the full series name remains the grouping label. Ingest and aliasing
 rename only; EPUB bytes are never rewritten.
 
@@ -475,16 +475,22 @@ one from the push, one from a later download. Since 1.5.0 the layout is a
 alone), so the bot reads it from `/api/settings` while the reader is in front
 of it rather than assuming the default.
 
-**📚 Library → Browse by series** adds one doorway rather than buttons beside
-every book. A series card offers **Queue all**, **Book metadata**, **Change
-short name**, and **Remove all from X3**. Book metadata opens a paginated volume
-picker and then the same individual editor described below. Queue all reuses
-the exact same slimmer and queue path as one book and skips volumes already
-queued. Remove all resolves the device's current OPDS filename format, deletes
-only exact SD-root matches, and explicitly leaves both catalog originals and
-the queue untouched. Changing the short name renames the series together
-without rewriting bytes and updates any queued paths so a later push does not
-go stale.
+**📚 Library** is one unified index. A standalone book occupies one row; a
+series also occupies one row no matter how many volumes it contains. Opening a
+series reveals its volumes as ordinary book buttons, so each still has its
+individual send, metadata, rename and delete actions. This makes missing or
+incorrect series metadata visible as standalone outliers; after an explicit
+metadata edit, the next library view naturally folds the book into its series.
+The old separate **Browse by series** callback remains as a compatibility route
+to this unified view, but no longer appears as another mode in the UI.
+
+A series card also offers **Queue all**, **Change short name**, and **Remove all
+from X3**. Queue all reuses the exact same slimmer and queue path as one book
+and skips volumes already queued. Remove all resolves the device's current OPDS
+filename format, deletes only exact SD-root matches, and explicitly leaves both
+catalog originals and the queue untouched. Changing the short name renames the
+series together without rewriting bytes and updates any queued paths so a later
+push does not go stale.
 
 An individual book card also has **📝 Metadata**. It displays the raw embedded
 title, author, series, series position and language and offers those five

@@ -141,8 +141,8 @@ built.
 `scripts/ingest_book.py` is the one catalog-ingest interface. It ignores a
 download site's filename, reads the metadata inside, and files the untouched
 bytes as `<catalog title> - <author>.epub`. For a series, the catalog title is
-`<short alias> <zero-padded volume> - <embedded title>`, for example
-`LOTR 01 - The Fellowship of the Ring`. The full series name remains available
+`<short alias> <volume> - <embedded title>` with no display padding, for example
+`LOTR 1 - The Fellowship of the Ring`. The full series name remains available
 in **By series** and search; the short alias is stored beside the collection in
 `workspace/library/.series-aliases.json`.
 
@@ -151,7 +151,7 @@ leading dash-delimited label exactly matches the separate author field (normal
 or `Family, Given`) or the separate series plus volume, the ingester removes
 that redundant label before adding the catalog prefix. It does no fuzzy title
 guessing: an unproved prefix stays. Thus `McMurtry, Larry - Lonesome Dove 01 -
-Lonesome Dove` becomes `LoDove 01 - Lonesome Dove`, not a pile-up of the same
+Lonesome Dove` becomes `LoDove 1 - Lonesome Dove`, not a pile-up of the same
 metadata three times.
 
 If those exact EPUB bytes already exist at the catalog root under an obsolete
