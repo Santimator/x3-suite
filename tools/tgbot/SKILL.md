@@ -476,13 +476,15 @@ alone), so the bot reads it from `/api/settings` while the reader is in front
 of it rather than assuming the default.
 
 **📚 Library → Browse by series** adds one doorway rather than buttons beside
-every book. A series card offers **Queue all**, **Remove all from X3**, and
-**Change short name**. Queue all reuses the exact same slimmer and queue path as
-one book and skips volumes already queued. Remove all resolves the device's
-current OPDS filename format, deletes only exact SD-root matches, and explicitly
-leaves both catalog originals and the queue untouched. Changing the short name
-renames the series together without rewriting bytes and updates any queued
-paths so a later push does not go stale.
+every book. A series card offers **Queue all**, **Book metadata**, **Change
+short name**, and **Remove all from X3**. Book metadata opens a paginated volume
+picker and then the same individual editor described below. Queue all reuses
+the exact same slimmer and queue path as one book and skips volumes already
+queued. Remove all resolves the device's current OPDS filename format, deletes
+only exact SD-root matches, and explicitly leaves both catalog originals and
+the queue untouched. Changing the short name renames the series together
+without rewriting bytes and updates any queued paths so a later push does not
+go stale.
 
 An individual book card also has **📝 Metadata**. It displays the raw embedded
 title, author, series, series position and language and offers those five

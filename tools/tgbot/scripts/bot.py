@@ -793,7 +793,6 @@ class Bot:
             lines.extend("· " + html.escape(
                 (report.get("error") or Path(report.get("source", "book")).name)[:120])
                          for report in failed)
-        lines.append("Catalog only — nothing was queued or sent to the X3.")
         self.say(chat, "\n".join(lines),
                  [[("📚 Series", "ser:list"), ("🏠 Menu", "m:main")]])
         self._next_series_alias(chat)
@@ -829,14 +828,11 @@ class Bot:
                 series_line += f" · volume {html.escape(report['series_index'])}"
             lines.append(series_line)
         lines.append(f"catalog file: <code>{html.escape(destination.name)}</code>")
-        lines.append("on the SD card: "
-                     f"<code>{html.escape(suite.device_book_name(author, title))}</code>")
         if not report.get("verify_ok", False):
             lines.append("\n<i>Readable EPUB, but the suite's stricter builder "
                          "check noted differences typical of third-party books.</i>")
-        lines.append("\nOn the catalog now — no push needed."
-                     if suite.opds_up(self.cfg["opds_url"])
-                     else "\n⚠️ Filed, but opds-server is not answering yet.")
+        if not suite.opds_up(self.cfg["opds_url"]):
+            lines.append("\n⚠️ Filed, but opds-server is not answering yet.")
         if self.active_alias_group in self.alias_groups:
             waiting = self.alias_groups[self.active_alias_group]["series"]
             lines.append("\n↩️ Your next plain-text reply still sets the short "
@@ -969,9 +965,11 @@ class Bot:
         if rest == "list":
             return self.submit(chat, lambda: self.show_series(chat))
         action, _, token = rest.partition(":")
-        key = self.tokens.get(token)
-        if not key:
+        payload = self.tokens.get(token)
+        if not payload:
             return self.stale(chat)
+        key = payload.get("key") if isinstance(payload, dict) else payload
+        page = payload.get("page", 0) if isinstance(payload, dict) else 0
         try:
             group, books = self.series_group(key)
         except suite.SuiteError as exc:
@@ -991,9 +989,39 @@ class Bot:
             return self.say(
                 chat, "\n".join(lines),
                 [[(f"📤 Queue all {len(books)}", f"ser:q:{again}")],
-                 [("🗑 Remove all from X3", f"ser:rm:{again}")],
+                 [("📝 Book metadata", f"ser:m:{again}")],
                  [("✏️ Change short name", f"ser:a:{again}")],
+                 [("🗑 Remove all from X3", f"ser:rm:{again}")],
                  [("📚 Series", "ser:list")]])
+
+        if action == "m":
+            page_size = 12
+            last_page = max(0, (len(books) - 1) // page_size)
+            page = max(0, min(page, last_page))
+            start = page * page_size
+            rows = []
+            for book in books[start:start + page_size]:
+                position = (f"{book.get('series_index')} · "
+                            if book.get("series_index") else "")
+                title = (book.get("base_title") or book.get("title")
+                         or Path(book["path"]).stem)
+                label = "📝 " + position + title
+                book_token = self.tokens.put({"path": book["path"]})
+                rows.append([(label[:52], f"bm:show:{book_token}")])
+            navigation = []
+            if page:
+                previous = self.tokens.put({"key": key, "page": page - 1})
+                navigation.append(("‹ Previous", f"ser:m:{previous}"))
+            if page < last_page:
+                following = self.tokens.put({"key": key, "page": page + 1})
+                navigation.append(("Next ›", f"ser:m:{following}"))
+            if navigation:
+                rows.append(navigation)
+            rows.append([("◀ Series", f"ser:f:{self.tokens.put(key)}")])
+            heading = f"📝 <b>{html.escape(group['name'])}</b> — choose a book"
+            if last_page:
+                heading += f"\nPage {page + 1} of {last_page + 1}"
+            return self.say(chat, heading, rows)
 
         if action == "q":
             self.say(chat, f"Preparing {len(books)} book(s) for the reader…")
@@ -1103,8 +1131,8 @@ class Bot:
             chat,
             f"✅ <b>{html.escape(series)}</b> now uses "
             f"<code>{html.escape(report['series_alias'])}</code>. "
-            f"Renamed {report.get('changed', 0)} catalog file(s) without changing "
-            f"their bytes" + (f"; updated {followed} queued path(s)." if followed else "."),
+            f"Renamed {report.get('changed', 0)} catalog file(s)"
+            + (f" and updated {followed} queued path(s)." if followed else "."),
             [[("📚 Series", "ser:list"), ("🏠 Menu", "m:main")]])
 
     def on_library_callback(self, chat, rest: str) -> None:
@@ -1314,8 +1342,6 @@ class Bot:
         token = self.tokens.put({"path": str(path), "updates": updates, "alias": alias,
                                  "sha256": report.get("sha256", "")})
         back = self.tokens.put({"path": str(path)})
-        lines.append("\nOnly the catalog EPUB’s package metadata changes. "
-                     "Nothing is sent to the X3.")
         self.say(chat, "\n".join(lines),
                  [[("✓ Write it", f"bm:apply:{token}"),
                    ("No", f"bm:show:{back}")]])
@@ -1347,12 +1373,15 @@ class Bot:
         fields = ", ".join(self.META_LABELS.get(field, field)
                            for field in report.get("changed_fields", [])) or "filename"
         token = self.tokens.put({"path": str(destination)})
+        queued_note = ""
+        if followed:
+            noun = "copy" if followed == 1 else "copies"
+            queued_note = f"\nUpdated {followed} queued {noun}."
         self.say(
             chat,
             f"✅ Updated {html.escape(fields)}.\n"
             f"catalog file: <code>{html.escape(destination.name)}</code>"
-            + (f"\nrefreshed {followed} queued card copy/copies." if followed else "")
-            + "\nNothing was sent to or removed from the X3.",
+            + queued_note,
             [[("📝 Metadata", f"bm:show:{token}"), ("📚 Library", "m:lib")]])
 
     def show_queue(self, chat) -> None:
