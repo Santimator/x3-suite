@@ -684,7 +684,10 @@ class Bot:
 
         destination = Path(report.get("destination") or report.get("source", ""))
         if status == "already_present":
-            intro = "📚 Already in the catalog; the duplicate upload was left untouched."
+            intro = ("📚 Already in the catalog; corrected its catalog name. "
+                     "The duplicate upload was left untouched."
+                     if report.get("renamed_from") else
+                     "📚 Already in the catalog; the duplicate upload was left untouched.")
         elif status == "filed":
             intro = "📚 Filed from embedded metadata."
         else:

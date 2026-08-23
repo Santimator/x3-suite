@@ -32,6 +32,7 @@ import shutil
 import sys
 import tempfile
 import threading
+import zipfile
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -112,6 +113,24 @@ def build_fixture_library(root: Path) -> None:
     (root / library.ALIAS_FILE).write_text(json.dumps({
         "version": 1, "aliases": {"The Lord of the Rings": "LOTR"},
     }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def make_metadata_epub(path: Path, title: str, author: str, series: str,
+                       series_index: str) -> Path:
+    """A small third-party-shaped EPUB for metadata-ingest regressions."""
+    container = ('<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+                 '<rootfiles><rootfile full-path="content.opf"/></rootfiles></container>')
+    opf = ('<package xmlns="http://www.idpf.org/2007/opf"><metadata '
+           'xmlns:dc="http://purl.org/dc/elements/1.1/">'
+           f'<dc:title>{title}</dc:title><dc:creator>{author}</dc:creator>'
+           '<dc:language>en</dc:language>'
+           f'<meta name="calibre:series" content="{series}"/>'
+           f'<meta name="calibre:series_index" content="{series_index}"/>'
+           '</metadata></package>')
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("META-INF/container.xml", container)
+        archive.writestr("content.opf", opf)
+    return path
 
 
 def start_server(root: Path, credentials: Optional[Tuple[str, str]] = None):
@@ -228,6 +247,11 @@ def main() -> int:
         all_ok &= check("a missing volume number is not invented",
                         library.catalog_title("Unknown volume", "SER", "")
                         == "SER - Unknown volume")
+        all_ok &= check("title cleanup leaves an unproved prefix alone",
+                        library.clean_embedded_title(
+                            "Anniversary Edition - Lonesome Dove", "Larry McMurtry",
+                            "Lonesome Dove", "1.0")
+                        == "Anniversary Edition - Lonesome Dove")
         all_ok &= check("book ids are stable across rescans",
                         [b.id for b in library.scan([root], [])] == [b.id for b in books])
 
@@ -266,6 +290,52 @@ def main() -> int:
                         invalid_report["status"] == "invalid" and invalid.exists()
                         and len(library.scan([catalog], [])) == 1,
                         str(invalid_report))
+
+        # A real-world dc:title can itself be a filename assembled from other
+        # metadata. This is the exact Lonesome Dove report that exposed the
+        # regression: both known prefixes must disappear, and nothing else.
+        lonesome_source = tmp / "Lonesome_Dove_1_download-site.epub"
+        make_metadata_epub(
+            lonesome_source,
+            "McMurtry, Larry - Lonesome Dove 01 - Lonesome Dove",
+            "Larry McMurtry", "Lonesome Dove", "1.0")
+        lonesome_bytes = lonesome_source.read_bytes()
+        lonesome_pending = ingest_book.ingest(lonesome_source, catalog)
+        all_ok &= check("the noisy embedded title still pauses for a human alias",
+                        lonesome_pending["status"] == "needs_alias"
+                        and lonesome_source.exists(), str(lonesome_pending))
+        lonesome_report = ingest_book.ingest(lonesome_source, catalog, "LoDove")
+        lonesome = catalog / "LoDove 01 - Lonesome Dove - Larry McMurtry.epub"
+        all_ok &= check("known author and series labels are not duplicated in the title",
+                        lonesome_report["status"] == "filed"
+                        and lonesome_report["base_title"] == "Lonesome Dove"
+                        and lonesome_report["title"] == "LoDove 01 - Lonesome Dove"
+                        and lonesome.exists(), str(lonesome_report))
+        all_ok &= check("the Lonesome Dove cleanup changes no EPUB bytes",
+                        lonesome.read_bytes() == lonesome_bytes)
+
+        old_lonesome = catalog / (
+            "LoDove 01 - McMurtry, Larry - Lonesome Dove 01 - Lonesome Dove "
+            "- Larry McMurtry.epub")
+        lonesome.rename(old_lonesome)
+        repair_preview = ingest_book.normalize(catalog, dry_run=True)
+        repaired = ingest_book.normalize(catalog)
+        all_ok &= check("normalization repairs the already-filed Lonesome Dove name",
+                        repair_preview["changed"] == 1 and old_lonesome.exists() is False
+                        and repaired["status"] == "normalized" and repaired["changed"] == 1
+                        and lonesome.exists() and lonesome.read_bytes() == lonesome_bytes,
+                        f"preview={repair_preview}; applied={repaired}")
+
+        lonesome.rename(old_lonesome)
+        repeat_upload = tmp / "Lonesome_Dove_repeat-upload.epub"
+        repeat_upload.write_bytes(lonesome_bytes)
+        repeat_report = ingest_book.ingest(repeat_upload, catalog)
+        all_ok &= check("re-uploading the same book repairs its old catalog name",
+                        repeat_report["status"] == "already_present"
+                        and Path(repeat_report.get("renamed_from", "")) == old_lonesome
+                        and lonesome.exists() and not old_lonesome.exists()
+                        and repeat_upload.exists() and lonesome.read_bytes() == lonesome_bytes,
+                        str(repeat_report))
 
         odd = catalog / "download-site--two-towers.epub"
         shutil.copy2(root / "two-towers" / "build" / "two-towers.epub", odd)

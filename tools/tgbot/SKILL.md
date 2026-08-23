@@ -440,6 +440,14 @@ download filename. A broadly readable third-party EPUB is accepted; the
 suite-builder's stricter structural check is shown as a warning, not mistaken
 for proof that a commercial EPUB is invalid.
 
+If the embedded title itself repeats the separately embedded author or
+series-and-volume as leading dash-delimited labels, the ingester removes only
+those proven duplicates before naming the book. Telegram does not try to infer
+a better title of its own; the catalog script remains the single deterministic
+owner of that cleanup. Re-sending identical bytes after a naming fix repairs
+the old flat catalog filename rather than adding a second catalog copy; the bot
+says what happened and leaves the repeat upload untouched.
+
 A new series pauses once. The bot shows its full embedded name and volume,
 makes a mechanical initials suggestion (`The Lord of the Rings` → `LOTR`), and
 asks you to accept it or send a short name of at most six characters. It is

@@ -571,6 +571,51 @@ def check_book_delivery(tmp: Path) -> None:
           tg.sent and "x.epub" in tg.sent[-1]["text"], str(tg.sent))
 
 
+def check_noisy_embedded_title(tmp: Path) -> None:
+    print("\na filename-shaped embedded title:")
+    bot, tg = make_bot(tmp)
+    source = bot.workspace / "Lonesome_Dove_1_download-site.epub"
+    make_epub(source, "McMurtry, Larry - Lonesome Dove 01 - Lonesome Dove",
+              "Larry McMurtry", "Lonesome Dove", "1.0")
+    original = source.read_bytes()
+
+    bot.take_book(OWNER, source)
+    check("the Lonesome Dove upload asks for its series alias",
+          source.exists() and bot.pending and bot.pending["kind"] == "seriesalias",
+          str(tg.sent[-1]))
+    bot.handle(msg("LoDove"))
+
+    expected = (bot.workspace / "library"
+                / "LoDove 01 - Lonesome Dove - Larry McMurtry.epub")
+    report = tg.sent[-1]["text"]
+    check("the typed alias returns through Telegram into the cleaned catalog name",
+          expected.exists() and expected.read_bytes() == original and not source.exists()
+          and "<b>LoDove 01 - Lonesome Dove</b>" in report
+          and "catalog file: <code>LoDove 01 - Lonesome Dove - Larry McMurtry.epub</code>"
+          in report,
+          report)
+    check("the redundant author/series title is gone rather than merely hidden",
+          "McMurtry, Larry - Lonesome Dove 01" not in report
+          and not any("McMurtry, Larry" in path.name
+                      for path in (bot.workspace / "library").glob("*.epub")),
+          report)
+
+    old_name = (bot.workspace / "library"
+                / ("LoDove 01 - McMurtry, Larry - Lonesome Dove 01 - "
+                   "Lonesome Dove - Larry McMurtry.epub"))
+    expected.rename(old_name)
+    repeat = bot.workspace / "Lonesome_Dove_repeat-upload.epub"
+    repeat.write_bytes(original)
+    tg.sent.clear()
+    bot.take_book(OWNER, repeat)
+    repair_report = tg.sent[-1]["text"]
+    check("re-sending the same book repairs the already-filed catalog path",
+          expected.exists() and expected.read_bytes() == original
+          and not old_name.exists() and repeat.exists()
+          and "corrected its catalog name" in repair_report,
+          repair_report)
+
+
 def check_series_workflow(tmp: Path) -> None:
     print("\na series, from noisy upload to whole-card actions:")
     bot, tg = make_bot(tmp)
@@ -1637,6 +1682,7 @@ def main() -> int:
         check_queue(tmp)
         check_push_is_all_or_nothing(tmp)
         check_book_delivery(tmp)
+        check_noisy_embedded_title(tmp)
         check_series_workflow(tmp)
         check_wallpaper_collection(tmp)
         check_fonts(tmp)

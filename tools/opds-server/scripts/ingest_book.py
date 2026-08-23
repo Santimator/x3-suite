@@ -89,10 +89,12 @@ def inspect(source: Path, library_dir: Path) -> dict:
         return {"status": "invalid", "source": str(source), "error": problem}
 
     metadata = library.read_opf_metadata(source)
-    base_title = metadata.get("title") or library.title_from_filename(source)
     author = metadata.get("author", "")
     series = metadata.get("series", "")
     series_index = metadata.get("series_index", "")
+    embedded_title = metadata.get("title") or library.title_from_filename(source)
+    base_title = library.clean_embedded_title(
+        embedded_title, author, series, series_index)
     aliases = library.load_aliases(library_dir)
     alias = library.alias_for(series, aliases) if series else ""
     suggestion = library.suggest_alias(series, aliases.values()) if series and not alias else ""
@@ -262,6 +264,28 @@ def _file_without_overwrite(source: Path, dest: Path) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def _identical_catalog_file(library_dir: Path, source: Path,
+                            digest: str) -> Optional[Path]:
+    """Find the same bytes under an obsolete flat catalog name, if present."""
+    try:
+        size = source.stat().st_size
+    except OSError:
+        return None
+    for candidate in sorted(library_dir.glob("*.epub")):
+        try:
+            if candidate.is_symlink():
+                continue
+            resolved = candidate.resolve()
+            if (resolved == source or not candidate.is_file()
+                    or candidate.stat().st_size != size):
+                continue
+            if _digest(candidate) == digest:
+                return resolved
+        except OSError:
+            continue
+    return None
+
+
 def ingest(source: Path, library_dir: Path, alias: str = "") -> dict:
     source = Path(source).resolve()
     library_dir = Path(library_dir).resolve()
@@ -296,6 +320,20 @@ def ingest(source: Path, library_dir: Path, alias: str = "") -> dict:
                     "error": "an identical catalog copy already exists; source was left untouched"}
         return {**report, "status": "conflict",
                 "error": f"refusing to overwrite different catalog file {dest.name!r}"}
+
+    # Naming rules can become more precise after a book was filed. A repeat
+    # upload of those exact bytes should repair that one catalog path, not make
+    # a second copy under the new canonical name. The upload itself follows the
+    # established duplicate rule and is left untouched.
+    previous = _identical_catalog_file(library_dir, source, report["sha256"])
+    if previous is not None:
+        try:
+            _apply_renames([(previous, dest)])
+        except (IngestError, OSError) as exc:
+            return {**report, "status": "conflict", "error": str(exc)}
+        return {**report, "status": "already_present",
+                "renamed_from": str(previous),
+                "note": "the identical catalog copy was renamed; source was left untouched"}
     try:
         _file_without_overwrite(source, dest)
     except FileExistsError:
