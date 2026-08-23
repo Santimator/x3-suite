@@ -98,12 +98,13 @@ deterministic. And a saving under 5% is discarded and the original pushed:
 books built by this suite carry no fonts and an already-sized cover, so a
 second near-identical file would be clutter for nothing.
 
-**The catalog is untouched by all this, on purpose.** `opds-server` serves
-originals, because an OPDS feed is read by anything — phones, laptops, other
-readers — and degrading every book to suit one 528×792 panel would be the wrong
-trade. So a book fetched by the reader *over OPDS* is the fat one. That
-asymmetry is a choice, not an oversight: the bot is the usual route, and a few
-MB on a 32 GB card is not a problem worth a second catalog.
+**The catalog is untouched by all device preparation, on purpose.**
+`opds-server` serves originals, because an OPDS feed is read by anything —
+phones, laptops, other readers — and degrading every book to suit one 528×792
+panel would be the wrong trade. So a book fetched by the reader *over OPDS* is
+the fat one. The separate metadata editor can explicitly change an original's
+OPF after a preview and confirmation; it never invokes the slimmer. That is a
+catalog edit, not device preparation, and the bot says so before writing.
 
 ## What the buttons do
 
@@ -448,13 +449,17 @@ owner of that cleanup. Re-sending identical bytes after a naming fix repairs
 the old flat catalog filename rather than adding a second catalog copy; the bot
 says what happened and leaves the repeat upload untouched.
 
-A new series pauses once. The bot shows its full embedded name and volume,
+A new series pauses once. The bot shows its full embedded name and volumes,
 makes a mechanical initials suggestion (`The Lord of the Rings` → `LOTR`), and
-asks you to accept it or send a short name of at most six characters. It is
-then remembered for every later volume. The result is both a canonical catalog
+asks you to accept it or send a short name of at most six characters. Several
+uploads are grouped by their exact embedded series: only the first series owns
+the next text reply, all of its staged volumes take that one answer, and the
+next distinct series is asked afterwards. Standalone books and other file types
+continue through their normal routes while those questions wait. The alias is
+then remembered for later volumes. The result is both a canonical catalog
 filename and a compact OPDS title such as `LOTR 01 - The Fellowship of the
-Ring`; the full series name remains the grouping label. EPUB bytes are never
-rewritten.
+Ring`; the full series name remains the grouping label. Ingest and aliasing
+rename only; EPUB bytes are never rewritten.
 
 Then it offers **📤 Also send to device**, which queues the book for the SD
 root alongside any wallpapers. Worth having when the reader is off your LAN, or
@@ -478,6 +483,21 @@ current OPDS filename format, deletes only exact SD-root matches, and explicitly
 leaves both catalog originals and the queue untouched. Changing the short name
 renames the series together without rewriting bytes and updates any queued
 paths so a later push does not go stale.
+
+An individual book card also has **📝 Metadata**. It displays the raw embedded
+title, author, series, series position and language and offers those five
+fields as a fixed edit list, including filling an empty field. Telegram shows
+an exact preview and canonical filename before **Write it**. If a newly entered
+series has no alias, that same conversation asks for the human short name and
+feeds it back with the edit. The bot does not parse or write OPF XML itself:
+`suite.py` calls the same typed `ingest_book.py metadata/edit` commands used by
+the terminal wizard. Keep the UI here and the wizard there in conversational
+sync; all validation and mutation stay in the OPDS scripts.
+
+An explicit metadata edit rewrites the catalog EPUB's OPF and nothing else in
+the archive, then renames the file canonically. A queued book follows the new
+path and metadata, and any pre-edit slim copy is invalidated so the next push
+rebuilds it. The X3 and its current contents remain untouched.
 
 ### A PDF
 

@@ -158,6 +158,42 @@ def set_series_alias(library_dir: Path, series: str, alias: str,
     return _json_out(rc, out, err, "series alias")
 
 
+def audit_catalog(library_dir: Path) -> dict:
+    """Read-only catalog verification from the ingester's own rules."""
+    rc, out, err = run([PY, str(INGEST_BOOK), "--json", "audit",
+                        "--library", str(library_dir)], timeout=300)
+    return _json_out(rc, out, err, "catalog audit")
+
+
+def book_metadata(path: Path, library_dir: Path) -> dict:
+    """The five-field editor view, produced by the catalog rather than here."""
+    rc, out, err = run([PY, str(INGEST_BOOK), "--json", "metadata", str(path),
+                        "--library", str(library_dir)], timeout=120)
+    return _json_out(rc, out, err, "book metadata")
+
+
+def edit_book_metadata(path: Path, library_dir: Path, updates: dict,
+                       alias: str = "", dry_run: bool = False,
+                       expected_sha256: str = "") -> dict:
+    """Preview/apply one typed edit through the shared catalog command.
+
+    Telegram owns only the conversation. Validation, EPUB semantics,
+    canonical naming and mutation all live in ingest_book/epub_metadata; keep
+    this as a subprocess boundary rather than duplicating any of them here.
+    """
+    cmd = [PY, str(INGEST_BOOK), "--json", "edit", str(path),
+           "--library", str(library_dir),
+           "--set-json", json.dumps(updates, ensure_ascii=False)]
+    if alias:
+        cmd += ["--alias", alias]
+    if expected_sha256:
+        cmd += ["--expect-sha256", expected_sha256]
+    if dry_run:
+        cmd.append("--dry-run")
+    rc, out, err = run(cmd, timeout=300)
+    return _json_out(rc, out, err, "book metadata edit")
+
+
 # -- wallpapers ------------------------------------------------------------
 
 

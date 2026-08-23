@@ -33,6 +33,7 @@ import argparse
 import fnmatch
 import hashlib
 import json
+import os
 import re
 import sys
 import unicodedata
@@ -204,6 +205,84 @@ def load_aliases(directory: Path) -> Dict[str, str]:
         return {}
     return {_clean(str(name)): _clean(str(alias)) for name, alias in raw.items()
             if _clean(str(name)) and _clean(str(alias))}
+
+
+def read_alias_document(directory: Path) -> dict:
+    """Read the writable alias document, refusing malformed state.
+
+    ``load_aliases`` is deliberately forgiving because a read-only OPDS scan
+    must still serve books when the sidecar is damaged.  Writers need the
+    opposite rule: never compound or silently replace a malformed document.
+    """
+    path = _alias_path(Path(directory))
+    if not path.exists():
+        return {"version": 1, "aliases": {}}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read {path.name}: {exc}") from exc
+    aliases = data.get("aliases", {}) if isinstance(data, dict) else None
+    if not isinstance(aliases, dict):
+        raise ValueError(f"{path.name} is not a valid alias document")
+    normalized: Dict[str, str] = {}
+    names_by_fold: Dict[str, str] = {}
+    aliases_by_fold: Dict[str, str] = {}
+    for raw_name, raw_alias in aliases.items():
+        if not isinstance(raw_name, str) or not isinstance(raw_alias, str):
+            raise ValueError(f"{path.name} series names and aliases must be text")
+        name = _clean(raw_name)
+        if not name:
+            raise ValueError(f"{path.name} contains an empty series name")
+        alias = validate_alias(raw_alias)
+        old_name = names_by_fold.get(name.casefold())
+        if old_name:
+            raise ValueError(f"{path.name} contains the series {name!r} twice")
+        old_series = aliases_by_fold.get(alias.casefold())
+        if old_series:
+            raise ValueError(
+                f"{path.name} uses short name {alias!r} for both "
+                f"{old_series!r} and {name!r}")
+        names_by_fold[name.casefold()] = name
+        aliases_by_fold[alias.casefold()] = name
+        normalized[name] = alias
+    return {"version": 1, "aliases": normalized}
+
+
+def with_alias(data: dict, series: str, alias: str) -> dict:
+    """Return a validated copy of an alias document with one assignment."""
+    series = _clean(series)
+    if not series:
+        raise ValueError("the full series name cannot be empty")
+    alias = validate_alias(alias)
+    result = {"version": 1, "aliases": dict(data.get("aliases", {}))}
+    aliases = result["aliases"]
+    existing_key = next(
+        (name for name in aliases if str(name).casefold() == series.casefold()), None)
+    collision = next(
+        (name for name, used in aliases.items()
+         if str(used).casefold() == alias.casefold()
+         and str(name).casefold() != series.casefold()), None)
+    if collision:
+        raise ValueError(f"{alias!r} already means {collision!r}")
+    if existing_key and existing_key != series:
+        aliases.pop(existing_key)
+    aliases[series] = alias
+    return result
+
+
+def write_alias_document(directory: Path, data: dict) -> None:
+    """Atomically replace the catalog alias sidecar."""
+    directory = Path(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = _alias_path(directory)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 def aliases_for(epub: Path, root: Path) -> Dict[str, str]:

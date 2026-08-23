@@ -87,7 +87,7 @@ class Queue:
         ids = set(ids)
         _write_atomic(self.path, [i for i in self._read() if i["id"] not in ids])
 
-    def remap_books(self, replacements: dict) -> int:
+    def remap_books(self, replacements: dict, *, invalidate_slim: bool = False) -> int:
         """Follow catalog-only renames without losing queued device work.
 
         `replacements` maps an old path to the freshly scanned book record at
@@ -104,6 +104,11 @@ class Queue:
             item["label"] = (book.get("title") or Path(book["path"]).stem)[:40]
             meta = dict(item.get("meta") or {})
             meta.update(book)
+            # A metadata edit changes the EPUB bytes and therefore invalidates
+            # a reader-only copy warmed before the edit. Alias-only renames do
+            # not, so callers opt into this stricter refresh explicitly.
+            if invalidate_slim:
+                meta.pop("slim", None)
             item["meta"] = meta
             changed += 1
         if changed:

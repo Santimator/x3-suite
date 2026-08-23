@@ -167,22 +167,46 @@ If a publisher supplied a series name but no volume position, the alias is
 still used but no number is invented; that book sorts after numbered volumes
 inside the **By series** feed.
 
-To preview cleanup of books that predate the ingester, then apply it:
+To verify and tidy books that predate the ingester:
 
 ```bash
-python3 tools/opds-server/scripts/ingest_book.py normalize \
-  --library workspace/library --dry-run
-python3 tools/opds-server/scripts/ingest_book.py set-alias \
-  "The Lord of the Rings" LOTR --library workspace/library --dry-run
-python3 tools/opds-server/scripts/ingest_book.py set-alias \
-  "The Lord of the Rings" LOTR --library workspace/library
-python3 tools/opds-server/scripts/ingest_book.py normalize \
+python3 tools/opds-server/scripts/ingest_book.py audit \
+  --library workspace/library
+python3 tools/opds-server/scripts/ingest_book.py tidy \
   --library workspace/library
 ```
 
-Series without a confirmed alias are reported and left alone. Name collisions
-abort before anything moves. Normalization and alias changes rename files only;
-they never rewrite an EPUB or delete a catalog book.
+`audit` is read-only. `tidy` asks once per distinct missing series, collects
+all answers, preflights the complete filename plan, then asks once before
+applying it. Unreadable EPUBs, byte-identical duplicates and name collisions
+are reported and left untouched. Ordinary ingest, tidying and alias changes
+rename files only; they never rewrite an EPUB or delete a catalog book.
+
+The deliberate metadata editor is separate:
+
+```bash
+# choose a catalog book, then step through the five useful fields
+python3 tools/opds-server/scripts/ingest_book.py edit \
+  --library workspace/library
+
+# inspect one book without changing it
+python3 tools/opds-server/scripts/ingest_book.py metadata path/to/book.epub \
+  --library workspace/library
+```
+
+It offers title, author, series, series position and language; Enter keeps a
+value and `-` clears an optional one. It shows the exact OPF and filename plan
+before the final confirmation. This explicit operation rewrites only the OPF
+entry, preserves every other archive member, refuses signed EPUBs, and renames
+the catalog file canonically. EPUB 3 packages receive
+`belongs-to-collection`, `collection-type=series` and `group-position` plus
+Calibre compatibility fields; EPUB 2 packages keep their version and receive
+only the compatible Calibre form. It never runs the device slimmer or touches
+the X3.
+
+The terminal prompts and Telegram messages are thin interfaces over the same
+typed inspect/preview/apply functions. Do not move validation, naming or EPUB
+mutation into either UI.
 
 Book ids are `sha1(path relative to its root)[:12]`, stable across restarts, and
 a download URL carries **only an id**. The id is looked up in the scanned
@@ -278,7 +302,8 @@ secrets/                     gitignored; the Basic-auth password
 scripts/
   serve_opds.py              the server (stdlib http.server)
   library.py                 scan roots, read OPF metadata, group and search
-  ingest_book.py             metadata-driven ingest, aliases and migration
+  ingest_book.py             ingest, audit/tidy and terminal editor interface
+  epub_metadata.py           safe OPF metadata inspection and explicit editing
   feeds.py                   Atom generation, with the client's rules baked in
   config.py                  config + credential resolution
   crosspoint_client.py       port of the device's client — the gate's oracle
