@@ -295,6 +295,65 @@ def format_series_index(value: str) -> str:
     return value
 
 
+_TITLE_SEPARATOR = re.compile(r"\s+[-\u2013\u2014]\s+")
+
+
+def _metadata_key(text: str) -> str:
+    """Comparison key for metadata labels, never for the title we display."""
+    text = unicodedata.normalize("NFKC", _clean(text)).casefold()
+    return "".join(character for character in text if character.isalnum())
+
+
+def clean_embedded_title(title: str, author: str = "", series: str = "",
+                         series_index: str = "") -> str:
+    """Remove only leading labels that the other OPF fields prove redundant.
+
+    Some third-party EPUBs put a filename-shaped value in ``dc:title``, such
+    as ``McMurtry, Larry - Lonesome Dove 01 - Lonesome Dove``.  The author,
+    series and volume are already separate metadata, so carrying those labels
+    into the catalog would add them a second time.  This deliberately is not a
+    fuzzy title guess: a dash-delimited prefix is removed only when it exactly
+    matches a form reconstructed from those known fields.
+    """
+    title = _clean(title)
+    parts = [_clean(part) for part in _TITLE_SEPARATOR.split(title)]
+    if len(parts) < 2:
+        return title
+
+    known_prefixes = {_metadata_key(author)} if author else set()
+    author = _clean(author)
+    if author and "," in author:
+        family, given = (_clean(part) for part in author.split(",", 1))
+        if family and given:
+            known_prefixes.add(_metadata_key(f"{given} {family}"))
+    elif author and not re.search(r"(?:\s(?:and|&)\s|[;/])", author, re.IGNORECASE):
+        names = author.split()
+        if len(names) > 1:
+            known_prefixes.add(_metadata_key(f"{names[-1]}, {' '.join(names[:-1])}"))
+
+    series = _clean(series)
+    series_index = _clean(series_index)
+    if series and series_index:
+        positions = {series_index, format_series_index(series_index)}
+        if re.fullmatch(r"\d+(?:\.\d+)*", series_index):
+            numeric = series_index.split(".")
+            while len(numeric) > 1 and numeric[-1] == "0":
+                numeric.pop()
+            numeric[0] = str(int(numeric[0]))
+            positions.add(".".join(numeric))
+        for position in positions:
+            for label in (f"{series} {position}", f"{series} Book {position}",
+                          f"{series} Volume {position}", f"{series} Vol. {position}"):
+                known_prefixes.add(_metadata_key(label))
+
+    known_prefixes.discard("")
+    first_title_part = 0
+    while (first_title_part < len(parts) - 1
+           and _metadata_key(parts[first_title_part]) in known_prefixes):
+        first_title_part += 1
+    return " - ".join(parts[first_title_part:]) if first_title_part else title
+
+
 def catalog_title(base_title: str, series_alias: str = "", series_index: str = "") -> str:
     base_title = _clean(base_title)
     if not series_alias:
@@ -382,11 +441,14 @@ def scan(roots: Iterable[Path], exclude: Iterable[str] = ()) -> List[Book]:
             fallback = (read_book_json(resolved)
                         if not all(opf.get(k) for k in ("title", "author", "language"))
                         or not opf.get("series") else {})
-            title = opf["title"] or fallback.get("title") or title_from_filename(resolved)
+            embedded_title = (opf["title"] or fallback.get("title")
+                              or title_from_filename(resolved))
             author = opf["author"] or fallback.get("author") or ""
             language = opf["language"] or fallback.get("language") or ""
             series = opf.get("series") or fallback.get("series") or ""
             series_index = opf.get("series_index") or fallback.get("series_index") or ""
+            title = clean_embedded_title(
+                embedded_title, author, series, series_index)
             series_alias = alias_for(series, aliases_for(resolved, root)) if series else ""
             display_title = catalog_title(title, series_alias, series_index)
 

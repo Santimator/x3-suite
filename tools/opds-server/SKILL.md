@@ -146,6 +146,19 @@ bytes as `<catalog title> - <author>.epub`. For a series, the catalog title is
 in **By series** and search; the short alias is stored beside the collection in
 `workspace/library/.series-aliases.json`.
 
+Some third-party EPUBs put a filename-shaped string in `dc:title` too. When a
+leading dash-delimited label exactly matches the separate author field (normal
+or `Family, Given`) or the separate series plus volume, the ingester removes
+that redundant label before adding the catalog prefix. It does no fuzzy title
+guessing: an unproved prefix stays. Thus `McMurtry, Larry - Lonesome Dove 01 -
+Lonesome Dove` becomes `LoDove 01 - Lonesome Dove`, not a pile-up of the same
+metadata three times.
+
+If those exact EPUB bytes already exist at the catalog root under an obsolete
+name, ingesting a repeat upload renames that existing catalog entry to the new
+canonical name instead of creating a second book. The repeat upload is left
+untouched, following the ordinary duplicate rule.
+
 The alias is deliberately confirmed by a person once. The script can make a
 transparent initials suggestion (`The Lord of the Rings` → `LOTR`), but it does
 not pretend truncation is intelligence. Aliases are at most six characters,
