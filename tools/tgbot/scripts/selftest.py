@@ -23,6 +23,7 @@ Checks 1 and 3 are why this file exists at all: they are invariants about
 from __future__ import annotations
 
 import json
+import re
 import sys
 import tempfile
 import zipfile
@@ -1920,6 +1921,17 @@ def check_optional() -> None:
     check("nothing outside tools/tgbot/ imports it", not hits, str(hits))
 
 
+def check_python311_syntax() -> None:
+    """Keep newer development Pythons from hiding a Debian 12 parse failure."""
+    source = (suite.REPO_ROOT / "tools" / "tgbot" / "scripts" / "bot.py").read_text()
+    # PEP 701 permits a non-triple f-string expression to cross a physical
+    # newline starting in Python 3.12. Python 3.11 sees an unterminated string.
+    match = re.search(
+        r'''f"[^"\n]*\{[^"\n]*\n|f'[^'\n]*\{[^'\n]*\n''', source)
+    check("the bot stays parseable by Debian 12's Python 3.11", match is None,
+          f"Python 3.12-only f-string near byte {match.start()}" if match else "")
+
+
 # -- 6b. the device file menu ---------------------------------------------
 
 
@@ -2077,6 +2089,7 @@ def main() -> int:
         check_entry_point()
         check_secrets_outside(tmp)
         check_optional()
+        check_python311_syntax()
 
     print()
     if failures:
