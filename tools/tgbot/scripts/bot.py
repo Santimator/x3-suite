@@ -1281,10 +1281,11 @@ class Bot:
         rows = [[("📚 Library", f"lib:v:{self.tokens.put(library_state)}"
                   if library_state else "m:lib")]]
         if group:
-            rows.insert(0, [("◀ Series", f"ser:f:{self.tokens.put({
+            series_token = self.tokens.put({
                 'key': group['key'], 'page': 0,
                 'library_state': library_state or {},
-            })}")])
+            })
+            rows.insert(0, [("◀ Series", f"ser:f:{series_token}")])
         self.panel(
             chat, message_id,
             f"✅ <b>{html.escape(series)}</b> now uses "
@@ -1321,10 +1322,11 @@ class Bot:
                 group = None
             rows = [[("📚 Library", "m:lib")]]
             if group:
-                rows.insert(0, [("◀ Series", f"ser:f:{self.tokens.put({
+                series_token = self.tokens.put({
                     'key': group['key'], 'page': 0,
                     'library_state': library_state or {},
-                })}")])
+                })
+                rows.insert(0, [("◀ Series", f"ser:f:{series_token}")])
             return self.panel(
                 chat, message_id,
                 "⚠️ Series name not changed: "
@@ -1403,10 +1405,11 @@ class Bot:
                       == report.get("series", "").casefold()), None)
         rows = []
         if group:
-            rows.append([("📚 Open series", f"ser:f:{self.tokens.put({
+            series_token = self.tokens.put({
                 'key': group['key'], 'page': 0,
                 'library_state': payload.get('library_state', {}),
-            })}")])
+            })
+            rows.append([("📚 Open series", f"ser:f:{series_token}")])
         rows.append([("📚 Library", f"lib:v:{self.tokens.put(payload.get('library_state', {}))}"
                      if payload.get("library_state") else "m:lib")])
         verb = "Merged" if report.get("merge") else "Renamed"
@@ -2919,10 +2922,11 @@ class Bot:
         if action == "f":
             back_callback = f"dev:ls:{self.tokens.put(parent)}"
             if payload.get("_device_series_key"):
-                back_callback = f"dev:sf:{self.tokens.put({
+                series_token = self.tokens.put({
                     'path': parent, 'key': payload['_device_series_key'],
                     'page': payload.get('_device_series_page', 0),
-                })}"
+                })
+                back_callback = f"dev:sf:{series_token}"
             rows = [[("✏️ Rename", f"dev:rn:{token}"),
                      ("📦 Move to…", f"dev:mv:{token}")],
                     [("🗑 Delete", f"dev:rm:{token}"),
