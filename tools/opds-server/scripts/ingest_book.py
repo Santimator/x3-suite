@@ -14,6 +14,7 @@ Examples:
   ingest_book.py audit --library workspace/library
   ingest_book.py tidy --library workspace/library
   ingest_book.py edit --library workspace/library
+  ingest_book.py rename-series "Old name" "New name" --library workspace/library
 """
 from __future__ import annotations
 
@@ -699,6 +700,17 @@ def main(argv=None) -> int:
     alias_ap.add_argument("--library", type=Path, required=True)
     alias_ap.add_argument("--dry-run", action="store_true")
 
+    rename_series_ap = sub.add_parser(
+        "rename-series", help="rewrite one full series name across every volume")
+    rename_series_ap.add_argument("series")
+    rename_series_ap.add_argument("new_name")
+    rename_series_ap.add_argument("--library", type=Path, required=True)
+    rename_series_ap.add_argument("--merge", action="store_true")
+    rename_series_ap.add_argument("--dry-run", action="store_true")
+    rename_series_ap.add_argument(
+        "--expect-json", default="",
+        help="preview path-to-sha256 object; refuses if the series changed")
+
     normal_ap = sub.add_parser("normalize", help="canonicalize existing catalog filenames")
     normal_ap.add_argument("--library", type=Path, required=True)
     normal_ap.add_argument("--dry-run", action="store_true")
@@ -735,6 +747,18 @@ def main(argv=None) -> int:
             report = ingest(args.source, args.library, args.alias)
         elif args.command == "set-alias":
             report = set_alias(args.library, args.series, args.alias, dry_run=args.dry_run)
+        elif args.command == "rename-series":
+            expected = None
+            if args.expect_json:
+                try:
+                    expected = json.loads(args.expect_json)
+                except json.JSONDecodeError as exc:
+                    raise IngestError(f"--expect-json is not valid JSON: {exc}") from exc
+                if not isinstance(expected, dict):
+                    raise IngestError("--expect-json must be a path-to-sha256 object")
+            report = epub_metadata.rename_series(
+                args.library, args.series, args.new_name, merge=args.merge,
+                dry_run=args.dry_run, expected_sha256s=expected)
         elif args.command == "normalize":
             report = normalize(args.library, dry_run=args.dry_run)
         elif args.command == "audit":

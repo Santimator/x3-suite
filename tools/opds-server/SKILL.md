@@ -192,6 +192,10 @@ python3 tools/opds-server/scripts/ingest_book.py edit \
 # inspect one book without changing it
 python3 tools/opds-server/scripts/ingest_book.py metadata path/to/book.epub \
   --library workspace/library
+
+# change the full embedded series name on every volume together
+python3 tools/opds-server/scripts/ingest_book.py rename-series \
+  'Old series name' 'New series name' --library workspace/library --dry-run
 ```
 
 It offers title, author, series, series position and language; Enter keeps a
@@ -203,6 +207,14 @@ the catalog file canonically. EPUB 3 packages receive
 Calibre compatibility fields; EPUB 2 packages keep their version and receive
 only the compatible Calibre form. It never runs the device slimmer or touches
 the X3.
+
+`rename-series` is the batch form of that same explicit metadata operation. It
+validates and prepares the complete series before replacing any volume, keeps
+the existing short alias, and refuses to combine two series unless `--merge`
+is explicit. A merge adopts the destination series' short alias. The dry run
+returns content hashes which the applying interface can pass back, so a book
+changed after preview is never overwritten. Any failure restores the original
+EPUBs and alias document together.
 
 The terminal prompts and Telegram messages are thin interfaces over the same
 typed inspect/preview/apply functions. Do not move validation, naming or EPUB

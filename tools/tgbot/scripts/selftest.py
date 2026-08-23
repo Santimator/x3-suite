@@ -705,21 +705,21 @@ def check_series_workflow(tmp: Path) -> None:
         bot.handle(cb(metadata))
         labels = {label for row in tg.sent[-1]["keyboard"] for label, _ in row}
         check("every series volume can open the shared metadata editor",
-              {"✏️ Title", "✏️ Author", "✏️ Series", "✏️ Series position",
+              {"✏️ Title", "✏️ Author", "↔ Change series", "✏️ Series position",
                "✏️ Language"}.issubset(labels), str(labels))
         bot.handle(cb(open_series))
         queue_all = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
                          if data.startswith("ser:q:"))
         catalog_before = {one.name: one.read_bytes(), two.name: two.read_bytes()}
         bot.handle(cb(queue_all))
-        check("Queue all uses the normal reader-only queue for both volumes",
+        check("Add all uses the normal reader-only queue for both volumes",
               len(bot.queue) == 2 and all(i["kind"] == "book" for i in bot.queue.items()),
               str(bot.queue.items()))
         check("queueing a series leaves both catalog originals byte-identical",
               one.read_bytes() == catalog_before[one.name]
               and two.read_bytes() == catalog_before[two.name])
         bot.handle(cb(queue_all))
-        check("Queue all is idempotent", len(bot.queue) == 2, str(bot.queue.items()))
+        check("Add all is idempotent", len(bot.queue) == 2, str(bot.queue.items()))
 
         bot.handle(cb(open_series))
         change = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
@@ -740,25 +740,67 @@ def check_series_workflow(tmp: Path) -> None:
         open_series = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
                            if data.startswith("ser:f:"))
         bot.handle(cb(open_series))
-        remove = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
-                      if data.startswith("ser:rm:"))
-        bot.handle(cb(remove))
-        confirm = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
-                       if data.startswith("ser:rm!:"))
+        series_buttons = [data for row in tg.sent[-1]["keyboard"] for _, data in row]
+        check("the server series card queues and edits, but cannot delete from the X3",
+              any(data.startswith("ser:q:") for data in series_buttons)
+              and any(data.startswith("ser:n:") for data in series_buttons)
+              and any(data.startswith("ser:a:") for data in series_buttons)
+              and not any(data.startswith("ser:rm") for data in series_buttons),
+              str(series_buttons))
+
+        rename_series = next(data for data in series_buttons if data.startswith("ser:n:"))
+        bot.handle(cb(rename_series))
+        bot.handle(msg("Legendarium"))
+        apply_name = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
+                          if data.startswith("srn:apply:"))
+        check("changing the full series name gets one batch preview",
+              "Confirm series change" in tg.sent[-1]["text"]
+              and "2 books" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+        bot.handle(cb(apply_name))
+        check("the batch writes embedded series metadata and keeps its short name",
+              suite.book_metadata(new_one, bot.workspace / "library")["metadata"]["series"]
+              == "Legendarium"
+              and suite.book_metadata(new_two, bot.workspace / "library")["metadata"]["series"]
+              == "Legendarium"
+              and all(item.get("meta", {}).get("series") == "Legendarium"
+                      for item in bot.queue.items()), str(bot.queue.items()))
+        post_rename = {new_one.name: new_one.read_bytes(), new_two.name: new_two.read_bytes()}
+
         bot.device_host = lambda: ("10.0.0.5", {})
         suite.device_book_name_candidates = lambda books, host: [
-            ["card-one.epub"], ["card-two.epub"]]
+            [f"card-{book.get('series_index')}.epub"] for book in books]
         suite.device.list_dir = lambda host, path: [
-            {"name": "card-one.epub", "isDirectory": False},
-            {"name": "card-two.epub", "isDirectory": False},
-            {"name": "some-other-book.epub", "isDirectory": False},
+            {"name": "card-1.epub", "isDirectory": False, "isEpub": True, "size": 10},
+            {"name": "card-2.epub", "isDirectory": False, "isEpub": True, "size": 20},
+            {"name": "some-other-book.epub", "isDirectory": False,
+             "isEpub": True, "size": 30},
         ]
         suite.device.delete_many = lambda host, paths: (removed.extend(paths) or True, "")
+        bot.handle(cb("dev:ls0:"))
+        device_buttons = [data for row in tg.sent[-1]["keyboard"] for _, data in row]
+        open_device_series = next(data for data in device_buttons
+                                  if data.startswith("dev:sf:"))
+        check("the live X3 view folds exact catalog matches into one virtual series",
+              sum(data.startswith("dev:sf:") for data in device_buttons) == 1
+              and sum(data.startswith("dev:f:") for data in device_buttons) == 1,
+              str(tg.sent[-1]))
+        bot.handle(cb(open_device_series))
+        device_series_buttons = [data for row in tg.sent[-1]["keyboard"]
+                                 for _, data in row]
+        remove = next(data for data in device_series_buttons
+                      if data.startswith("dev:srm:"))
+        check("only the connected-device series card offers whole-series removal",
+              not any(data.startswith("ser:q:") for data in device_series_buttons)
+              and bool(remove), str(device_series_buttons))
+        bot.handle(cb(remove))
+        confirm = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
+                       if data.startswith("dev:srm!:"))
         bot.handle(cb(confirm))
-        check("Remove all targets only exact series filenames in one device call",
-              removed == ["/card-one.epub", "/card-two.epub"], str(removed))
-        check("device removal touches neither catalog nor queue",
-              new_one.read_bytes() == first_bytes and new_two.read_bytes() == second_bytes
+        check("device removal targets only the exact files in that virtual series",
+              removed == ["/card-1.epub", "/card-2.epub"], str(removed))
+        check("device removal changes neither catalog nor queue",
+              new_one.read_bytes() == post_rename[new_one.name]
+              and new_two.read_bytes() == post_rename[new_two.name]
               and standalone.read_bytes() == standalone_bytes and len(bot.queue) == 2)
         bot.handle(cb("ser:list"))
         check("old Browse by series buttons now return to the unified library",
@@ -864,27 +906,47 @@ def check_unified_library_pagination(tmp: Path) -> None:
               sum(data.startswith("ser:f:") for data in callbacks) == 1
               and "33 books total · 1 series · 20 standalone books" in tg.sent[-1]["text"],
               str(tg.sent[-1]))
-        next_library = next(data for data in callbacks if data == "lib:p:1")
+        initial_buttons = [button for row in tg.sent[-1]["keyboard"] for button in row]
+        check("large lists show only initials which actually contain entries",
+              {label for label, _ in initial_buttons if label in {"A", "S", "#"}}
+              == {"A", "S"}, str(initial_buttons))
+        standalone_filter = next(data for label, data in initial_buttons
+                                 if label == "Standalone")
+        bot.handle(cb(standalone_filter))
+        filtered_buttons = [button for row in tg.sent[-1]["keyboard"] for button in row]
+        check("the category filters stay in the same edited Telegram panel",
+              tg.sent[-1].get("edited") == 1
+              and any(label == "✓ Standalone" for label, _ in filtered_buttons)
+              and "Page 1 of 3" in tg.sent[-1]["text"], str(tg.sent[-1]))
+        letter_s = next(data for label, data in filtered_buttons if label == "S")
+        bot.handle(cb(letter_s))
+        next_library = next(data for label, data in
+                            [button for row in tg.sent[-1]["keyboard"] for button in row]
+                            if label == "›")
         bot.handle(cb(next_library))
-        check("standalone entries beyond the first page remain reachable",
-              "Page 2 of 2" in tg.sent[-1]["text"]
+        check("standalone entries remain reachable seven at a time",
+              "Page 2 of 3" in tg.sent[-1]["text"]
               and sum(data.startswith("lib:f:") for row in tg.sent[-1]["keyboard"]
-                      for _, data in row) == 3, str(tg.sent[-1]))
+                      for _, data in row) == 7, str(tg.sent[-1]))
 
-        bot.show_library(OWNER)
+        series_filter = next(data for label, data in
+                             [button for row in tg.sent[-1]["keyboard"] for button in row]
+                             if label == "Series")
+        bot.handle(cb(series_filter))
         open_series = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
                            if data.startswith("ser:f:"))
         bot.handle(cb(open_series))
-        series_next = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
-                           if data.startswith("ser:f:"))
-        check("a long series presents twelve ordinary book cards per page",
+        series_next = next(data for label, data in
+                           [button for row in tg.sent[-1]["keyboard"] for button in row]
+                           if label == "Next ›")
+        check("a long series presents seven ordinary book cards per page",
               sum(data.startswith("lib:f:") for row in tg.sent[-1]["keyboard"]
-                  for _, data in row) == 12
+                  for _, data in row) == 7
               and "Page 1 of 2" in tg.sent[-1]["text"], str(tg.sent[-1]))
         bot.handle(cb(series_next))
-        check("the remaining series volume is reachable on page two",
+        check("the remaining six series volumes are reachable on page two",
               sum(data.startswith("lib:f:") for row in tg.sent[-1]["keyboard"]
-                  for _, data in row) == 1
+                  for _, data in row) == 6
               and "Page 2 of 2" in tg.sent[-1]["text"], str(tg.sent[-1]))
     finally:
         suite.library = original_library
@@ -916,30 +978,53 @@ def check_metadata_editor(tmp: Path) -> None:
             if label == "📝 Metadata")
         bot.handle(cb(metadata_button))
         labels = {label for row in tg.sent[-1]["keyboard"] for label, _ in row}
-        check("the book card exposes the five useful fields as a fixed list",
-              {"✏️ Title", "✏️ Author", "✏️ Series", "✏️ Series position",
-               "✏️ Language"}.issubset(labels), str(labels))
+        check("a standalone book offers the useful fields plus Add to series",
+              {"✏️ Title", "✏️ Author", "✏️ Language",
+               "➕ Add to series"}.issubset(labels)
+              and "✏️ Series position" not in labels, str(labels))
         check("the values shown are the embedded values, not filename guesses",
               "Title: <code>Bad title</code>" in tg.sent[-1]["text"]
               and "Author: <code>Bad Author</code>" in tg.sent[-1]["text"],
               tg.sent[-1]["text"])
 
-        edit_series = next(
+        add_series = next(
             data for row in tg.sent[-1]["keyboard"] for label, data in row
-            if label == "✏️ Series")
-        bot.handle(cb(edit_series))
+            if label == "➕ Add to series")
+        bot.handle(cb(add_series))
+        new_series = next(
+            data for row in tg.sent[-1]["keyboard"] for label, data in row
+            if label == "＋ New series")
+        bot.handle(cb(new_series))
+        cancel_new_series = next(
+            data for row in tg.sent[-1]["keyboard"] for label, data in row
+            if label == "✗ Cancel")
+        bot.handle(cb(cancel_new_series))
+        check("cancelling a free-text series question really releases the next reply",
+              bot.pending is None and "Choose a series" in tg.sent[-1]["text"],
+              str(tg.sent[-1]))
+        new_series = next(
+            data for row in tg.sent[-1]["keyboard"] for label, data in row
+            if label == "＋ New series")
+        bot.handle(cb(new_series))
         bot.handle(msg("Chronicles"))
         check("creating series metadata pauses for the human short name",
-              bot.pending and bot.pending["kind"] == "bookmetaalias"
-              and "no short catalog name" in tg.sent[-1]["text"],
+              bot.pending and bot.pending["kind"] == "bookseriesalias"
+              and "Send the short name" in tg.sent[-1]["text"],
               str(tg.sent[-1]))
         bot.handle(msg("TOO-LONG"))
         check("an invalid metadata alias keeps the same answer wired for retry",
               source.exists() and bot.pending
-              and bot.pending["kind"] == "bookmetaalias"
+              and bot.pending["kind"] == "bookseriesalias"
               and "Send another short name" in tg.sent[-1]["text"],
               str(tg.sent[-1]))
         bot.handle(msg("CHRON"))
+        check("new and existing series assignments always ask for a position",
+              bot.pending and bot.pending["kind"] == "bookseriesposition"
+              and "position in" in tg.sent[-1]["text"], str(tg.sent[-1]))
+        no_position = next(
+            data for row in tg.sent[-1]["keyboard"] for label, data in row
+            if label == "No position")
+        bot.handle(cb(no_position))
         apply = next(
             data for row in tg.sent[-1]["keyboard"] for label, data in row
             if label == "✓ Write it")
@@ -971,7 +1056,7 @@ def check_metadata_editor(tmp: Path) -> None:
               and "X3" not in tg.sent[-1]["text"],
               tg.sent[-1]["text"])
 
-        # Fill the previously empty position through the same fixed field list.
+        # Fill the deliberately omitted position through its direct edit.
         show = next(data for row in tg.sent[-1]["keyboard"] for label, data in row
                     if label == "📝 Metadata")
         bot.show_library(OWNER)
@@ -994,6 +1079,45 @@ def check_metadata_editor(tmp: Path) -> None:
         check("an empty series position can be created and immediately re-files the book",
               positioned.exists() and not edited.exists()
               and suite.book_metadata(positioned, catalog)["metadata"]["series_index"] == "2")
+
+        second = make_epub(
+            catalog / "another-standalone.epub", "Another Book", "Second Author")
+        bot.show_book_metadata(OWNER, second)
+        add_existing = next(
+            data for row in tg.sent[-1]["keyboard"] for label, data in row
+            if label == "➕ Add to series")
+        bot.handle(cb(add_existing))
+        existing = next(
+            data for row in tg.sent[-1]["keyboard"] for label, data in row
+            if label == "Chronicles")
+        bot.handle(cb(existing))
+        check("an existing series is selected from the catalog and reuses its alias",
+              bot.pending and bot.pending["kind"] == "bookseriesposition"
+              and bot.pending.get("alias") == "CHRON", str(bot.pending))
+        bot.handle(msg("3"))
+        apply_existing = next(
+            data for row in tg.sent[-1]["keyboard"] for label, data in row
+            if label == "✓ Write it")
+        bot.handle(cb(apply_existing))
+        joined = catalog / "CHRON 3 - Another Book - Second Author.epub"
+        check("choosing an existing series only needed its position",
+              joined.exists()
+              and suite.book_metadata(joined, catalog)["metadata"]["series"]
+              == "Chronicles")
+
+        metadata_again = next(
+            data for row in tg.sent[-1]["keyboard"] for label, data in row
+            if label == "📝 Metadata")
+        bot.handle(cb(metadata_again))
+        change_series = next(
+            data for row in tg.sent[-1]["keyboard"] for label, data in row
+            if label == "↔ Change series")
+        bot.handle(cb(change_series))
+        picker_labels = {label for row in tg.sent[-1]["keyboard"] for label, _ in row}
+        check("a book already in a series can switch, create, or leave it",
+              "✓ Chronicles" in picker_labels
+              and "＋ New series" in picker_labels
+              and "✕ Remove from series" in picker_labels, str(picker_labels))
     finally:
         suite.library = original_library
 

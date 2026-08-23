@@ -158,6 +158,22 @@ def set_series_alias(library_dir: Path, series: str, alias: str,
     return _json_out(rc, out, err, "series alias")
 
 
+def rename_series(library_dir: Path, series: str, new_name: str, *,
+                  merge: bool = False, dry_run: bool = False,
+                  expected_sha256s: dict | None = None) -> dict:
+    """Preview/apply the catalog's transactional whole-series rename."""
+    cmd = [PY, str(INGEST_BOOK), "--json", "rename-series", series, new_name,
+           "--library", str(library_dir)]
+    if merge:
+        cmd.append("--merge")
+    if dry_run:
+        cmd.append("--dry-run")
+    if expected_sha256s is not None:
+        cmd += ["--expect-json", json.dumps(expected_sha256s, ensure_ascii=False)]
+    rc, out, err = run(cmd, timeout=600)
+    return _json_out(rc, out, err, "series rename")
+
+
 def audit_catalog(library_dir: Path) -> dict:
     """Read-only catalog verification from the ingester's own rules."""
     rc, out, err = run([PY, str(INGEST_BOOK), "--json", "audit",

@@ -380,6 +380,62 @@ def main() -> int:
                         and (catalog / "RINGS 2 - The Two Towers - J. R. R. Tolkien.epub").exists(),
                         str(changed))
 
+        series_names = tmp / "series-name-catalog"
+        series_names.mkdir()
+        old_one = make_metadata_epub(
+            series_names / "old-one.epub", "First", "Series Author",
+            "Old Cycle", "1", version="3.0")
+        old_two = make_metadata_epub(
+            series_names / "old-two.epub", "Second", "Series Author",
+            "Old Cycle", "2", version="3.0")
+        with zipfile.ZipFile(old_one) as archive:
+            old_chapter = archive.read("chapter.xhtml")
+        ingest_book.set_alias(series_names, "Old Cycle", "OLD")
+        rename_preview = epub_metadata.rename_series(
+            series_names, "Old Cycle", "New Cycle", dry_run=True)
+        rename_report = epub_metadata.rename_series(
+            series_names, "Old Cycle", "New Cycle",
+            expected_sha256s=rename_preview["expected_sha256s"])
+        renamed_one = series_names / "OLD 1 - First - Series Author.epub"
+        renamed_two = series_names / "OLD 2 - Second - Series Author.epub"
+        with zipfile.ZipFile(renamed_one) as archive:
+            renamed_chapter = archive.read("chapter.xhtml")
+        aliases_after_rename = library.load_aliases(series_names)
+        all_ok &= check("a full series-name preview applies every volume together",
+                        rename_preview["status"] == "dry_run"
+                        and rename_report["status"] == "renamed"
+                        and library.read_opf_metadata(renamed_one)["series"] == "New Cycle"
+                        and library.read_opf_metadata(renamed_two)["series"] == "New Cycle"
+                        and aliases_after_rename == {"New Cycle": "OLD"},
+                        f"{rename_preview}; {rename_report}; {aliases_after_rename}")
+        all_ok &= check("a full series rename preserves non-OPF book resources",
+                        renamed_chapter == old_chapter)
+
+        target = make_metadata_epub(
+            series_names / "target.epub", "Third", "Series Author",
+            "Existing Cycle", "3", version="3.0")
+        ingest_book.set_alias(series_names, "Existing Cycle", "EXIST")
+        merge_question = epub_metadata.rename_series(
+            series_names, "New Cycle", "Existing Cycle", dry_run=True)
+        merge_preview = epub_metadata.rename_series(
+            series_names, "New Cycle", "Existing Cycle", merge=True, dry_run=True)
+        merge_report = epub_metadata.rename_series(
+            series_names, "New Cycle", "Existing Cycle", merge=True,
+            expected_sha256s=merge_preview["expected_sha256s"])
+        merged = library.group_by_series(library.scan([series_names], []))
+        all_ok &= check("an existing name requires an explicit merge",
+                        merge_question["status"] == "needs_merge"
+                        and merge_preview["status"] == "dry_run"
+                        and merge_preview["series_alias"] == "EXIST",
+                        f"{merge_question}; {merge_preview}")
+        all_ok &= check("an explicit merge uses the destination identity",
+                        merge_report["status"] == "renamed"
+                        and len(merged) == 1 and merged[0][1] == "Existing Cycle"
+                        and len(merged[0][3]) == 3
+                        and library.load_aliases(series_names)
+                        == {"Existing Cycle": "EXIST"},
+                        f"{merge_report}; {merged}")
+
         print("1c. catalog audit and explicit metadata editing")
         steward = tmp / "steward-catalog"
         steward.mkdir()
