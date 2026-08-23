@@ -357,10 +357,10 @@ def suggest_alias(series: str, used: Iterable[str] = ()) -> str:
 
 
 def format_series_index(value: str) -> str:
-    """Preserve publisher-supplied subpositions while padding the main volume.
+    """Preserve publisher-supplied subpositions without display padding.
 
-    `1` and `1.0` become `01`; `1.5` becomes `01.5`; `2.2.1` becomes
-    `02.2.1`. Non-numeric positions are kept verbatim rather than invented.
+    `1`, `01` and `1.0` become `1`; `1.5` stays `1.5`; `2.2.1` stays
+    `2.2.1`. Non-numeric positions are kept verbatim rather than invented.
     """
     value = _clean(value)
     if not value:
@@ -369,7 +369,7 @@ def format_series_index(value: str) -> str:
         parts = value.split(".")
         while len(parts) > 1 and parts[-1] == "0":
             parts.pop()
-        parts[0] = parts[0].zfill(2)
+        parts[0] = str(int(parts[0]))
         return ".".join(parts)
     return value
 
@@ -420,6 +420,12 @@ def clean_embedded_title(title: str, author: str = "", series: str = "",
                 numeric.pop()
             numeric[0] = str(int(numeric[0]))
             positions.add(".".join(numeric))
+            # Old catalog names and third-party title metadata commonly pad
+            # the first position. Continue recognizing that proven label even
+            # though new catalog titles deliberately display the natural form.
+            legacy = list(numeric)
+            legacy[0] = legacy[0].zfill(2)
+            positions.add(".".join(legacy))
         for position in positions:
             for label in (f"{series} {position}", f"{series} Book {position}",
                           f"{series} Volume {position}", f"{series} Vol. {position}"):

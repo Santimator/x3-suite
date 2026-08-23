@@ -505,12 +505,12 @@ def check_book_delivery(tmp: Path) -> None:
               suite.device_book_name("A", "B", host=None) == "A - B.epub")
         candidates = suite.device_book_name_candidates([{
             "author": "J. R. R. Tolkien",
-            "title": "LOTR 01 - The Fellowship of the Ring",
+            "title": "LOTR 1 - The Fellowship of the Ring",
             "base_title": "The Fellowship of the Ring",
         }], "h")
         check("series removal also recognizes the exact pre-alias filename",
               candidates == [[
-                  "LOTR 01 - The Fellowship of the Ring - J. R. R. Tolkien.epub",
+                  "LOTR 1 - The Fellowship of the Ring - J. R. R. Tolkien.epub",
                   "The Fellowship of the Ring - J. R. R. Tolkien.epub",
               ]], str(candidates))
     finally:
@@ -589,11 +589,11 @@ def check_noisy_embedded_title(tmp: Path) -> None:
     bot.handle(msg("LoDove"))
 
     expected = (bot.workspace / "library"
-                / "LoDove 01 - Lonesome Dove - Larry McMurtry.epub")
+                / "LoDove 1 - Lonesome Dove - Larry McMurtry.epub")
     report = tg.sent[-1]["text"]
     check("the typed alias returns through Telegram into the cleaned catalog name",
           expected.exists() and expected.read_bytes() == original and not source.exists()
-          and "<code>LoDove 01 - Lonesome Dove - Larry McMurtry.epub</code>" in report,
+          and "<code>LoDove 1 - Lonesome Dove - Larry McMurtry.epub</code>" in report,
           report)
     check("the redundant author/series title is gone rather than merely hidden",
           "McMurtry, Larry - Lonesome Dove 01" not in report
@@ -603,7 +603,7 @@ def check_noisy_embedded_title(tmp: Path) -> None:
           report)
 
     old_name = (bot.workspace / "library"
-                / ("LoDove 01 - McMurtry, Larry - Lonesome Dove 01 - "
+                / ("LoDove 1 - McMurtry, Larry - Lonesome Dove 01 - "
                    "Lonesome Dove - Larry McMurtry.epub"))
     expected.rename(old_name)
     repeat = bot.workspace / "Lonesome_Dove_repeat-upload.epub"
@@ -643,18 +643,22 @@ def check_series_workflow(tmp: Path) -> None:
           str(tg.sent[-1]))
     bot.handle(msg("LOTR"))
     one = bot.workspace / "library" / (
-        "LOTR 01 - The Fellowship of the Ring - J. R. R. Tolkien.epub")
+        "LOTR 1 - The Fellowship of the Ring - J. R. R. Tolkien.epub")
     check("the typed reply is fed back, remembered, and files without byte changes",
           one.read_bytes() == first_bytes and not first.exists()
           and len(bot.queue) == 0)
 
     tg.sent.clear()
     bot.take_book(OWNER, second)
-    two = bot.workspace / "library" / "LOTR 02 - The Two Towers - J. R. R. Tolkien.epub"
+    two = bot.workspace / "library" / "LOTR 2 - The Two Towers - J. R. R. Tolkien.epub"
     check("the next volume reuses the confirmed alias without asking",
           two.read_bytes() == second_bytes and not second.exists()
           and bot.pending is None
           and not any("new series" in sent["text"] for sent in tg.sent), str(tg.sent))
+    standalone = make_epub(
+        bot.workspace / "library" / "unfiled-outlier.epub",
+        "An Unfiled Book", "Solo Author")
+    standalone_bytes = standalone.read_bytes()
 
     original_library = suite.library
     original_slim = suite.slim_book
@@ -680,19 +684,25 @@ def check_series_workflow(tmp: Path) -> None:
 
         tg.sent.clear()
         bot.show_library(OWNER)
-        check("the ordinary library gains one unobtrusive series doorway",
-              any(data == "ser:list" for row in tg.sent[-1]["keyboard"] for _, data in row),
-              str(tg.sent[-1]["keyboard"]))
-        bot.handle(cb("ser:list"))
-        open_series = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
+        library_buttons = [data for row in tg.sent[-1]["keyboard"] for _, data in row]
+        check("the library shows one series card beside each standalone book",
+              sum(data.startswith("ser:f:") for data in library_buttons) == 1
+              and sum(data.startswith("lib:f:") for data in library_buttons) == 1
+              and "ser:list" not in library_buttons
+              and "3 books total · 1 series · 1 standalone book" in tg.sent[-1]["text"],
+              str(tg.sent[-1]))
+        open_series = next(data for data in library_buttons
                            if data.startswith("ser:f:"))
         bot.handle(cb(open_series))
-        edit_books = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
-                          if data.startswith("ser:m:"))
-        bot.handle(cb(edit_books))
         series_book = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
-                           if data.startswith("bm:show:"))
+                           if data.startswith("lib:f:"))
         bot.handle(cb(series_book))
+        metadata = next(data for row in tg.sent[-1]["keyboard"] for label, data in row
+                        if label == "📝 Metadata")
+        check("a volume opens as a normal book with a route back to its series",
+              any(label == "◀ Series" for row in tg.sent[-1]["keyboard"]
+                  for label, _ in row), str(tg.sent[-1]))
+        bot.handle(cb(metadata))
         labels = {label for row in tg.sent[-1]["keyboard"] for label, _ in row}
         check("every series volume can open the shared metadata editor",
               {"✏️ Title", "✏️ Author", "✏️ Series", "✏️ Series position",
@@ -717,8 +727,8 @@ def check_series_workflow(tmp: Path) -> None:
         bot.handle(cb(change))
         bot.handle(msg("RINGS"))
         new_one = bot.workspace / "library" / (
-            "RINGS 01 - The Fellowship of the Ring - J. R. R. Tolkien.epub")
-        new_two = bot.workspace / "library" / "RINGS 02 - The Two Towers - J. R. R. Tolkien.epub"
+            "RINGS 1 - The Fellowship of the Ring - J. R. R. Tolkien.epub")
+        new_two = bot.workspace / "library" / "RINGS 2 - The Two Towers - J. R. R. Tolkien.epub"
         check("changing the alias renames the full series without rewriting it",
               new_one.read_bytes() == first_bytes and new_two.read_bytes() == second_bytes
               and not one.exists() and not two.exists())
@@ -726,7 +736,7 @@ def check_series_workflow(tmp: Path) -> None:
               {Path(i["path"]).name for i in bot.queue.items()}
               == {new_one.name, new_two.name}, str(bot.queue.items()))
 
-        bot.handle(cb("ser:list"))
+        bot.handle(cb("m:lib"))
         open_series = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
                            if data.startswith("ser:f:"))
         bot.handle(cb(open_series))
@@ -749,7 +759,12 @@ def check_series_workflow(tmp: Path) -> None:
               removed == ["/card-one.epub", "/card-two.epub"], str(removed))
         check("device removal touches neither catalog nor queue",
               new_one.read_bytes() == first_bytes and new_two.read_bytes() == second_bytes
-              and len(bot.queue) == 2)
+              and standalone.read_bytes() == standalone_bytes and len(bot.queue) == 2)
+        bot.handle(cb("ser:list"))
+        check("old Browse by series buttons now return to the unified library",
+              "<b>Library</b>" in tg.sent[-1]["text"]
+              and not any(data == "ser:list" for row in tg.sent[-1]["keyboard"]
+                          for _, data in row), str(tg.sent[-1]))
     finally:
         suite.library = original_library
         suite.slim_book = original_slim
@@ -797,7 +812,7 @@ def check_batched_series_ingest(tmp: Path) -> None:
     bot.handle(msg("ALPHA"))
     check("one answer files every Alpha volume",
           all((bot.workspace / "library" /
-               f"ALPHA {number:02d} - Alpha Title {number} - One Author.epub").exists()
+               f"ALPHA {number} - Alpha Title {number} - One Author.epub").exists()
               for number in range(1, 5))
           and all(not path.exists() for path in alpha))
     check("the next series is asked only after Alpha is resolved",
@@ -807,7 +822,7 @@ def check_batched_series_ingest(tmp: Path) -> None:
     bot.handle(msg("BETA"))
     check("the second answer files all five Beta volumes and closes the queue",
           all((bot.workspace / "library" /
-               f"BETA {number:02d} - Beta Title {number} - Two Author.epub").exists()
+               f"BETA {number} - Beta Title {number} - Two Author.epub").exists()
               for number in range(1, 6))
           and all(not path.exists() for path in beta)
           and not bot.alias_groups and bot.pending is None)
@@ -817,6 +832,62 @@ def check_batched_series_ingest(tmp: Path) -> None:
           len(summaries) == 2 and "filed: 4" in summaries[0]
           and "filed: 5" in summaries[1]
           and all("X3" not in summary for summary in summaries), str(summaries))
+
+
+def check_unified_library_pagination(tmp: Path) -> None:
+    print("\na large unified library stays navigable:")
+    bot, tg = make_bot(tmp)
+    series_books = [{
+        "id": f"series-{number}", "path": f"/catalog/series-{number}.epub",
+        "title": f"LONG {number} - Volume {number}",
+        "base_title": f"Volume {number}", "author": "Series Author",
+        "series": "A Long Cycle", "series_index": str(number),
+    } for number in range(1, 14)]
+    standalone = [{
+        "id": f"single-{number}", "path": f"/catalog/single-{number}.epub",
+        "title": f"Standalone {number:02d}", "base_title": f"Standalone {number:02d}",
+        "author": "Solo Author", "series": "", "series_index": "",
+    } for number in range(1, 21)]
+    payload = {
+        "books": series_books + standalone,
+        "series": [{
+            "key": "a-long-cycle", "name": "A Long Cycle", "alias": "LONG",
+            "count": 13, "book_ids": [book["id"] for book in series_books],
+        }],
+    }
+    original_library = suite.library
+    try:
+        suite.library = lambda: payload
+        bot.show_library(OWNER)
+        callbacks = [data for row in tg.sent[-1]["keyboard"] for _, data in row]
+        check("thirteen volumes consume one row in the main library",
+              sum(data.startswith("ser:f:") for data in callbacks) == 1
+              and "33 books total · 1 series · 20 standalone books" in tg.sent[-1]["text"],
+              str(tg.sent[-1]))
+        next_library = next(data for data in callbacks if data == "lib:p:1")
+        bot.handle(cb(next_library))
+        check("standalone entries beyond the first page remain reachable",
+              "Page 2 of 2" in tg.sent[-1]["text"]
+              and sum(data.startswith("lib:f:") for row in tg.sent[-1]["keyboard"]
+                      for _, data in row) == 3, str(tg.sent[-1]))
+
+        bot.show_library(OWNER)
+        open_series = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
+                           if data.startswith("ser:f:"))
+        bot.handle(cb(open_series))
+        series_next = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
+                           if data.startswith("ser:f:"))
+        check("a long series presents twelve ordinary book cards per page",
+              sum(data.startswith("lib:f:") for row in tg.sent[-1]["keyboard"]
+                  for _, data in row) == 12
+              and "Page 1 of 2" in tg.sent[-1]["text"], str(tg.sent[-1]))
+        bot.handle(cb(series_next))
+        check("the remaining series volume is reachable on page two",
+              sum(data.startswith("lib:f:") for row in tg.sent[-1]["keyboard"]
+                  for _, data in row) == 1
+              and "Page 2 of 2" in tg.sent[-1]["text"], str(tg.sent[-1]))
+    finally:
+        suite.library = original_library
 
 
 def check_metadata_editor(tmp: Path) -> None:
@@ -903,6 +974,12 @@ def check_metadata_editor(tmp: Path) -> None:
         # Fill the previously empty position through the same fixed field list.
         show = next(data for row in tg.sent[-1]["keyboard"] for label, data in row
                     if label == "📝 Metadata")
+        bot.show_library(OWNER)
+        library_buttons = [data for row in tg.sent[-1]["keyboard"] for _, data in row]
+        check("adding series metadata folds the former outlier into one series card",
+              sum(data.startswith("ser:f:") for data in library_buttons) == 1
+              and not any(data.startswith("lib:f:") for data in library_buttons),
+              str(tg.sent[-1]))
         bot.handle(cb(show))
         edit_position = next(
             data for row in tg.sent[-1]["keyboard"] for label, data in row
@@ -913,7 +990,7 @@ def check_metadata_editor(tmp: Path) -> None:
             data for row in tg.sent[-1]["keyboard"] for label, data in row
             if label == "✓ Write it")
         bot.handle(cb(apply_position))
-        positioned = catalog / "CHRON 02 - Bad title - Bad Author.epub"
+        positioned = catalog / "CHRON 2 - Bad title - Bad Author.epub"
         check("an empty series position can be created and immediately re-files the book",
               positioned.exists() and not edited.exists()
               and suite.book_metadata(positioned, catalog)["metadata"]["series_index"] == "2")
@@ -1863,6 +1940,7 @@ def main() -> int:
         check_noisy_embedded_title(tmp)
         check_series_workflow(tmp)
         check_batched_series_ingest(tmp)
+        check_unified_library_pagination(tmp)
         check_metadata_editor(tmp)
         check_wallpaper_collection(tmp)
         check_fonts(tmp)

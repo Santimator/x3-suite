@@ -254,6 +254,11 @@ def main() -> int:
         all_ok &= check("a missing volume number is not invented",
                         library.catalog_title("Unknown volume", "SER", "")
                         == "SER - Unknown volume")
+        all_ok &= check("series positions use natural numbers without zero padding",
+                        library.catalog_title("Ninth", "SER", "09") == "SER 9 - Ninth"
+                        and library.catalog_title("Tenth", "SER", "10")
+                        == "SER 10 - Tenth"
+                        and library.format_series_index("1.5") == "1.5")
         all_ok &= check("title cleanup leaves an unproved prefix alone",
                         library.clean_embedded_title(
                             "Anniversary Edition - Lonesome Dove", "Larry McMurtry",
@@ -278,7 +283,7 @@ def main() -> int:
         all_ok &= check("the confirmed alias files the book canonically",
                         filed["status"] == "filed" and destination.exists()
                         and destination.name
-                        == "LOTR 01 - The Fellowship of the Ring - J. R. R. Tolkien.epub",
+                        == "LOTR 1 - The Fellowship of the Ring - J. R. R. Tolkien.epub",
                         str(filed))
         all_ok &= check("ingest changes no EPUB bytes",
                         destination.read_bytes() == original_bytes
@@ -290,6 +295,17 @@ def main() -> int:
                         duplicate_report["status"] == "already_present"
                         and duplicate.exists() and destination.read_bytes() == original_bytes,
                         str(duplicate_report))
+        padded_destination = destination.with_name(
+            "LOTR 01 - The Fellowship of the Ring - J. R. R. Tolkien.epub")
+        destination.rename(padded_destination)
+        padding_preview = ingest_book.normalize(catalog, dry_run=True)
+        padding_report = ingest_book.normalize(catalog)
+        all_ok &= check("catalog tidy migrates old zero-padded series filenames",
+                        padding_preview["changed"] == 1
+                        and padding_report["changed"] == 1
+                        and destination.exists() and not padded_destination.exists()
+                        and destination.read_bytes() == original_bytes,
+                        f"preview={padding_preview}; applied={padding_report}")
         invalid = tmp / "broken.epub"
         invalid.write_bytes(b"not an epub")
         invalid_report = ingest_book.ingest(invalid, catalog)
@@ -312,17 +328,17 @@ def main() -> int:
                         lonesome_pending["status"] == "needs_alias"
                         and lonesome_source.exists(), str(lonesome_pending))
         lonesome_report = ingest_book.ingest(lonesome_source, catalog, "LoDove")
-        lonesome = catalog / "LoDove 01 - Lonesome Dove - Larry McMurtry.epub"
+        lonesome = catalog / "LoDove 1 - Lonesome Dove - Larry McMurtry.epub"
         all_ok &= check("known author and series labels are not duplicated in the title",
                         lonesome_report["status"] == "filed"
                         and lonesome_report["base_title"] == "Lonesome Dove"
-                        and lonesome_report["title"] == "LoDove 01 - Lonesome Dove"
+                        and lonesome_report["title"] == "LoDove 1 - Lonesome Dove"
                         and lonesome.exists(), str(lonesome_report))
         all_ok &= check("the Lonesome Dove cleanup changes no EPUB bytes",
                         lonesome.read_bytes() == lonesome_bytes)
 
         old_lonesome = catalog / (
-            "LoDove 01 - McMurtry, Larry - Lonesome Dove 01 - Lonesome Dove "
+            "LoDove 1 - McMurtry, Larry - Lonesome Dove 01 - Lonesome Dove "
             "- Larry McMurtry.epub")
         lonesome.rename(old_lonesome)
         repair_preview = ingest_book.normalize(catalog, dry_run=True)
@@ -351,7 +367,7 @@ def main() -> int:
                         dry["status"] == "dry_run" and dry["changed"] == 1
                         and odd.exists(), str(dry))
         normalized = ingest_book.normalize(catalog)
-        towers = catalog / "LOTR 02 - The Two Towers - J. R. R. Tolkien.epub"
+        towers = catalog / "LOTR 2 - The Two Towers - J. R. R. Tolkien.epub"
         all_ok &= check("normalization then renames metadata-only",
                         normalized["status"] == "normalized" and towers.exists()
                         and towers.read_bytes()
@@ -360,8 +376,8 @@ def main() -> int:
         changed = ingest_book.set_alias(catalog, "The Lord of the Rings", "RINGS")
         all_ok &= check("changing an alias renames the whole series together",
                         changed["changed"] == 2
-                        and (catalog / "RINGS 01 - The Fellowship of the Ring - J. R. R. Tolkien.epub").exists()
-                        and (catalog / "RINGS 02 - The Two Towers - J. R. R. Tolkien.epub").exists(),
+                        and (catalog / "RINGS 1 - The Fellowship of the Ring - J. R. R. Tolkien.epub").exists()
+                        and (catalog / "RINGS 2 - The Two Towers - J. R. R. Tolkien.epub").exists(),
                         str(changed))
 
         print("1c. catalog audit and explicit metadata editing")
@@ -397,8 +413,8 @@ def main() -> int:
         tidy_report = ingest_book.tidy_interactive(
             steward, input_fn=lambda prompt: (
                 tidy_prompts.append(prompt), next(tidy_answers))[1])
-        tidy_one = steward / "A-M 01 - Master and Commander - Patrick O'Brian.epub"
-        tidy_two = steward / "A-M 02 - Post Captain - Patrick O'Brian.epub"
+        tidy_one = steward / "A-M 1 - Master and Commander - Patrick O'Brian.epub"
+        tidy_two = steward / "A-M 2 - Post Captain - Patrick O'Brian.epub"
         all_ok &= check("tidy stores one alias and renames both readable volumes",
                         tidy_report["status"] == "reconciled"
                         and tidy_one.read_bytes() == one_bytes
@@ -426,7 +442,7 @@ def main() -> int:
                         and editable.exists(), str(edit_preview))
         edit_report = epub_metadata.edit_metadata(
             editable, steward, updates, alias="EARTH")
-        edited = steward / "EARTH 01 - The New Title - New Author.epub"
+        edited = steward / "EARTH 1 - The New Title - New Author.epub"
         edited_meta = library.read_opf_metadata(edited)
         with zipfile.ZipFile(edited) as archive:
             edited_opf = archive.read("content.opf").decode("utf-8")
@@ -574,8 +590,8 @@ def main() -> int:
                 server_url, f"{server_url}/opds/series/{series_key}")
             all_ok &= check("series feed is in volume order",
                             not series_error and [b.title for b in series_books] == [
-                                "LOTR 01 - The Fellowship of the Ring",
-                                "LOTR 02 - The Two Towers",
+                                "LOTR 1 - The Fellowship of the Ring",
+                                "LOTR 2 - The Two Towers",
                             ], series_error or str([b.title for b in series_books]))
 
             print("4. pagination")
