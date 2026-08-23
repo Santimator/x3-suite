@@ -131,6 +131,33 @@ def verify_epub(path: Path) -> tuple:
     return rc == 0, (out + err).strip()
 
 
+INGEST_BOOK = REPO_ROOT / "tools" / "opds-server" / "scripts" / "ingest_book.py"
+
+
+def ingest_book(path: Path, library_dir: Path, alias: str = "") -> dict:
+    """Ask the catalog to inspect, name and file one EPUB.
+
+    A `needs_alias` result is a normal pause, not an error: Telegram gathers
+    the user's short name and repeats this exact call with `alias` set.
+    """
+    cmd = [PY, str(INGEST_BOOK), "--json", "ingest", str(path),
+           "--library", str(library_dir)]
+    if alias:
+        cmd += ["--alias", alias]
+    rc, out, err = run(cmd, timeout=180)
+    return _json_out(rc, out, err, "book ingest")
+
+
+def set_series_alias(library_dir: Path, series: str, alias: str,
+                     dry_run: bool = False) -> dict:
+    cmd = [PY, str(INGEST_BOOK), "--json", "set-alias", series, alias,
+           "--library", str(library_dir)]
+    if dry_run:
+        cmd.append("--dry-run")
+    rc, out, err = run(cmd, timeout=180)
+    return _json_out(rc, out, err, "series alias")
+
+
 # -- wallpapers ------------------------------------------------------------
 
 
@@ -454,6 +481,28 @@ def device_book_name(author: str, title: str, host: str | None = None) -> str:
         except (DeviceError, TypeError, ValueError):
             pass            # the default is also the pre-1.5.0 behaviour
     return opds_client.opds_book_filename(author or "", title or "", fmt)
+
+
+def device_book_name_candidates(books: list, host: str) -> list:
+    """Exact SD-root names per book, one settings read.
+
+    The base-title variant is included for a volume downloaded before the
+    catalog gained its series alias. Nothing fuzzy is ever deleted.
+    """
+    fmt = opds_client.FILENAME_AUTHOR_TITLE
+    try:
+        fmt = int(device.setting_value(host, "opdsFilenameFormat", fmt))
+    except (DeviceError, TypeError, ValueError):
+        pass
+    candidates = []
+    for book in books:
+        titles = [book.get("title", "")]
+        if book.get("base_title") and book["base_title"] not in titles:
+            titles.append(book["base_title"])
+        candidates.append(list(dict.fromkeys(
+            opds_client.opds_book_filename(book.get("author", ""), title, fmt)
+            for title in titles)))
+    return candidates
 
 
 SLIM = REPO_ROOT / "tools" / "epub-slimmer" / "scripts" / "slim_epub.py"

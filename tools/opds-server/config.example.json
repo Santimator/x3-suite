@@ -4,8 +4,8 @@
   "library_roots": ["workspace"],
   "_library_roots_note": "Directories scanned recursively for .epub files. A relative path resolves against the repo root, so 'workspace' means the builder's output wherever you start the server from. Add absolute paths to serve other folders too, e.g. '/home/you/Books'.",
 
-  "exclude": ["*-DIAGNOSTIC.epub"],
-  "_exclude_note": "Filename or relative-path globs to skip. The default hides the builder's render-test EPUBs. Also the place to hide one of two variant builds of the same book — the device saves downloads as '<author> - <title>.epub', so same-titled variants overwrite each other on the SD card (the server names them at startup).",
+  "exclude": ["*-DIAGNOSTIC.epub", "inbox/*"],
+  "_exclude_note": "Filename or relative-path globs to skip. The default hides the builder's render-test EPUBs. inbox/* is always appended even if an older local config omits it: that folder is Telegram staging while an alias answer is pending or after an upload is rejected, not catalog content. This is also the place to hide one of two variant builds of the same book — the device saves downloads as '<author> - <title>.epub', so same-titled variants overwrite each other on the SD card (the server names them at startup).",
 
   "host": "0.0.0.0",
   "port": 6737,

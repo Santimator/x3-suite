@@ -20,9 +20,9 @@ sent.
 queue is left exactly as it was — a push that half-happens in silence is the
 one failure that would make the queue useless.
 
-Books are never queued. The X3 pulls those from the OPDS catalog itself, so a
-book in a delivery queue could only ever produce a second copy on the SD card
-under a different name.
+Books enter the delivery queue only when you explicitly ask for a card copy.
+They are named exactly as the OPDS client would name them, so push and pull
+converge on one file rather than producing duplicates.
 
 **Who may talk to it.** One Telegram user id, checked before any handler runs,
 on messages and on button presses alike — the buttons are where a bot that
@@ -379,6 +379,14 @@ class Bot:
             src.rename(dest)
             return self.say(chat, f"✅ renamed to <code>{html.escape(dest.name)}</code>")
 
+        if job["kind"] == "seriesalias":
+            return self.submit(
+                chat, lambda: self.finish_book_ingest(chat, Path(job["path"]), text))
+
+        if job["kind"] == "seriesaliaschange":
+            return self.submit(
+                chat, lambda: self.change_series_alias(chat, job["series"], text))
+
     # -- menus -------------------------------------------------------------
 
     def menu(self, chat, text: str = "Menu") -> None:
@@ -437,28 +445,29 @@ class Bot:
                 return self.stale(chat)
 
             def work():
-                # Slimmed at queue time, not at push time: this is the server's
-                # own work, and doing it now means the push is only bytes over
-                # the wire. The original is never touched — the catalog goes on
-                # serving the book you were given.
-                meta = dict(book)
-                slimmed = suite.slim_book(Path(book["path"]),
-                                          self.state_dir / "cache" / "slim")
-                note = ""
-                if slimmed["used"]:
-                    meta["slim"] = str(slimmed["path"])
-                    note = (f"\nSlimmed for the reader: "
-                            f"{human(slimmed['before'])} → "
-                            f"{human(slimmed['after'])}. The catalog keeps the "
-                            f"original.")
-                self.queue.add("book", book["path"],
-                               label=book["title"][:40], meta=meta)
+                result = self.queue_book(book)
+                if not result["queued"]:
+                    return self.say(
+                        chat, "Already queued — there will still be only one card copy.",
+                        [[("📤 Queue", "m:q"), ("🏠 Menu", "m:main")]])
                 self.say(
                     chat,
                     f"📕 queued for the card — {len(self.queue)} waiting."
-                    f"{note}\nIt stays on the catalog either way.",
+                    f"{result['note']}\nIt stays on the catalog either way.",
                     [[("📲 Push now", "push:ask"), ("🏠 Menu", "m:main")]])
             return self.submit(chat, work)
+
+        if head == "balias":                  # accept a deterministic suggestion
+            if rest == "cancel":
+                self.pending = None
+                return self.menu(chat, "Left the upload untouched.")
+            job = self.tokens.get(rest)
+            if not job:
+                return self.stale(chat)
+            self.pending = None
+            return self.submit(
+                chat, lambda: self.finish_book_ingest(
+                    chat, Path(job["path"]), job["alias"]))
 
         if head == "qdel":
             self.queue.remove(rest)
@@ -489,6 +498,8 @@ class Bot:
                 chat, rest, (cb.get("message") or {}).get("message_id"))
         if head == "lib":
             return self.on_library_callback(chat, rest)
+        if head == "ser":
+            return self.on_series_callback(chat, rest)
         if head == "in":
             path = self.tokens.get(rest)
             if not path:
@@ -620,46 +631,111 @@ class Bot:
     # -- books and PDFs ----------------------------------------------------
 
     def take_book(self, chat, path: Path) -> None:
-        """A book needs no push — it needs to be somewhere the catalog scans."""
+        """Hand one upload to the catalog's deterministic ingester."""
+        if not inside(self.workspace, path):
+            return self.say(chat, "⚠️ that book is outside the workspace.")
         dest_dir = self.workspace / "library"
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = safe_join(dest_dir, path.name)
-        if path.resolve() != dest.resolve():
-            path.replace(dest)
+        report = suite.ingest_book(path, dest_dir)
+        if report.get("status") == "needs_alias":
+            suggestion = report.get("suggested_alias") or "SERIES"
+            self.pending = {"kind": "seriesalias", "path": str(path),
+                            "series": report.get("series", ""),
+                            "suggestion": suggestion}
+            token = self.tokens.put({"path": str(path), "alias": suggestion})
+            return self.say(
+                chat,
+                "📚 I found a new series in the book:\n\n"
+                f"<b>{html.escape(report.get('series', ''))}</b>"
+                + (f" · volume {html.escape(report.get('series_index', ''))}"
+                   if report.get("series_index") else "")
+                + "\n\nIts short name is a catalog convention, not something "
+                  "metadata can decide. I made a mechanical suggestion; accept "
+                  "it or send another name (maximum 6 characters). The catalog "
+                  "will remember it for the next volumes.",
+                [[(f"Use {suggestion}", f"balias:{token}")],
+                 [("✗ Cancel", "balias:cancel")]])
+        self.report_book_ingest(chat, report)
 
-        ok, detail = suite.verify_epub(dest)
-        title = author = None
-        try:
-            for book in suite.library().get("books", []):
-                if Path(book["path"]).resolve() == dest.resolve():
-                    title, author = book["title"], book["author"]
-                    break
-        except suite.SuiteError:
-            pass
+    def finish_book_ingest(self, chat, path: Path, alias: str) -> None:
+        report = suite.ingest_book(path, self.workspace / "library", alias)
+        if (report.get("status") == "conflict" and report.get("series")
+                and not report.get("series_alias") and not report.get("destination")):
+            suggestion = report.get("suggested_alias") or "SERIES"
+            self.pending = {"kind": "seriesalias", "path": str(path),
+                            "series": report["series"], "suggestion": suggestion}
+            token = self.tokens.put({"path": str(path), "alias": suggestion})
+            return self.say(
+                chat,
+                f"⚠️ {html.escape(report.get('error', 'That short name did not work.'))}\n"
+                "Send another short name, or use the original suggestion.",
+                [[(f"Use {suggestion}", f"balias:{token}"),
+                  ("✗ Cancel", "balias:cancel")]])
+        self.report_book_ingest(chat, report)
 
-        lines = ["📚 " + ("verified" if ok else "⚠️ verify_epub complained")]
-        if title:
-            # What the device will show, and what it will name the download.
-            lines.append(f"<b>{html.escape(title)}</b>")
-            lines.append(f"by {html.escape(author or 'unknown')}")
-            lines.append(f"on the SD card it becomes: "
-                         f"<code>{html.escape(f'{author} - {title}.epub')}</code>")
-        if not ok:
-            lines.append(f"<pre>{html.escape(detail[:500])}</pre>")
-        lines.append("")
-        lines.append("On the catalog now — no push needed."
+    def report_book_ingest(self, chat, report: dict) -> None:
+        status = report.get("status")
+        if status in ("invalid", "conflict", "error"):
+            return self.say(
+                chat,
+                "⚠️ Not added. The uploaded file was left untouched.\n\n"
+                f"{html.escape(report.get('error') or 'catalog ingest failed')}",
+                [[("📥 Inbox", "m:in"), ("🏠 Menu", "m:main")]])
+
+        destination = Path(report.get("destination") or report.get("source", ""))
+        if status == "already_present":
+            intro = "📚 Already in the catalog; the duplicate upload was left untouched."
+        elif status == "filed":
+            intro = "📚 Filed from embedded metadata."
+        else:
+            return self.say(chat, f"⚠️ Unexpected ingest result: {html.escape(str(status))}")
+
+        title = report.get("title") or destination.stem
+        author = report.get("author") or ""
+        lines = [intro, f"<b>{html.escape(title)}</b>",
+                 f"by {html.escape(author or 'unknown')}"]
+        if report.get("series"):
+            series_line = (f"series: {html.escape(report['series'])} "
+                           f"[{html.escape(report.get('series_alias') or '?')}]")
+            if report.get("series_index"):
+                series_line += f" · volume {html.escape(report['series_index'])}"
+            lines.append(series_line)
+        lines.append(f"catalog file: <code>{html.escape(destination.name)}</code>")
+        lines.append("on the SD card: "
+                     f"<code>{html.escape(suite.device_book_name(author, title))}</code>")
+        if not report.get("verify_ok", False):
+            lines.append("\n<i>Readable EPUB, but the suite's stricter builder "
+                         "check noted differences typical of third-party books.</i>")
+        lines.append("\nOn the catalog now — no push needed."
                      if suite.opds_up(self.cfg["opds_url"])
-                     else "⚠️ opds-server is not answering, so the reader "
-                          "cannot fetch it yet.")
+                     else "\n⚠️ Filed, but opds-server is not answering yet.")
 
-        # The catalog is the library; the device is a convenience. So the book
-        # is filed first, always, and copying it onto the card is an extra you
-        # ask for — never the only place it exists.
-        token = self.tokens.put({"path": str(dest), "title": title or dest.stem,
-                                 "author": author or ""})
+        book = {key: report.get(key, "") for key in (
+            "title", "base_title", "author", "language", "series",
+            "series_index", "series_alias")}
+        book["path"] = str(destination)
+        token = self.tokens.put(book)
         self.say(chat, "\n".join(lines),
                  [[("📤 Also send to device", f"bq:{token}")],
                   [("🏠 Menu", "m:main")]])
+
+    def queue_book(self, book: dict) -> dict:
+        """Warm the same slim cache for one book, individual or whole series."""
+        path = Path(book["path"])
+        resolved = path.resolve()
+        for item in self.queue.items():
+            if item.get("kind") == "book" and Path(item["path"]).resolve() == resolved:
+                return {"queued": False, "note": "", "saved": 0}
+        meta = dict(book)
+        slimmed = suite.slim_book(path, self.state_dir / "cache" / "slim")
+        note = ""
+        if slimmed["used"]:
+            meta["slim"] = str(slimmed["path"])
+            note = (f"\nSlimmed for the reader: {human(slimmed['before'])} → "
+                    f"{human(slimmed['after'])}. The catalog keeps the original.")
+        self.queue.add("book", str(path),
+                       label=(book.get("title") or path.stem)[:40], meta=meta)
+        return {"queued": True, "note": note, "saved": slimmed.get("saved", 0)}
 
     def take_pdf(self, chat, path: Path) -> None:
         """Stage the conversion and say honestly what happens next.
@@ -718,6 +794,8 @@ class Bot:
             return self.say(chat, "No books yet. Send me an EPUB.",
                             [[("🏠 Menu", "m:main")]])
         rows = []
+        if lib.get("series"):
+            rows.append([("📚 Browse by series", "ser:list")])
         for book in books[:20]:
             # The whole record, not just the path: sending it to the card later
             # needs the author and title the catalog knows it by.
@@ -726,6 +804,173 @@ class Bot:
             rows.append([(label, f"lib:f:{token}")])
         rows.append([("🏠 Menu", "m:main")])
         self.say(chat, f"📚 {len(books)} book(s) the catalog would serve:", rows)
+
+    def show_series(self, chat) -> None:
+        try:
+            groups = suite.library().get("series", [])
+        except suite.SuiteError as exc:
+            return self.say(chat, f"⚠️ {exc}")
+        if not groups:
+            return self.say(chat, "No books carry series metadata yet.",
+                            [[("📚 Library", "m:lib")]])
+        rows = []
+        for group in groups[:30]:
+            token = self.tokens.put(group["key"])
+            alias = f" [{group['alias']}]" if group.get("alias") else ""
+            rows.append([(f"{group['name'][:28]}{alias} · {group['count']}",
+                          f"ser:f:{token}")])
+        rows.append([("📚 All books", "m:lib"), ("🏠 Menu", "m:main")])
+        self.say(chat, f"📚 {len(groups)} series:", rows)
+
+    def series_group(self, key: str) -> tuple:
+        lib = suite.library()
+        group = next((g for g in lib.get("series", []) if g.get("key") == key), None)
+        if not group:
+            return None, []
+        by_id = {book["id"]: book for book in lib.get("books", [])}
+        return group, [by_id[book_id] for book_id in group.get("book_ids", [])
+                       if book_id in by_id]
+
+    def on_series_callback(self, chat, rest: str) -> None:
+        if self.pending and self.pending.get("kind") == "seriesaliaschange":
+            self.pending = None
+        if rest == "list":
+            return self.submit(chat, lambda: self.show_series(chat))
+        action, _, token = rest.partition(":")
+        key = self.tokens.get(token)
+        if not key:
+            return self.stale(chat)
+        try:
+            group, books = self.series_group(key)
+        except suite.SuiteError as exc:
+            return self.say(chat, f"⚠️ {exc}")
+        if not group:
+            return self.stale(chat)
+
+        if action == "f":
+            lines = [f"📚 <b>{html.escape(group['name'])}</b>",
+                     f"short name: <code>{html.escape(group.get('alias') or 'not set')}</code>", ""]
+            for book in books[:16]:
+                position = f"{book.get('series_index')}. " if book.get("series_index") else ""
+                lines.append(f"· {html.escape(position + book.get('base_title', book['title']))}")
+            if len(books) > 16:
+                lines.append(f"· …and {len(books) - 16} more")
+            again = self.tokens.put(key)
+            return self.say(
+                chat, "\n".join(lines),
+                [[(f"📤 Queue all {len(books)}", f"ser:q:{again}")],
+                 [("🗑 Remove all from X3", f"ser:rm:{again}")],
+                 [("✏️ Change short name", f"ser:a:{again}")],
+                 [("📚 Series", "ser:list")]])
+
+        if action == "q":
+            self.say(chat, f"Preparing {len(books)} book(s) for the reader…")
+            return self.submit(chat, lambda: self.queue_series(chat, group, books))
+
+        if action == "rm":
+            again = self.tokens.put(key)
+            return self.say(
+                chat,
+                f"Remove every <b>{html.escape(group['name'])}</b> volume found "
+                "on the X3?\n\nThe catalog originals stay exactly where they are.",
+                [[("Yes, remove from X3", f"ser:rm!:{again}"),
+                  ("No", f"ser:f:{again}")]])
+
+        if action == "rm!":
+            self.say(chat, "📡 Listening for the reader…")
+            return self.submit(
+                chat, lambda: self.remove_series_from_device(chat, group, books))
+
+        if action == "a":
+            self.pending = {"kind": "seriesaliaschange", "series": group["name"]}
+            return self.say(
+                chat,
+                f"Send the new short name for <b>{html.escape(group['name'])}</b> "
+                "(maximum 6 characters). This renames all of its catalog files "
+                "together; their EPUB bytes do not change.",
+                [[("✗ Cancel", f"ser:f:{self.tokens.put(key)}")]])
+
+    def queue_series(self, chat, group: dict, books: list) -> None:
+        queued = skipped = 0
+        saved = 0
+        failed = []
+        for book in books:
+            try:
+                result = self.queue_book(book)
+            except Exception as exc:
+                failed.append(f"{book.get('base_title') or book.get('title')}: {exc}")
+                continue
+            if result["queued"]:
+                queued += 1
+                saved += result["saved"]
+            else:
+                skipped += 1
+        lines = [f"📕 <b>{html.escape(group['name'])}</b>",
+                 f"queued: {queued}", f"already queued: {skipped}",
+                 "Catalog originals were not changed."]
+        if saved:
+            lines.insert(3, f"reader-only slimming saved {human(saved)}")
+        if failed:
+            lines.append("Could not prepare:\n" + "\n".join(
+                f"· {html.escape(detail[:100])}" for detail in failed))
+        self.say(chat, "\n".join(lines),
+                 [[("📲 Push now", "push:ask"), ("📤 Queue", "m:q")],
+                  [("📚 Series", "ser:list")]])
+
+    def remove_series_from_device(self, chat, group: dict, books: list) -> None:
+        try:
+            host, _ = self.device_host()
+        except suite.DeviceError as exc:
+            return self.no_reader(chat, str(exc))
+        candidates = suite.device_book_name_candidates(books, host)
+        present = {entry.get("name") for entry in suite.device.list_dir(host, "/")
+                   if not entry.get("isDirectory")}
+        matched = [[name for name in names if name in present] for names in candidates]
+        targets = ["/" + name for name in dict.fromkeys(
+            name for names in matched for name in names)]
+        if not targets:
+            return self.say(
+                chat,
+                f"No <b>{html.escape(group['name'])}</b> volumes were found at "
+                "the X3 root. The catalog was not touched.",
+                [[("📚 Series", "ser:list"), ("🏠 Menu", "m:main")]])
+        ok, detail = suite.device.delete_many(host, targets)
+        if not ok:
+            return self.say(chat, "⚠️ The X3 refused the bulk removal: "
+                            f"{html.escape(detail[:200])}",
+                            [[("📚 Series", "ser:list")]])
+        self.say(
+            chat,
+            f"🗑 Removed {len(targets)} <b>{html.escape(group['name'])}</b> "
+            f"book file(s) from the X3; "
+            f"{sum(not names for names in matched)} volume(s) were not there.\n"
+            "Catalog originals and the delivery queue were not touched.",
+            [[("📚 Series", "ser:list"), ("🏠 Menu", "m:main")]])
+
+    def change_series_alias(self, chat, series: str, alias: str) -> None:
+        report = suite.set_series_alias(self.workspace / "library", series, alias)
+        if report.get("status") not in ("alias_set", "dry_run"):
+            return self.say(chat, "⚠️ Short name not changed: "
+                            f"{html.escape(report.get('error', 'unknown error'))}",
+                            [[("📚 Series", "ser:list")]])
+        try:
+            lib = suite.library()
+        except suite.SuiteError:
+            lib = {"books": []}
+        fresh = {str(Path(book["path"])): book for book in lib.get("books", [])}
+        replacements = {}
+        for rename in report.get("renames", []):
+            book = fresh.get(str(Path(rename["to"])))
+            if book:
+                replacements[str(Path(rename["from"]))] = book
+        followed = self.queue.remap_books(replacements)
+        self.say(
+            chat,
+            f"✅ <b>{html.escape(series)}</b> now uses "
+            f"<code>{html.escape(report['series_alias'])}</code>. "
+            f"Renamed {report.get('changed', 0)} catalog file(s) without changing "
+            f"their bytes" + (f"; updated {followed} queued path(s)." if followed else "."),
+            [[("📚 Series", "ser:list"), ("🏠 Menu", "m:main")]])
 
     def on_library_callback(self, chat, rest: str) -> None:
         action, _, token = rest.partition(":")

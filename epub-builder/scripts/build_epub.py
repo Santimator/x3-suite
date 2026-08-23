@@ -331,7 +331,8 @@ CONTAINER_XML = """\
 
 
 def build_opf(title: str, author: str, lang: str, chapters: List[Dict],
-              images: Optional[Dict[str, Dict]] = None) -> str:
+              images: Optional[Dict[str, Dict]] = None,
+              series: str = "", series_index: str = "") -> str:
     manifest = ['<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>',
                 '<item id="css" href="style.css" media-type="text/css"/>']
     spine = []
@@ -348,6 +349,15 @@ def build_opf(title: str, author: str, lang: str, chapters: List[Dict],
     # identity, so readers replace a re-sideloaded copy instead of duplicating
     # it, and identical sources build byte-identical epubs.
     book_id = "urn:uuid:" + str(uuid.uuid5(uuid.NAMESPACE_URL, "epub-builder:" + title))
+    series_meta = ""
+    if series:
+        series_meta = (
+            f'    <meta property="belongs-to-collection" id="series">'
+            f'{html.escape(str(series))}</meta>\n'
+            f'    <meta refines="#series" property="collection-type">series</meta>\n')
+        if str(series_index).strip():
+            series_meta += (f'    <meta refines="#series" property="group-position">'
+                            f'{html.escape(str(series_index).strip())}</meta>\n')
     return f"""\
 <?xml version="1.0" encoding="utf-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="{lang}">
@@ -356,6 +366,7 @@ def build_opf(title: str, author: str, lang: str, chapters: List[Dict],
     <dc:title>{html.escape(title)}</dc:title>
     <dc:creator>{html.escape(author)}</dc:creator>
     <dc:language>{lang}</dc:language>
+{series_meta}\
     <!-- fixed timestamp: same book source always builds a byte-identical epub -->
     <meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>
   </metadata>
@@ -379,7 +390,8 @@ def image_id(epub_src: str) -> str:
 
 
 def write_epub(out: Path, title: str, author: str, lang: str, chapters: List[Dict],
-               cover: Optional[Tuple[str, Path]] = None, line_spacing: str = "normal") -> None:
+               cover: Optional[Tuple[str, Path]] = None, line_spacing: str = "normal",
+               series: str = "", series_index: str = "") -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
 
     # Fixed zip mtimes (matching dcterms:modified) so identical sources really
@@ -414,7 +426,10 @@ def write_epub(out: Path, title: str, author: str, lang: str, chapters: List[Dic
         z.writestr(entry("mimetype"), "application/epub+zip", compress_type=zipfile.ZIP_STORED)
         z.writestr(entry("META-INF/container.xml"), CONTAINER_XML, compress_type=zipfile.ZIP_DEFLATED)
         z.writestr(entry("OEBPS/style.css"), css_text, compress_type=zipfile.ZIP_DEFLATED)
-        z.writestr(entry("OEBPS/content.opf"), build_opf(title, author, lang, chapters, images), compress_type=zipfile.ZIP_DEFLATED)
+        z.writestr(entry("OEBPS/content.opf"),
+                   build_opf(title, author, lang, chapters, images,
+                             series=series, series_index=series_index),
+                   compress_type=zipfile.ZIP_DEFLATED)
         z.writestr(entry("OEBPS/nav.xhtml"), build_nav(title, lang, chapters), compress_type=zipfile.ZIP_DEFLATED)
         for ch in chapters:
             xhtml = XHTML_TMPL.format(lang=lang, title=html.escape(ch["title"]), body=ch["body"])
@@ -499,7 +514,9 @@ def main(argv=None) -> int:
 
     write_epub(args.out, meta.get("title", "Book"), meta.get("author", ""),
                meta.get("language", "en"), chapters, cover=cover,
-               line_spacing=meta.get("line_spacing", "normal"))
+               line_spacing=meta.get("line_spacing", "normal"),
+               series=meta.get("series", ""),
+               series_index=meta.get("series_index", ""))
     print(f"wrote {args.out}  ({len(chapters)} sections, "
           f"readings: {meta.get('reading_style', 'after')}, "
           f"spacing: {meta.get('line_spacing', 'normal')})")

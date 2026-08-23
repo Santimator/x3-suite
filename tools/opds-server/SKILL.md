@@ -122,21 +122,54 @@ it's twenty declarative lines.
 ## The catalog
 
 ```
-/opds                    root: Recently built · All books · By author · By language
+/opds                    root: Recently built · All books · By author · By series · By language
 /opds/all                every book, by title, paginated
 /opds/recent             newest build first
 /opds/authors[/<key>]    grouped by author
+/opds/series[/<key>]     grouped by full series name, volumes in metadata order
 /opds/languages[/<code>] grouped by language
-/opds/search?q=...       title and author substring
+/opds/search?q=...       title, author and series substring
 /book/<id>/<slug>.epub   the download
 ```
 
 Metadata comes from each EPUB's **OPF** first (`dc:title`, `dc:creator`,
-`dc:language`), then `book.json` two levels up, then the filename. The OPF is
-authoritative on purpose: a book dropped in by hand catalogs exactly as well as
-one this suite built. That matters more than it sounds — the device builds the
-SD-card filename out of author and title, so thin metadata is a permanently
-worse filename.
+`dc:language`, EPUB 3 collection metadata, and legacy Calibre series fields),
+then `book.json` two levels up, then the filename. The OPF is authoritative on
+purpose: a book dropped in by hand catalogs exactly as well as one this suite
+built.
+
+`scripts/ingest_book.py` is the one catalog-ingest interface. It ignores a
+download site's filename, reads the metadata inside, and files the untouched
+bytes as `<catalog title> - <author>.epub`. For a series, the catalog title is
+`<short alias> <zero-padded volume> - <embedded title>`, for example
+`LOTR 01 - The Fellowship of the Ring`. The full series name remains available
+in **By series** and search; the short alias is stored beside the collection in
+`workspace/library/.series-aliases.json`.
+
+The alias is deliberately confirmed by a person once. The script can make a
+transparent initials suggestion (`The Lord of the Rings` → `LOTR`), but it does
+not pretend truncation is intelligence. Aliases are at most six characters,
+must be unique, and are reused case-insensitively for later volumes.
+If a publisher supplied a series name but no volume position, the alias is
+still used but no number is invented; that book sorts after numbered volumes
+inside the **By series** feed.
+
+To preview cleanup of books that predate the ingester, then apply it:
+
+```bash
+python3 tools/opds-server/scripts/ingest_book.py normalize \
+  --library workspace/library --dry-run
+python3 tools/opds-server/scripts/ingest_book.py set-alias \
+  "The Lord of the Rings" LOTR --library workspace/library --dry-run
+python3 tools/opds-server/scripts/ingest_book.py set-alias \
+  "The Lord of the Rings" LOTR --library workspace/library
+python3 tools/opds-server/scripts/ingest_book.py normalize \
+  --library workspace/library
+```
+
+Series without a confirmed alias are reported and left alone. Name collisions
+abort before anything moves. Normalization and alias changes rename files only;
+they never rewrite an EPUB or delete a catalog book.
 
 Book ids are `sha1(path relative to its root)[:12]`, stable across restarts, and
 a download URL carries **only an id**. The id is looked up in the scanned
@@ -232,6 +265,7 @@ secrets/                     gitignored; the Basic-auth password
 scripts/
   serve_opds.py              the server (stdlib http.server)
   library.py                 scan roots, read OPF metadata, group and search
+  ingest_book.py             metadata-driven ingest, aliases and migration
   feeds.py                   Atom generation, with the client's rules baked in
   config.py                  config + credential resolution
   crosspoint_client.py       port of the device's client — the gate's oracle

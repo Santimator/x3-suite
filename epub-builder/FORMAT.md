@@ -32,6 +32,8 @@ workspace/<slug>/
   "title":    "诚实的重要",
   "author":   "改编自 Oscar Wilde",
   "language": "zh",
+  "series":   "Short Chinese Readers",
+  "series_index": "3",
   "cover":    "images/cover.png",
   "reading_style": "after",
   "line_spacing":  "normal",
@@ -44,6 +46,7 @@ workspace/<slug>/
 | key | meaning |
 |---|---|
 | `title`, `author`, `language` | metadata; `language` is the EPUB `dc:language` |
+| `series`, `series_index` | optional EPUB 3 series name and volume position; the catalog may add its own compact alias for display, but these full values stay embedded in the book |
 | `chapters` | the spine — order here is reading order; each entry's `#` heading becomes its TOC label |
 | `chapters[].source` | the markdown the builder renders. Point it wherever the prepared file lives |
 | `chapters[].glossary` | optional TSV (`word`, `pinyin`, `gloss`) rendered as an end-of-chapter list; annotated words link to their entry and back |

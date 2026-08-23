@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -38,6 +39,27 @@ OWNER = 424242
 STRANGER = 999999
 
 failures = []
+
+
+def make_epub(path: Path, title: str, author: str = "", series: str = "",
+              series_index: str = "") -> Path:
+    """Small third-party-shaped EPUB: enough for ingest metadata tests."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    series_xml = ""
+    if series:
+        series_xml = (
+            f'<meta name="calibre:series" content="{series}"/>'
+            f'<meta name="calibre:series_index" content="{series_index}"/>')
+    container = ('<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+                 '<rootfiles><rootfile full-path="content.opf"/></rootfiles></container>')
+    opf = ('<package xmlns="http://www.idpf.org/2007/opf"><metadata '
+           'xmlns:dc="http://purl.org/dc/elements/1.1/">'
+           f'<dc:title>{title}</dc:title><dc:creator>{author}</dc:creator>'
+           f'<dc:language>en</dc:language>{series_xml}</metadata></package>')
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("META-INF/container.xml", container)
+        archive.writestr("content.opf", opf)
+    return path
 
 
 def check(label: str, ok: bool, detail: str = "") -> None:
@@ -206,6 +228,12 @@ def check_paths(tmp: Path) -> None:
           outsider.exists() and "outside" in tg.sent[-1]["text"],
           tg.sent[-1]["text"] if tg.sent else "nothing said")
 
+    tg.sent.clear()
+    bot.take_book(OWNER, outsider)
+    check("will not ingest or consume a book outside the workspace",
+          outsider.exists() and "outside" in tg.sent[-1]["text"],
+          tg.sent[-1]["text"] if tg.sent else "nothing said")
+
 
 # -- 3. the queue ----------------------------------------------------------
 
@@ -234,10 +262,10 @@ def check_queue(tmp: Path) -> None:
     raw = json.loads(path.read_text())
     check("stays readable JSON on disk", isinstance(raw, list))
 
-    print("\nbooks never enter the delivery queue:")
+    print("\nbooks enter the delivery queue only when asked:")
     bot, tg = make_bot(tmp)
     book = bot.workspace / "incoming.epub"
-    book.write_bytes(b"PK\x03\x04 not a real epub")
+    make_epub(book, "incoming")
     bot.take_book(bot.user_id, book)
     check("an EPUB is filed, not queued", len(bot.queue) == 0, str(bot.queue.items()))
     check("... and lands where the catalog scans",
@@ -473,6 +501,16 @@ def check_book_delivery(tmp: Path) -> None:
                                      host="h"))
         check("... and an unreachable reader falls back to the default layout",
               suite.device_book_name("A", "B", host=None) == "A - B.epub")
+        candidates = suite.device_book_name_candidates([{
+            "author": "J. R. R. Tolkien",
+            "title": "LOTR 01 - The Fellowship of the Ring",
+            "base_title": "The Fellowship of the Ring",
+        }], "h")
+        check("series removal also recognizes the exact pre-alias filename",
+              candidates == [[
+                  "LOTR 01 - The Fellowship of the Ring - J. R. R. Tolkien.epub",
+                  "The Fellowship of the Ring - J. R. R. Tolkien.epub",
+              ]], str(candidates))
     finally:
         suite.device.request = orig_req
 
@@ -486,7 +524,7 @@ def check_book_delivery(tmp: Path) -> None:
 
     bot, tg = make_bot(tmp)
     book = bot.workspace / "x.epub"
-    book.write_bytes(b"PK\x03\x04")
+    make_epub(book, "x")
     bot.take_book(bot.user_id, book)
     check("filing a book still does not queue it", len(bot.queue) == 0)
 
@@ -531,6 +569,133 @@ def check_book_delivery(tmp: Path) -> None:
     bot.handle(cb(f"lib:f:{bot.tokens.put(str(book))}"))
     check("an older button carrying a bare path still opens",
           tg.sent and "x.epub" in tg.sent[-1]["text"], str(tg.sent))
+
+
+def check_series_workflow(tmp: Path) -> None:
+    print("\na series, from noisy upload to whole-card actions:")
+    bot, tg = make_bot(tmp)
+    first = bot.workspace / "download-site_LOTR_everything-in-the-name_1.epub"
+    second = bot.workspace / "download-site_LOTR_everything-in-the-name_2.epub"
+    make_epub(first, "The Fellowship of the Ring", "J. R. R. Tolkien",
+              "The Lord of the Rings", "1")
+    make_epub(second, "The Two Towers", "J. R. R. Tolkien",
+              "The Lord of the Rings", "2")
+    first_bytes, second_bytes = first.read_bytes(), second.read_bytes()
+
+    bot.take_book(OWNER, first)
+    buttons = [b for row in (tg.sent[-1]["keyboard"] or []) for b in row]
+    accept = next((data for label, data in buttons if label == "Use LOTR"), "")
+    check("the first volume asks instead of pretending its alias is intelligent",
+          bool(accept) and first.exists() and bot.pending["kind"] == "seriesalias",
+          str(tg.sent[-1]))
+    bot.handle(msg("TOO-LONG"))
+    check("an invalid typed alias asks again and still does not move the upload",
+          first.exists() and bot.pending and bot.pending["kind"] == "seriesalias",
+          str(tg.sent[-1]))
+    bot.handle(msg("LOTR"))
+    one = bot.workspace / "library" / (
+        "LOTR 01 - The Fellowship of the Ring - J. R. R. Tolkien.epub")
+    check("the typed reply is fed back, remembered, and files without byte changes",
+          one.read_bytes() == first_bytes and not first.exists()
+          and len(bot.queue) == 0)
+
+    tg.sent.clear()
+    bot.take_book(OWNER, second)
+    two = bot.workspace / "library" / "LOTR 02 - The Two Towers - J. R. R. Tolkien.epub"
+    check("the next volume reuses the confirmed alias without asking",
+          two.read_bytes() == second_bytes and not second.exists()
+          and bot.pending is None
+          and not any("new series" in sent["text"] for sent in tg.sent), str(tg.sent))
+
+    original_library = suite.library
+    original_slim = suite.slim_book
+    original_names = suite.device_book_name_candidates
+    original_list = suite.device.list_dir
+    original_delete = suite.device.delete_many
+
+    def local_library():
+        rc, out, err = suite.run([
+            suite.PY, "tools/opds-server/scripts/library.py", "--json",
+            "--root", str(bot.workspace)], timeout=120)
+        if rc:
+            raise suite.SuiteError(err or out)
+        return json.loads(out)
+
+    removed = []
+    try:
+        suite.library = local_library
+        suite.slim_book = lambda src, cache: {
+            "path": src, "before": src.stat().st_size, "after": src.stat().st_size,
+            "saved": 0, "used": False,
+        }
+
+        tg.sent.clear()
+        bot.show_library(OWNER)
+        check("the ordinary library gains one unobtrusive series doorway",
+              any(data == "ser:list" for row in tg.sent[-1]["keyboard"] for _, data in row),
+              str(tg.sent[-1]["keyboard"]))
+        bot.handle(cb("ser:list"))
+        open_series = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
+                           if data.startswith("ser:f:"))
+        bot.handle(cb(open_series))
+        queue_all = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
+                         if data.startswith("ser:q:"))
+        catalog_before = {one.name: one.read_bytes(), two.name: two.read_bytes()}
+        bot.handle(cb(queue_all))
+        check("Queue all uses the normal reader-only queue for both volumes",
+              len(bot.queue) == 2 and all(i["kind"] == "book" for i in bot.queue.items()),
+              str(bot.queue.items()))
+        check("queueing a series leaves both catalog originals byte-identical",
+              one.read_bytes() == catalog_before[one.name]
+              and two.read_bytes() == catalog_before[two.name])
+        bot.handle(cb(queue_all))
+        check("Queue all is idempotent", len(bot.queue) == 2, str(bot.queue.items()))
+
+        bot.handle(cb(open_series))
+        change = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
+                      if data.startswith("ser:a:"))
+        bot.handle(cb(change))
+        bot.handle(msg("RINGS"))
+        new_one = bot.workspace / "library" / (
+            "RINGS 01 - The Fellowship of the Ring - J. R. R. Tolkien.epub")
+        new_two = bot.workspace / "library" / "RINGS 02 - The Two Towers - J. R. R. Tolkien.epub"
+        check("changing the alias renames the full series without rewriting it",
+              new_one.read_bytes() == first_bytes and new_two.read_bytes() == second_bytes
+              and not one.exists() and not two.exists())
+        check("queued paths follow that explicit catalog rename",
+              {Path(i["path"]).name for i in bot.queue.items()}
+              == {new_one.name, new_two.name}, str(bot.queue.items()))
+
+        bot.handle(cb("ser:list"))
+        open_series = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
+                           if data.startswith("ser:f:"))
+        bot.handle(cb(open_series))
+        remove = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
+                      if data.startswith("ser:rm:"))
+        bot.handle(cb(remove))
+        confirm = next(data for row in tg.sent[-1]["keyboard"] for _, data in row
+                       if data.startswith("ser:rm!:"))
+        bot.device_host = lambda: ("10.0.0.5", {})
+        suite.device_book_name_candidates = lambda books, host: [
+            ["card-one.epub"], ["card-two.epub"]]
+        suite.device.list_dir = lambda host, path: [
+            {"name": "card-one.epub", "isDirectory": False},
+            {"name": "card-two.epub", "isDirectory": False},
+            {"name": "some-other-book.epub", "isDirectory": False},
+        ]
+        suite.device.delete_many = lambda host, paths: (removed.extend(paths) or True, "")
+        bot.handle(cb(confirm))
+        check("Remove all targets only exact series filenames in one device call",
+              removed == ["/card-one.epub", "/card-two.epub"], str(removed))
+        check("device removal touches neither catalog nor queue",
+              new_one.read_bytes() == first_bytes and new_two.read_bytes() == second_bytes
+              and len(bot.queue) == 2)
+    finally:
+        suite.library = original_library
+        suite.slim_book = original_slim
+        suite.device_book_name_candidates = original_names
+        suite.device.list_dir = original_list
+        suite.device.delete_many = original_delete
 
 
 # -- 5. buttons ------------------------------------------------------------
@@ -1472,6 +1637,7 @@ def main() -> int:
         check_queue(tmp)
         check_push_is_all_or_nothing(tmp)
         check_book_delivery(tmp)
+        check_series_workflow(tmp)
         check_wallpaper_collection(tmp)
         check_fonts(tmp)
         check_font_queue(tmp)

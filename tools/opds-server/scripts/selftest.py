@@ -43,12 +43,13 @@ sys.path.insert(0, str(REPO / "epub-builder" / "scripts"))
 import build_epub  # noqa: E402
 import crosspoint_client as cc  # noqa: E402
 import feeds  # noqa: E402
+import ingest_book  # noqa: E402
 import library  # noqa: E402
 import serve_opds  # noqa: E402
 import verify_epub  # noqa: E402
 
 # One fixture per hazard: CJK metadata, a plain Latin book, characters that must
-# survive XML escaping, and a book with no author at all.
+# survive XML escaping, a book with no author, and two ordered series volumes.
 FIXTURES = [
     {"slug": "yugong", "title": "愚公移山", "author": "分级读物 (HSK 1-3)", "language": "zh"},
     {"slug": "alcaldes", "title": "Los alcaldes encontrados", "author": "Tirso de Molina",
@@ -56,9 +57,21 @@ FIXTURES = [
     {"slug": "escaping", "title": 'Ampersands & "angles" <tags>', "author": "Q & A",
      "language": "en"},
     {"slug": "anonymous", "title": "Anonymous notebook", "author": "", "language": "en"},
+    {"slug": "fellowship", "title": "The Fellowship of the Ring",
+     "author": "J. R. R. Tolkien", "language": "en",
+     "series": "The Lord of the Rings", "series_index": "1"},
+    {"slug": "two-towers", "title": "The Two Towers",
+     "author": "J. R. R. Tolkien", "language": "en",
+     "series": "The Lord of the Rings", "series_index": "2"},
 ]
 
-PAGE_SIZE = 2  # forces pagination over four books
+PAGE_SIZE = 2  # forces pagination
+
+
+def expected_title(fixture: dict) -> str:
+    if fixture.get("series"):
+        return library.catalog_title(fixture["title"], "LOTR", fixture["series_index"])
+    return fixture["title"]
 
 
 # The server logs every request to stderr; that is right in production and pure
@@ -81,7 +94,10 @@ def build_fixture_library(root: Path) -> None:
             f"# {fixture['title']}\n\nOne short paragraph, enough to build.\n", encoding="utf-8")
         (book_dir / "book.json").write_text(json.dumps({
             "title": fixture["title"], "author": fixture["author"],
-            "language": fixture["language"], "chapters": [{"source": "chapters/ch01.md"}],
+            "language": fixture["language"],
+            "series": fixture.get("series", ""),
+            "series_index": fixture.get("series_index", ""),
+            "chapters": [{"source": "chapters/ch01.md"}],
         }, ensure_ascii=False), encoding="utf-8")
 
         # No glossary and no annotation pass: these fixtures exist to be
@@ -90,7 +106,12 @@ def build_fixture_library(root: Path) -> None:
         chapters, meta = build_epub.assemble(book_dir)
         build_epub.write_epub(book_dir / "build" / f"{fixture['slug']}.epub",
                               meta["title"], meta.get("author", ""),
-                              meta.get("language", "en"), chapters)
+                              meta.get("language", "en"), chapters,
+                              series=meta.get("series", ""),
+                              series_index=meta.get("series_index", ""))
+    (root / library.ALIAS_FILE).write_text(json.dumps({
+        "version": 1, "aliases": {"The Lord of the Rings": "LOTR"},
+    }, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def start_server(root: Path, credentials: Optional[Tuple[str, str]] = None):
@@ -173,20 +194,98 @@ def main() -> int:
                         server_config.load_config()["library_roots"]
                         == [server_config.REPO_ROOT / "workspace"],
                         str(server_config.load_config()["library_roots"]))
+        staged = root / "inbox" / "waiting-for-alias.epub"
+        staged.parent.mkdir()
+        shutil.copy2(root / "fellowship" / "build" / "fellowship.epub", staged)
+        all_ok &= check("Telegram's pending/rejected inbox is never catalog content",
+                        staged not in [Path(book.path) for book in library.scan(
+                            [root], server_config.load_config()["exclude"])])
+        old_config = tmp / "old-opds-config.json"
+        old_config.write_text(json.dumps({"library_roots": [str(root)], "exclude": []}))
+        all_ok &= check("an older local config cannot accidentally re-enable inbox",
+                        "inbox/*" in server_config.load_config(old_config)["exclude"])
+        staged.unlink()
 
         print("1. library scan")
         books = library.scan([root], [])
         all_ok &= check(f"found {len(FIXTURES)} books", len(books) == len(FIXTURES),
                         f"got {len(books)}")
-        by_title = {b.title: b for b in books}
+        by_title = {b.base_title: b for b in books}
         for fixture in FIXTURES:
             book = by_title.get(fixture["title"])
             all_ok &= check(f"metadata from OPF: {fixture['title'][:24]}",
                             book is not None and book.author == fixture["author"]
-                            and book.language == fixture["language"],
-                            "title, author or language did not survive the round trip")
+                            and book.language == fixture["language"]
+                            and book.title == expected_title(fixture),
+                            "title, author, language or display title did not survive")
+        groups = library.group_by_series(books)
+        all_ok &= check("series metadata groups and sorts by volume",
+                        len(groups) == 1 and groups[0][1:3] == (
+                            "The Lord of the Rings", "LOTR")
+                        and [b.series_index for b in groups[0][3]] == ["1", "2"],
+                        str([(name, alias, [b.series_index for b in group])
+                             for _, name, alias, group in groups]))
+        all_ok &= check("a missing volume number is not invented",
+                        library.catalog_title("Unknown volume", "SER", "")
+                        == "SER - Unknown volume")
         all_ok &= check("book ids are stable across rescans",
                         [b.id for b in library.scan([root], [])] == [b.id for b in books])
+
+        print("1b. metadata-driven ingest")
+        catalog = tmp / "ingest-catalog"
+        catalog.mkdir()
+        source = tmp / "The_Lord_of_the_Rings_download-site-name-and-noise.epub"
+        shutil.copy2(root / "fellowship" / "build" / "fellowship.epub", source)
+        original_bytes = source.read_bytes()
+        first = ingest_book.ingest(source, catalog)
+        all_ok &= check("a new series pauses before filing",
+                        first["status"] == "needs_alias" and source.exists(), str(first))
+        all_ok &= check("the transparent alias suggestion is LOTR",
+                        first.get("suggested_alias") == "LOTR", str(first))
+        filed = ingest_book.ingest(source, catalog, "LOTR")
+        destination = Path(filed.get("destination", "missing"))
+        all_ok &= check("the confirmed alias files the book canonically",
+                        filed["status"] == "filed" and destination.exists()
+                        and destination.name
+                        == "LOTR 01 - The Fellowship of the Ring - J. R. R. Tolkien.epub",
+                        str(filed))
+        all_ok &= check("ingest changes no EPUB bytes",
+                        destination.read_bytes() == original_bytes
+                        and not source.exists())
+        duplicate = tmp / "duplicate.epub"
+        duplicate.write_bytes(original_bytes)
+        duplicate_report = ingest_book.ingest(duplicate, catalog)
+        all_ok &= check("an identical destination is never overwritten or consumed",
+                        duplicate_report["status"] == "already_present"
+                        and duplicate.exists() and destination.read_bytes() == original_bytes,
+                        str(duplicate_report))
+        invalid = tmp / "broken.epub"
+        invalid.write_bytes(b"not an epub")
+        invalid_report = ingest_book.ingest(invalid, catalog)
+        all_ok &= check("an invalid upload stays outside the catalog",
+                        invalid_report["status"] == "invalid" and invalid.exists()
+                        and len(library.scan([catalog], [])) == 1,
+                        str(invalid_report))
+
+        odd = catalog / "download-site--two-towers.epub"
+        shutil.copy2(root / "two-towers" / "build" / "two-towers.epub", odd)
+        dry = ingest_book.normalize(catalog, dry_run=True)
+        all_ok &= check("normalization previews without moving anything",
+                        dry["status"] == "dry_run" and dry["changed"] == 1
+                        and odd.exists(), str(dry))
+        normalized = ingest_book.normalize(catalog)
+        towers = catalog / "LOTR 02 - The Two Towers - J. R. R. Tolkien.epub"
+        all_ok &= check("normalization then renames metadata-only",
+                        normalized["status"] == "normalized" and towers.exists()
+                        and towers.read_bytes()
+                        == (root / "two-towers" / "build" / "two-towers.epub").read_bytes(),
+                        str(normalized))
+        changed = ingest_book.set_alias(catalog, "The Lord of the Rings", "RINGS")
+        all_ok &= check("changing an alias renames the whole series together",
+                        changed["changed"] == 2
+                        and (catalog / "RINGS 01 - The Fellowship of the Ring - J. R. R. Tolkien.epub").exists()
+                        and (catalog / "RINGS 02 - The Two Towers - J. R. R. Tolkien.epub").exists(),
+                        str(changed))
 
         httpd, server_url = start_server(root)
         try:
@@ -196,7 +295,7 @@ def main() -> int:
             if root_feed is None:
                 print("FAIL")
                 return 1
-            all_ok &= check("four navigation entries", len(root_feed.navigation()) == 4,
+            all_ok &= check("five navigation entries", len(root_feed.navigation()) == 5,
                             f"got {len(root_feed.navigation())}")
             all_ok &= check("no entry was silently dropped",
                             all(e.title and e.href for e in root_feed.entries))
@@ -208,12 +307,22 @@ def main() -> int:
             walked, visited, errors = walk(server_url, "/opds")
             all_ok &= check("every navigation target answers", not errors, "; ".join(errors))
             all_ok &= check("walk reached every book",
-                            {b.title for b in walked} == {f["title"] for f in FIXTURES},
+                            {b.title for b in walked} == {expected_title(f) for f in FIXTURES},
                             f"reached {sorted(b.title for b in walked)}")
             all_ok &= check("author grouping is reachable",
                             any("/opds/authors/" in url for url in visited))
             all_ok &= check("language grouping is reachable",
                             any("/opds/languages/" in url for url in visited))
+            all_ok &= check("series grouping is reachable",
+                            any("/opds/series/" in url for url in visited))
+            series_key = library.series_key("The Lord of the Rings")
+            series_books, _, series_error = collect_pages(
+                server_url, f"{server_url}/opds/series/{series_key}")
+            all_ok &= check("series feed is in volume order",
+                            not series_error and [b.title for b in series_books] == [
+                                "LOTR 01 - The Fellowship of the Ring",
+                                "LOTR 02 - The Two Towers",
+                            ], series_error or str([b.title for b in series_books]))
 
             print("4. pagination")
             paged, pages, page_error = collect_pages(server_url, f"{server_url}/opds/all")
@@ -238,12 +347,14 @@ def main() -> int:
                             found is not None and [b.title for b in found.books()]
                             == ["Los alcaldes encontrados"],
                             f"got {[b.title for b in found.books()] if found else None}")
-            # "n" matches three of the four fixtures, so the results paginate —
+            # "n" matches enough fixtures to paginate —
             # and page 2 must still be *the search*, not the whole library.
             wide_url = template.replace(cc.SEARCH_PLACEHOLDER, "n")
             wide, pages, wide_error = collect_pages(server_url, wide_url)
-            expected = {f["title"] for f in FIXTURES
-                        if "n" in f["title"].casefold() or "n" in f["author"].casefold()}
+            expected = {expected_title(f) for f in FIXTURES
+                        if "n" in f["title"].casefold()
+                        or "n" in f["author"].casefold()
+                        or "n" in f.get("series", "").casefold()}
             all_ok &= check("a paginated search keeps its query", not wide_error, wide_error)
             all_ok &= check(f"search paged over {len(pages)} page(s) without widening",
                             {b.title for b in wide} == expected and len(pages) > 1,
@@ -320,11 +431,12 @@ def main() -> int:
                             status == 401, f"got {status}")
             feed, error = cc.fetch_feed(f"{secure_url}/opds", "reader", "s3cret")
             all_ok &= check("correct credentials browse normally",
-                            feed is not None and len(feed.navigation()) == 4, error)
+                            feed is not None and len(feed.navigation()) == 5, error)
             books_seen, _, auth_errors = walk(secure_url, "/opds", ("reader", "s3cret"))
             all_ok &= check("authenticated walk reaches every book",
                             not auth_errors
-                            and {b.title for b in books_seen} == {f["title"] for f in FIXTURES},
+                            and {b.title for b in books_seen}
+                            == {expected_title(f) for f in FIXTURES},
                             "; ".join(auth_errors) or f"{sorted({b.title for b in books_seen})}")
         finally:
             secure.shutdown()

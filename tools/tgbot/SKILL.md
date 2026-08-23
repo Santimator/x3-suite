@@ -434,12 +434,19 @@ and does not pretend to — details in `../../extras/readers.md`.
 
 ### A book
 
-Send an `.epub`. It is filed into `workspace/library/`, checked with the
-shared `epub-builder/scripts/verify_epub.py`, and the bot replies with the
-title and author **as the device will see them** (read through the catalog's
-own scanner, from the OPF) plus the filename it will get on the SD card. Then
-it says whether `opds-server` is actually answering — because "it's on the
-catalog" is only true if that server is up.
+Send an `.epub`. The bot hands it to OPDS's `ingest_book.py`, which reads title,
+author, language and series metadata from inside the EPUB and ignores the noisy
+download filename. A broadly readable third-party EPUB is accepted; the
+suite-builder's stricter structural check is shown as a warning, not mistaken
+for proof that a commercial EPUB is invalid.
+
+A new series pauses once. The bot shows its full embedded name and volume,
+makes a mechanical initials suggestion (`The Lord of the Rings` → `LOTR`), and
+asks you to accept it or send a short name of at most six characters. It is
+then remembered for every later volume. The result is both a canonical catalog
+filename and a compact OPDS title such as `LOTR 01 - The Fellowship of the
+Ring`; the full series name remains the grouping label. EPUB bytes are never
+rewritten.
 
 Then it offers **📤 Also send to device**, which queues the book for the SD
 root alongside any wallpapers. Worth having when the reader is off your LAN, or
@@ -454,6 +461,15 @@ one from the push, one from a later download. Since 1.5.0 the layout is a
 *device setting* (`opdsFilenameFormat`: author–title, title–author, or title
 alone), so the bot reads it from `/api/settings` while the reader is in front
 of it rather than assuming the default.
+
+**📚 Library → Browse by series** adds one doorway rather than buttons beside
+every book. A series card offers **Queue all**, **Remove all from X3**, and
+**Change short name**. Queue all reuses the exact same slimmer and queue path as
+one book and skips volumes already queued. Remove all resolves the device's
+current OPDS filename format, deletes only exact SD-root matches, and explicitly
+leaves both catalog originals and the queue untouched. Changing the short name
+renames the series together without rewriting bytes and updates any queued
+paths so a later push does not go stale.
 
 ### A PDF
 

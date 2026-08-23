@@ -33,7 +33,10 @@ DEFAULT_CONFIG = SERVER_DIR / "config.json"
 
 DEFAULTS: Dict = {
     "library_roots": ["workspace"],
-    "exclude": ["*-DIAGNOSTIC.epub"],
+    # inbox/ is staging: Telegram deliberately leaves a new-series upload
+    # there while it waits for the alias reply, and a rejected upload stays
+    # there for inspection. Neither state means "add this to the catalog".
+    "exclude": ["*-DIAGNOSTIC.epub", "inbox/*"],
     "host": "0.0.0.0",
     # 6737 is "OPDS" on a phone keypad. Chosen mostly for what it is *not*:
     # 8080 is the most contested port on any machine — dev servers, proxies and
@@ -90,6 +93,8 @@ def load_config(path: Optional[Path] = None) -> Dict:
         raise ConfigError("library_roots is empty — nothing to serve")
     cfg["library_roots"] = roots
     cfg["exclude"] = [str(p) for p in cfg["exclude"]]
+    if "inbox/*" not in cfg["exclude"]:
+        cfg["exclude"].append("inbox/*")
     cfg["port"] = int(cfg["port"])
     cfg["page_size"] = max(1, int(cfg["page_size"]))
     cfg["public_url"] = str(cfg["public_url"]).rstrip("/")
