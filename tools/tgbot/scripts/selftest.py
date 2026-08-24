@@ -1917,6 +1917,30 @@ def check_never_silent(tmp: Path) -> None:
     check("... and the confirm button carries the same file", bool(yes), str(tg.sent[-1]))
 
 
+def check_poll_timeout_is_transient() -> None:
+    """The SSL read timeout seen in production stays inside the poll loop."""
+    print("\na stalled Telegram long-poll:")
+    from unittest.mock import patch
+    from telegram import Telegram, TelegramError
+
+    with patch("telegram.urllib.request.urlopen",
+               side_effect=TimeoutError("The read operation timed out")) as open_, \
+            patch("telegram.time.sleep"):
+        try:
+            Telegram("test-token").get_updates(30)
+        except TelegramError as exc:
+            check("a raw SSL read timeout is retried and normalized",
+                  open_.call_count == 3
+                  and "getUpdates: The read operation timed out" in str(exc),
+                  f"{open_.call_count} calls; {exc}")
+        except Exception as exc:
+            check("a raw SSL read timeout is retried and normalized", False,
+                  f"escaped as {type(exc).__name__}: {exc}")
+        else:
+            check("a raw SSL read timeout is retried and normalized", False,
+                  "the mocked request unexpectedly succeeded")
+
+
 # -- 5b. the real entry point actually starts ------------------------------
 
 
@@ -2133,6 +2157,7 @@ def main() -> int:
         check_tokens(tmp)
         check_device_menu(tmp)
         check_never_silent(tmp)
+        check_poll_timeout_is_transient()
         check_entry_point()
         check_secrets_outside(tmp)
         check_optional()
