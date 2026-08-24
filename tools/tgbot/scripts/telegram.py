@@ -82,11 +82,12 @@ class Telegram:
                     time.sleep(min(float(wait or 1) + 0.5, 30))
                     continue
                 raise TelegramError(f"{method}: HTTP {exc.code} {detail}") from None
-            except urllib.error.URLError as exc:
+            except (urllib.error.URLError, TimeoutError) as exc:
                 if attempt < 2:
                     time.sleep(1 + attempt)
                     continue
-                raise TelegramError(f"{method}: {exc.reason}") from None
+                detail = getattr(exc, "reason", exc)
+                raise TelegramError(f"{method}: {detail}") from None
             if not data.get("ok"):
                 raise TelegramError(f"{method}: {data.get('description')}")
             return data.get("result")
