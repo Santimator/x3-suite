@@ -312,8 +312,10 @@ Docs: [`tools/wallpaper-maker/SKILL.md`](tools/wallpaper-maker/SKILL.md) · devi
 
 ## 8. Fonts
 
-**Tested:** device-confirmed, all four families. Stock firmware shows hanzi as
-tofu boxes and Arabic book text as nothing at all; these render.
+**Tested:** the four existing families are device-confirmed on X3;
+`LinguisticsPro` is source-, structure- and bitmap-validated, with device
+confirmation still pending. Stock firmware shows hanzi as tofu boxes and
+Arabic book text as nothing at all; the CrossPoint families below render them.
 
 Copy a family folder from `extras/fonts/` to the SD card under `/fonts/`,
 power-cycle (fonts are scanned once at boot), then pick it under Settings →
@@ -336,6 +338,17 @@ failure the reader cannot tell you about.
   it installed, an Arabic book body renders joined and right-to-left. The
   mechanism, the build command and what each failure mode accuses are in
   [`extras/readers.md`](extras/readers.md), "Arabic in the book body".
+- **`LinguisticsPro/`** — Bulgarian. A compact book serif whose 27 modern
+  Bulgarian Cyrillic forms are baked out of the font's `locl BGR` feature
+  before CrossPoint conversion (the firmware does not apply language-specific
+  OpenType substitutions). Four reading sizes, 694 KiB. The build is
+  reproducible and validated; on-device X3/X4 Pro confirmation is still open.
+
+All five folders are the same CrossPoint `.cpfont` v4 format on X3 and X4 Pro;
+no X4-specific font build is needed. The source proof, current X4 Pro firmware
+status and the one remaining hardware-test boundary are in
+[`extras/readers.md`](extras/readers.md), "X4 Pro: same font files, different
+device build".
 
 Glyphs stream from the SD card, so a big font costs no RAM. Build rules for
 making your own — including the trap where a subset font loads in the picker and
@@ -410,7 +423,8 @@ The code and documentation are **MIT** licensed — see [`LICENSE`](LICENSE).
 Two kinds of bundled content keep their own terms:
 
 - **Fonts**, under the **SIL Open Font License 1.1** — the `.cpfont` families in
-  `extras/fonts/` (from LXGW WenKai, Zilla Slab, Noto CJK) and
+  `extras/fonts/` (from LXGW WenKai, Zilla Slab, Cochineal, Noto and
+  Linguistics Pro) and
   `extras/default-covers/IMFellEnglish-Regular.ttf` for cover titles. Notices in
   [`ATTRIBUTION.md`](extras/fonts/ATTRIBUTION.md),
   [`OFL.txt`](extras/fonts/OFL.txt) and

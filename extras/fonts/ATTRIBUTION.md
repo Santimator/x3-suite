@@ -1,7 +1,7 @@
 # Font attribution & licenses
 
-The `.cpfont` files in this directory are bitmap conversions (for the Xteink
-X3 / CrossPoint firmware) of third-party fonts. The conversion changes the
+The `.cpfont` files in this directory are bitmap conversions (for CrossPoint
+on the Xteink X3 and X4 Pro) of third-party fonts. The conversion changes the
 format, not the design — each remains a derivative of its source font and is
 redistributed here under that font's original license, the **SIL Open Font
 License 1.1** (full text in [`OFL.txt`](OFL.txt)). None of these fonts is
@@ -70,3 +70,33 @@ No Reserved Font Name is declared by either notice.
 Sources: https://github.com/skosch/Crimson · https://ctan.org/pkg/cochineal ·
 https://github.com/nicoverbruggen/ebook-fonts (fonts/extra, `NV_Scarlet-*`)
 
+## LinguisticsPro/ (Bulgarian Cyrillic)
+
+**Linguistics Pro** — the primary face in `LinguisticsPro`, version 1.088. It
+is a LOCALFONTS book serif with modern Bulgarian Cyrillic forms, based on
+Utopia Nova / Lingua Franca. The source TTF's own `cyrl/BGR/locl`
+substitutions were redirected into an intermediate cmap by
+[`bake_bulgarian.py`](bake_bulgarian.py) before bitmap conversion; no outlines
+were redrawn and the intermediate TTF is not distributed here.
+> Copyright 2026 The Linguistics Pro Project Authors
+> (https://github.com/StefanPeev/Linguistics-Pro). Earlier design contributions
+> are credited to the Utopia Project / Adobe Systems (1989, 1991), the
+> GUTenberg Project (2003–2004), Han The Thanh (2006), Andrey V. Panov
+> (2008–2014), Michael Sharpe (2014), Andreas Nolda (2015), and Stefan Peev
+> (2016).
+
+No Reserved Font Name is declared by the current OFL notice.
+
+Source: https://github.com/StefanPeev/Linguistics-Pro (official CI regular TTF
+from commit `1b8580fbc25d2f3e2a92bf587a134d74214fb61a`)
+
+**Noto Serif** — fallback for replacement glyphs and source-coverage gaps.
+Version 2.015, used unmodified before bitmap conversion.
+> Copyright 2022 The Noto Project Authors
+> (https://github.com/notofonts/latin-greek-cyrillic)
+
+No Reserved Font Name is declared by the notice.
+
+Source: https://github.com/crosspoint-reader/crosspoint-reader
+(`lib/EpdFont/builtinFonts/source/NotoSerif/NotoSerif-Regular.ttf`, tag
+`v1.5.0`)
