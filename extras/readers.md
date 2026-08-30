@@ -1,4 +1,4 @@
-# Device notes — Xteink X3 (CrossPoint firmware)
+# Device notes — Xteink X3, plus X4 Pro font compatibility
 
 The suite's EPUBs target an **Xteink X3** (ESP32-C3, ~400 KB RAM, 528×792
 e-ink) running **CrossPoint** (open-source firmware; 1.5.0 as of mid-2026),
@@ -26,7 +26,10 @@ otherwise.
    For Arabic the font is not a preference but the whole feature:
    **`NaskhFull/`** ships 12–18 and is what makes a book body render at all
    (the menus already work without it) — **device-confirmed 2026-08**, see
-   "Arabic in the book body". Install details: `extras/fonts/README.md`.
+   "Arabic in the book body". **`LinguisticsPro/`** ships 12–18 for Bulgarian
+   body text; its modern Bulgarian glyphs are baked out of the source font's
+   `locl BGR` feature before conversion — source and bitmap validated, device
+   confirmation pending. Install details: `extras/fonts/README.md`.
 3. **Books:** build with `reading_style: after` in book.json (pinyin after each
    glossed word) — see the rendering verdicts below.
 
@@ -42,10 +45,52 @@ otherwise.
 | Glossary/internal links | Harmless; not tappable (no touchscreen) — kept for phone reading |
 | CJK in *interface* text (TOC, library, browser) | Needs 1.5.0 **and** 8/10/12 pt `.cpfont` sizes — see below. On 1.4.1 those rows render **blank** |
 | Arabic body text (bidi + contextual joining) | **Works** — right-to-left order and joined letterforms are the firmware's own, and correct. Needs an SD font carrying the *presentation forms*; no built-in reading font does. `NaskhFull` device-confirmed 2026-08 |
+| Bulgarian body text | `LinguisticsPro` supplies modern Bulgarian Cyrillic as direct cmap glyphs, not inert `locl BGR` alternates. Source/bitmap validated; device confirmation pending |
 
 Keep chapter CSS trivial: the engine honors basic text properties only.
 `reading_style: ruby` remains for capable readers (Apple Books renders ruby
 beautifully) — never for the X3.
+
+## X4 Pro: same font files, different device build
+
+*Source-confirmed against CrossPoint `develop` at
+`e7a3bb48817f1cb951b521ca958562723159c2f6` (2026-08-30); not yet
+device-confirmed on an X4 Pro.*
+
+**The font delta is zero.** CrossPoint's X4 Pro environment selects the
+ESP32-S3 board, PSRAM, native SDMMC, touch, Home key and frontlight, but it
+extends the same base firmware and compiles the same `SdCardFont`,
+`SdCardFontRegistry`, `SdCardFontManager` and `SdCardFontSystem` sources as the
+X3. `SdCardFont.h` still requires **cpfont v4**, the format emitted by the
+pinned v1.5.0 converter used for every family here. There is no X4 conditional
+in the loader and no device id, panel dimension or pixel density in a
+`.cpfont` file. The same bytes are valid under `/.fonts/<Family>/` or
+`/fonts/<Family>/` on either device.
+
+The X4 Pro's portrait canvas is **480×800** and Xteink rates the panel at
+**219 PPI**, while the X3 target here is 528×792. That changes line breaks and
+how a chosen bitmap size feels on the physical panel, not the format or the
+available size files: CrossPoint's converter rasterizes every family at its
+fixed 150 DPI on both. Start with the same 12/14/16/18 reading sizes; taste may
+pick a different default, but it does not require a rebuild. The X4 Pro's
+8 MB PSRAM and native SDMMC add headroom and change I/O plumbing, not font
+coverage or residency — glyphs still stream from the card.
+
+What **does** differ is outside the font: use an X4 Pro firmware image, and
+expect USB mass-storage transfer, touch/frontlight behavior and the 480 px
+page width to need their own device QA. As of 2026-08-30, stable CrossPoint
+1.5.0 explicitly excludes X4 Pro; GitHub's **1.6.0rc** release says it
+officially adds X4 Pro, while device builds are still on the beta/RC channel.
+The 2026-08-15 RC2 notes even include a performance fix for CJK UI fallback
+from SD fonts. So compatibility is source-proven, but it would be
+wrong to label any family X4-Pro-confirmed before opening real Bulgarian,
+Arabic and CJK pages on that hardware.
+
+Current sources: https://github.com/crosspoint-reader/crosspoint-reader ·
+https://github.com/crosspoint-reader/crosspoint-reader/releases ·
+https://crosspointreader.com/blog/release-1.5.0 ·
+https://updates.crosspointreader.com/cmsuphnoa0m040ro513ptjbwg ·
+https://www.xteink.com/products/xteink-x4-pro-pocket-ereader
 
 ## CJK in the interface (why the chapter list was blank)
 
@@ -54,7 +99,8 @@ device-confirmed 2026-07.*
 
 The book *body* and the *interface* are drawn with different fonts. Body text
 uses the SD-card family you selected; every list row, header and title in the
-UI uses a **built-in Ubuntu face compiled into flash — Latin only**
+UI uses a **built-in face compiled into flash — it covers Latin, Cyrillic and
+Arabic, but not CJK**
 (`UI_10_FONT_ID` for list rows, `UI_12_FONT_ID` for headers/titles,
 `SMALL_FONT_ID` — Noto Sans — for subtitle lines). Selecting a CJK SD font
 never changed that.
@@ -94,6 +140,82 @@ Two upstream issue candidates: the exact-size lookup could use the
 `findNearestSize` that already exists next to it, and a UI font without U+FFFD
 fails silently (blank) instead of showing the boxes the firmware's own
 `docs/sd-card-fonts.md` promises.
+
+## Bulgarian in the book body (why `locl BGR` must be baked)
+
+*Font choice, converter behavior and output bitmaps **source-confirmed**;
+on-device result not yet confirmed.*
+
+**Coverage is not the same as Bulgarian typography.** A generic Cyrillic font
+can contain every character in a Bulgarian EPUB and still show the
+traditional international/Russian forms. Modern Bulgarian upright text uses
+different designs for a visible group of letters — most obviously lowercase
+д, т and п, which take forms analogous to Latin *g*, *m* and *n*. The font
+therefore has to solve a design problem, not just a Unicode-range problem.
+
+**Linguistics Pro was chosen as the primary face.** It is a SIL-OFL book serif
+from Bulgarian type designer Stefan Peev's LOCALFONTS project, explicitly
+developed around modern Bulgarian Cyrillic. Veleka was also evaluated and has
+richer kerning, but its Bulgarian forms likewise live behind OpenType
+localization and its Reserved Font Name makes a baked derivative need a new
+name. Linguistics Pro is compact, readable and declares no Reserved Font Name.
+
+**The current binary still needs intervention.** Linguistics Pro's changelog
+says the base Cyrillic range became Bulgarian in 2016, but the official 1.088
+regular TTF maps 27 modern Bulgarian glyphs through the
+`cyrl/BGR/locl` GSUB feature. Rendering the base and localized glyphs side by
+side catches it immediately: untouched U+0434 is д-shaped while the BGR glyph
+is g-shaped; U+0442 is т-shaped versus m-shaped. CrossPoint's conversion path
+does not run a shaping engine or set a BGR language tag — it asks FreeType for
+the cmap glyph at each codepoint — so an untouched conversion silently bakes
+the wrong model.
+
+[`fonts/bake_bulgarian.py`](fonts/bake_bulgarian.py) is the small reproducible
+fix. It finds the font's own `cyrl/BGR/locl` lookups and redirects all Unicode
+cmap tables to those destination glyphs; it does not redraw an outline. It
+also refuses output if fewer than 20 codepoints move, so an upstream feature
+change cannot quietly recreate the original bug. Version 1.088 moves 27:
+U+0414/U+0416/U+041A/U+041B/U+0424 and 22 lowercase letters including U+045D.
+
+**The build** (what produced `extras/fonts/LinguisticsPro/`):
+
+```bash
+# Official Linguistics Pro CI regular TTF, version 1.088, commit
+# 1b8580fbc25d2f3e2a92bf587a134d74214fb61a
+#   LinguisticsPro-Regular.ttf sha256:
+#   fcd42eb79c156b8fdd3a25ec9997c05b9abca0476460b76d625d6de48fb2f6fa
+# Run from the directory holding that TTF; the helper writes
+# LinguisticsPro-Bulgarian.ttf, sha256:
+# e2e00645c1f6045c53ccbc3e67b6e0977a08f6b3d7c4d038753b888b6fdb168f
+python3 /path/to/x3-suite/extras/fonts/bake_bulgarian.py
+
+# NotoSerif-Regular.ttf is CrossPoint v1.5.0's built-in source, Noto Serif
+# 2.015, sha256 a7e8ea1ab7e7d368b001c892d6148325fffc849a46e030e55e1bdc597bbe939d.
+python3 fontconvert_sdcard.py \
+    --intervals 'latin-ext,cyrillic,(0x0300-0x036F),(0x20A0-0x20CF),(0x2100-0x214F)' \
+    --sizes 12,14,16,18 \
+    --regular LinguisticsPro-Bulgarian.ttf --fallback-regular NotoSerif-Regular.ttf \
+    --name LinguisticsPro --output-dir LinguisticsPro/
+```
+
+The output is deliberately broad rather than book-subsetted: **1,511 glyphs
+over 11 validated intervals**, including Cyrillic Supplement, combining marks,
+currency, letterlike symbols and U+FFFD. The four files total 710,174 bytes
+(694 KiB). Parsing the committed v4 files back confirms every Bulgarian
+codepoint, U+045D, U+0300/U+0301, U+20AC, U+2116 and U+FFFD has an entry, and
+the 27 localized codepoints' bitmaps differ from a raw-source conversion.
+
+**Four sizes are enough.** The built-in UI fonts already cover Cyrillic and
+the UI-to-SD redirect probes only CJK, so 8/10 pt Bulgarian files would never
+be selected for UI text. This family corrects the book body. UI book titles
+continue to use the built-in Cyrillic design; fixing those to Bulgarian forms
+would be a firmware-localization change, not another font size. The source
+regular TTF also has `mark`/`mkmk` positioning but no `kern` feature, so the
+converter correctly reports zero kerning pairs — recorded here as an upstream
+font limitation rather than hidden as a conversion failure.
+
+Source: https://github.com/StefanPeev/Linguistics-Pro (README, ChangeLog,
+OFL and official build at the pinned commit).
 
 ## Arabic in the book body (why the menus work and the pages do not)
 
@@ -426,18 +548,21 @@ duplicating it would mean maintaining a copy. What this repo has instead is
 the list of ways it goes wrong. If you are building a family — by hand or with
 the web builder — this is the whole of it:
 
-1. **Intervals: a broad preset** (`latin-ext,cjk`). Never the book's exact
-   charset. A subset font passes every check the firmware makes, lists in the
-   picker, and then silently reverts to built-in Noto when a book is opened.
-   Glyphs stream from SD, so the big font costs no RAM — there is nothing to
-   gain by subsetting and an evening to lose.
-2. **Sizes `8,10,12,14,16,18`.** The last three are for reading; the first
-   three are what 1.5.0's interface fallback looks for by **exact** size. Omit
-   them and books render perfectly while the chapter list, library and file
-   browser draw *blank* for CJK — no error, no tofu, nothing.
-3. **Regular only.** Bold and italic duplicate 22k CJK bitmaps per style for no
-   CJK gain, since WenKai has no bold or italic.
-4. **Layout `/fonts/<Family>/<Family>_<size>.cpfont`.** Loose files are ignored,
+1. **Intervals: broad presets or a handful of broad ranges.** Never the book's
+   exact charset. A sparse subset can pass every check the firmware makes,
+   list in the picker, and then silently revert to built-in Noto when a book
+   opens. CJK uses `latin-ext,cjk`; Bulgarian uses `latin-ext,cyrillic` plus
+   three broad mark/symbol ranges; Arabic uses four broad ranges. Glyphs stream
+   from SD, so subsetting saves no resident RAM.
+2. **Sizes are script-aware.** Every family needs reading sizes 12/14/16/18.
+   Add 8/10 only for CJK: those are what 1.5.0's CJK-only interface fallback
+   looks for by **exact** size. They are dead weight for Bulgarian and Arabic,
+   whose interface glyphs are already built in.
+3. **Regular only for the bundled families.** Bold and italic would multiply
+   the large CJK bitmaps without adding CJK coverage; the compact Arabic and
+   Bulgarian families deliberately follow the same single-style policy.
+4. **Layout `/<root>/<Family>/<Family>_<size>.cpfont`.** Both `/.fonts` and
+   `/fonts` are scanned. Loose files are ignored,
    and the scan happens at boot only — a file copied to a running device does
    not exist as far as the reader is concerned.
 5. **Verify the bytes afterwards.** Discovery parses filenames and never opens
@@ -464,19 +589,21 @@ means the glyph is genuinely missing rather than the font being broken.
    custom ranges as such: `NaskhFull` is built from four hand-written ranges
    (18 validated intervals) and loads and renders on 1.5.0, device-confirmed
    2026-08. Sparsity is the trap; a handful of wide ranges is not sparse.
-2. **Ship 8, 10 and 12 pt as well as the reading sizes.** Those three are what
+2. **For CJK, ship 8, 10 and 12 pt as well as the reading sizes.** Those three are what
    the 1.5.0 UI fallback looks for, by exact size, to draw CJK in the chapter
    list, library and browser (see "CJK in the interface"). Cost: ~4 MB of SD
    per family, and a couple of KB of RAM — only the interval table is resident,
    glyphs stream.
-3. **Layout:** one folder per family — `/fonts/<Family>/<Family>_<size>.cpfont`;
-   loose files are ignored. Scan happens at boot only.
+3. **Layout:** one folder per family —
+   `/.fonts/<Family>/<Family>_<size>.cpfont` or the equally valid visible
+   `/fonts/...`; loose files are ignored. Scan happens at boot only.
 4. **Reproducible build** (what produced `extras/fonts/`):
 
 ```bash
 pip install freetype-py fonttools
-# Pinned to the 1.5.0 tag, not master: master's converter has since grown
-# ligature extraction, which changes the bytes it emits for Latin faces.
+# Pinned to the 1.5.0 tag: it is the version that produced the committed
+# cpfont-v4 files. As of 2026-08-30, develop changes this converter only by
+# adding the Arabic preset; keeping the pin still protects reproducibility.
 # The tag is `v1.5.0` — upstream's earlier tags have no `v`, and this line
 # said `1.5.0` until 2026-08, which raw.githubusercontent answers with a
 # 404 page that curl -O happily saves as a 14-byte "script".
@@ -520,6 +647,10 @@ python3 fontconvert_sdcard.py --intervals latin-ext,cjk \
 # NaskhFull (Arabic) is built with the same converter and four sizes instead
 # of six; its command, its sources and why its intervals are spelled out by
 # hand are in "Arabic in the book body" above.
+
+# LinguisticsPro (Bulgarian) also uses four sizes. Its source needs the
+# bake_bulgarian.py cmap step before this converter; the exact command and
+# source hashes are in "Bulgarian in the book body" above.
 ```
 
 The recipe is deterministic: re-running it reproduces the committed 12 pt files
@@ -530,6 +661,11 @@ new size you built — and it is worth doing *first*, because it fails loudly
 where a mismatched WenKai or converter would otherwise just quietly hand you a
 family that differs from the committed one. The WenKai in the 2026-08 check was
 Ubuntu noble's `fonts-lxgw-wenkai` 1.315+repack-1.
+
+The Bulgarian recipe is deterministic too: a second clean bake from the
+pinned Linguistics Pro TTF followed by conversion reproduced all four
+`LinguisticsPro` files byte for byte. `CHECKSUMS.tsv` is the source of record
+for their 710,174 total bytes and MD5 values.
 
 **Which WenKai is not a detail.** Re-run before building `NaskhFull` (2026-08):
 that same Ubuntu package (an 18,769,824-byte TTF) reproduces
@@ -556,6 +692,11 @@ tens of bytes off, check the TTF before suspecting the converter.
   overall — so it reads lighter without going spindly, and its pen-written
   roots echo kaiti's brush-written ones. Carries every pinyin tone vowel
   itself. SIL OFL.
+- **Linguistics Pro** — a Utopia-rooted book serif from Bulgarian designer
+  Stefan Peev's LOCALFONTS project. The modern Bulgarian letterforms are the
+  reason it is here; `bake_bulgarian.py` makes them direct cmap glyphs because
+  CrossPoint does not apply `locl BGR`. Its current regular source has no
+  kerning feature. SIL OFL.
 - Alternatives if taste differs: Noto Sans/Serif SC (print-style, sturdier
   at tiny sizes), TW-Kai (traditional-oriented), Ma Shan Zheng (true brush
   calligraphy — pretty, tiring as body text).
@@ -648,6 +789,12 @@ by Rafal-P-Mazur, which this parser is based on); it is not worth using here.
 - https://github.com/lxgw/LxgwWenKai · https://github.com/notofonts/noto-cjk
 - https://github.com/notofonts/notofonts.github.io (Noto Naskh Arabic, Noto
   Sans) · https://github.com/mintty/mintty (the bidi/shaping port's upstream)
+- https://github.com/StefanPeev/Linguistics-Pro (Bulgarian source face,
+  changelog, OpenType sources and OFL)
+- https://github.com/crosspoint-reader/crosspoint-reader/releases ·
+  https://updates.crosspointreader.com/cmsuphnoa0m040ro513ptjbwg ·
+  https://www.xteink.com/products/xteink-x4-pro-pocket-ereader (current X4 Pro
+  CrossPoint channel and hardware)
 - https://github.com/bigbag/papyrix-reader ·
   https://github.com/aBER0724/crosspoint-reader-cjk
 - On-device photo evidence: stock tofu (2026-07); CrossPoint + WenKaiFull
