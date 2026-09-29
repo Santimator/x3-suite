@@ -126,6 +126,13 @@ cleaned that folder, so the collection already existed; it just had no door.
 
 ### A photo becomes a sleep screen
 
+**Send it as a file, not as a photo, when the original matters.** Telegram
+treats the two differently even for the same image: sent as a *photo* it is
+recompressed to JPEG (and scaled down to ~1280 px on the long side), which
+**drops any transparency** a PNG carried; sent as a *file* (📎 → File) it
+arrives byte for byte, PNG and alpha channel intact. For an ordinary photo
+either works; for anything meant to be transparent, only the file does.
+
 Send one. The bot asks `make_wallpaper.py --probe` whether the image fills the
 panel, and only then decides what to ask you:
 
