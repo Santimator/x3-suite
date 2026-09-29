@@ -501,20 +501,10 @@ def rescan_device_fonts(host: str) -> None:
     device.fonts(host)          # the GET is what acts on the dirty flag
 
 
-def sleep_dir(host: str) -> str:
-    """Which folder the device is actually reading wallpapers from.
-
-    The firmware checks /.sleep first and only falls back to /sleep when it
-    does not exist — and /.sleep never appears in a listing, because
-    /api/files hides dot-prefixed entries. So the bot cannot find it by
-    browsing; it has to ask the same question push_wallpaper.py asks, and
-    without creating anything.
-    """
-    if device.list_dir(host, "/.sleep"):
-        return "/.sleep"
-    if device.list_dir(host, "/sleep"):
-        return "/sleep"
-    return "/.sleep"
+# Where wallpapers live on the card — the same folder push_wallpaper.py fills.
+# Not /.sleep: since 1.6.x the firmware refuses to create dot-prefixed names
+# over the web API, so /sleep is the only wallpaper folder we can make.
+SLEEP_DIR = "/sleep"
 
 
 def device_book_name(author: str, title: str, host: str | None = None) -> str:

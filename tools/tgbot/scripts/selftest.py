@@ -440,7 +440,7 @@ def check_push_is_all_or_nothing(tmp: Path) -> None:
     try:
         bot.device_host = lambda: ("10.0.0.5", {})
         suite.push = lambda files, host=None: {
-            "ok": False, "host": "10.0.0.5", "target": "/.sleep",
+            "ok": False, "host": "10.0.0.5", "target": "/sleep",
             "items": [{"name": "wall.bmp", "ok": True},
                       {"name": "other.bmp", "ok": False, "error": "File already exists"}]}
         bot.do_push(bot.user_id)
@@ -1600,6 +1600,12 @@ def check_device_files(tmp: Path) -> None:
         bot.handle(msg("Sci/Fi"))
         check("a folder name with a slash is refused",
               not made and "no slashes" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+        bot.handle(cb(next(d for _, d in flat if d.startswith("dev:mkdir"))))
+        tg.sent.clear()
+        bot.handle(msg(".hidden"))
+        check("a dot-prefixed folder name is refused before the reader 403s it",
+              not made and "starts with a dot" in tg.sent[-1]["text"],
+              tg.sent[-1]["text"])
         bot.handle(cb(next(d for _, d in flat if d.startswith("dev:mkdir"))))
         bot.handle(msg("Poetry"))
         check("a plain name creates the folder where you are",

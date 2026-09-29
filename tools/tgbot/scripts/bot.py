@@ -340,14 +340,13 @@ class Bot:
             name = text.strip()
             if "/" in name or "\\" in name:
                 return self.say(chat, "A folder name, not a path — no slashes.")
+            if name.startswith("."):
+                return self.say(chat, "The reader refuses to create a folder "
+                                      "whose name starts with a dot.")
 
             def work():
                 suite.device.mkdir(job["host"], job["path"], name)
-                note = ("\n<i>(a dot-prefixed folder is hidden from the "
-                        "reader's listings — including this one)</i>"
-                        if name.startswith(".") else "")
-                self.say(chat, f"📁 <code>{html.escape(name)}</code> created."
-                               f"{note}")
+                self.say(chat, f"📁 <code>{html.escape(name)}</code> created.")
                 self.browse(chat, job["path"])
             return self.submit(chat, work)
 
@@ -2205,10 +2204,7 @@ class Bot:
                                   f"leave it off)")
 
         if action == "dev":
-            def work():
-                host, _ = self.device_host()
-                self.browse(chat, suite.sleep_dir(host))
-            return self.submit(chat, work)
+            return self.submit(chat, lambda: self.browse(chat, suite.SLEEP_DIR))
 
         wall = self.tokens.get(token)
         if not wall:
@@ -2708,10 +2704,8 @@ class Bot:
                 chat, lambda: self.remove_device_series(
                     chat, payload, message_id=msg_id))
         if action == "wp":
-            def work():
-                host, _ = self.device_host()
-                self.browse(chat, suite.sleep_dir(host), message_id=msg_id)
-            return self.submit(chat, work)
+            return self.submit(
+                chat, lambda: self.browse(chat, suite.SLEEP_DIR, message_id=msg_id))
         if action == "fo":
             return self.submit(chat, lambda: self.show_device_fonts(chat))
         if action == "foscan":

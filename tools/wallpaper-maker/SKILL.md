@@ -292,24 +292,19 @@ a reason to go hunting and push to whatever turns up. On success it is written
 down, so `--ip` is normally a one-off: the next run finds the reader on its
 own, until the DHCP lease moves and the fallbacks take over again.
 
-Where the files land is decided, not asked:
-
-- **`/.sleep/`** — the firmware's preferred pool. Checked first; one file is
-  picked at random each time the device sleeps. Hidden, so it stays out of the
-  file browser. This is the default target.
-- **`/sleep/`** — the visible fallback, read *only* when `/.sleep` does not
-  exist. If wallpapers are already there, we push there instead: creating
-  `/.sleep` would silently shadow every one of them.
+Where the files land is decided, not asked: **`/sleep/`**, created if missing.
+One file is picked at random each time the device sleeps. The firmware looks
+in `/.sleep` first, but since 1.6.x `POST /mkdir` answers 403 to any
+dot-prefixed name (and WebDAV refuses dotted segments), so nothing remote can
+create it; `/sleep` is read whenever `/.sleep` holds no valid image.
 
 Then the sleep screen has to be set to **Custom** to use the pool at all, so
 the push does that too (`POST /api/settings {"sleepScreen": 2}`);
 `--no-set-mode` if you would rather set it by hand under Settings → Display.
 
-Two firmware behaviours the pusher works around, both worth knowing before you
+One firmware behaviour the pusher works around, worth knowing before you
 reach for `curl`: an upload onto an existing filename is **rejected**, not
-overwritten, so replacing means deleting first; and **WebDAV — the other way
-in — refuses every path segment beginning with a dot**, which rules out
-`/.sleep` entirely. Hence the plain HTTP API.
+overwritten, so replacing means deleting first.
 
 ### The OPDS-shaped alternative, for completeness
 
@@ -330,7 +325,7 @@ default sleep screen, with no message anywhere. In order of likelihood:
 |---|---|
 | Default CrossPoint sleep screen | Sleep screen is not set to **Custom** (Settings → Display), or `sleep`/`.sleep` holds no file the scan accepts. |
 | Some images appear, one never does | Its name starts with `.` (skipped whatever it contains), or the extension is not `.bmp`, or the header did not parse. |
-| Images stopped appearing after a push | `/.sleep` exists and takes priority; anything in `/sleep` is now invisible. Move them, or delete `/.sleep`. |
+| Images stopped appearing after a push | A `/.sleep` with valid images (made on the card by hand) takes priority; `/sleep` is then ignored. Empty or delete `/.sleep`. |
 | Grainier or flatter than the preview | The file is not 4-bpp-indexed with a native palette, so the firmware re-dithered it on-device. Re-run `make_wallpaper.py`; do not hand-edit the BMP in an image editor, which will re-save it 24-bpp. |
 | A picture floating in a black frame | Not 528x792 — the firmware never scales *up*, and that black is the device's, not our mat. Re-run `make_wallpaper.py`. |
 | Upload fails with "File already exists" | The firmware refuses collisions. `--replace`, or delete on the device. |

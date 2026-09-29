@@ -258,10 +258,9 @@ one is that the device names OPDS downloads `<author> - <title>.epub`, and
 books from other catalogs arrive with names like
 `Historia-de-la-magia-resumen-de-sus-procedimientos-...-Rafael-Urbano.epub`.
 
-**🖼 Wallpapers** jumps straight to the folder the device is actually reading —
-`/.sleep` if it exists, `/sleep` otherwise. That shortcut is not a convenience:
-`/api/files` hides dot-prefixed entries, so `/.sleep` never appears in a
-listing and cannot be reached by browsing at all.
+**🖼 Wallpapers** jumps straight to `/sleep`, the folder `push_wallpaper.py`
+fills. Not `/.sleep`: since firmware 1.6.x the web API refuses to create a
+dot-prefixed folder, and the bot's own *New folder* refuses one up front.
 
 Any `.bmp` offers **👁 Preview**, and a folder full of them offers *Preview
 all* — which is the answer to three wallpapers with names that say nothing.

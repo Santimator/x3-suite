@@ -154,7 +154,7 @@ class FakeDevice(BaseHTTPRequestHandler):
         route = urllib.parse.urlparse(self.path).path
         if route == "/api/status":
             return self._send(200, json.dumps(
-                {"version": "1.5.0", "model": "Xteink X3", "ip": "127.0.0.1"}
+                {"version": "1.6.5", "model": "Xteink X3", "ip": "127.0.0.1"}
             ).encode(), "application/json")
         if route == "/api/files":
             target = self._sd(self._args().get("path", "/"))
@@ -179,6 +179,10 @@ class FakeDevice(BaseHTTPRequestHandler):
         body = self.rfile.read(length) if length else b""
 
         if route == "/mkdir":
+            # 1.6.x refuses a dot-prefixed name before it looks at the card,
+            # so an existing /.sleep answers 403 too.
+            if args["name"].startswith("."):
+                return self._send(403, b"Cannot create protected item")
             target = self._sd(args.get("path", "/")) / args["name"]
             if target.exists():
                 return self._send(400, b"Folder already exists")
@@ -515,18 +519,17 @@ def check_push(build_dir: Path) -> None:
                  str(build_dir), *addr, *extra],
                 capture_output=True, text=True, timeout=60, env=env)
 
-            # Looking must not change anything: creating /.sleep just to read it
-            # would shadow whatever the device keeps in /sleep.
+            # Looking must not change anything.
             listed = run("--list")
             check("push: --list leaves the device alone",
-                  listed.returncode == 0 and not (sd / ".sleep").exists(),
+                  listed.returncode == 0 and not (sd / "sleep").exists(),
                   listed.stderr.strip())
 
             first = run()
-            pushed = sorted(p.name for p in (sd / ".sleep").glob("*.bmp")) \
-                if (sd / ".sleep").is_dir() else []
+            pushed = sorted(p.name for p in (sd / "sleep").glob("*.bmp")) \
+                if (sd / "sleep").is_dir() else []
             expected = sorted(p.name for p in build_dir.glob("*.bmp"))
-            check("push: creates /.sleep and uploads every wallpaper",
+            check("push: creates /sleep and uploads every wallpaper",
                   first.returncode == 0 and pushed == expected,
                   first.stderr.strip() or f"{pushed} != {expected}")
             check("push: switches the sleep screen to Custom",
@@ -535,7 +538,7 @@ def check_push(build_dir: Path) -> None:
 
             # The firmware rejects an upload onto an existing name, so a second
             # push must delete first rather than silently doing nothing.
-            marker = sorted((sd / ".sleep").glob("*.bmp"))[0]
+            marker = sorted((sd / "sleep").glob("*.bmp"))[0]
             marker.write_bytes(b"stale")
             again = run()
             check("push: replaces a file already on the device",
@@ -545,7 +548,7 @@ def check_push(build_dir: Path) -> None:
             cleared = run("--replace")
             check("push: --replace clears the folder first",
                   cleared.returncode == 0
-                  and sorted(p.name for p in (sd / ".sleep").glob("*.bmp")) == expected,
+                  and sorted(p.name for p in (sd / "sleep").glob("*.bmp")) == expected,
                   cleared.stderr.strip())
 
             # --ip is meant to be a one-off: the address that answered is
@@ -563,8 +566,8 @@ def check_push(build_dir: Path) -> None:
         finally:
             server.shutdown()
 
-    # A device that already keeps wallpapers in the visible /sleep must not have
-    # them shadowed by a /.sleep we created.
+    # A card that already has /sleep: the push adds to it rather than failing
+    # on "Folder already exists".
     with tempfile.TemporaryDirectory() as sd_dir:
         sd = Path(sd_dir)
         (sd / "sleep").mkdir()
@@ -574,7 +577,7 @@ def check_push(build_dir: Path) -> None:
             result = subprocess.run(
                 [sys.executable, str(SCRIPTS / "push_wallpaper.py"), str(build_dir),
                  "--host", host], capture_output=True, text=True, timeout=60)
-            check("push: uses /sleep when the device already reads it",
+            check("push: adds to an existing /sleep",
                   result.returncode == 0 and not (sd / ".sleep").exists()
                   and len(list((sd / "sleep").glob("*.bmp"))) > 1,
                   result.stderr.strip())

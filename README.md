@@ -294,8 +294,8 @@ a pull, and this device only pulls books.
 So it's a push instead, into the file-transfer web server the firmware already
 ships. On the device: **Home → File Transfer → Join a Network**; it prints an
 address and holds the server up while that screen is open. `push_wallpaper.py`
-uploads into `/.sleep/` — or into `/sleep/` if you already keep wallpapers
-there, since creating `/.sleep` would silently shadow them — and sets the sleep
+uploads into `/sleep/` — the web API refuses to create dot-prefixed folders
+since firmware 1.6.x, so `/.sleep` is not an option — and sets the sleep
 screen to Custom so the pool is actually used.
 
 To find the reader it tries the address that answered last time, then

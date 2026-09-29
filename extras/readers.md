@@ -406,7 +406,7 @@ pushes them.
 |---|---|
 | Format | **BMP only.** The folder scan filters on `hasBmpExtension` (case-insensitive) and opens nothing else |
 | `.pxc` | **Not a wallpaper format** — it is the EPUB reader's *pixel cache* (`lib/Epub/Epub/converters/PixelCache.h`), written beside a decoded JPEG. Web converters that offer `.pxc` for a sleep screen are wrong for this firmware; the file is skipped in silence |
-| Where | `/.sleep/` (preferred, checked first, one file picked at random per sleep), else `/sleep/`, else a single `/sleep.bmp` at the root. **`/.sleep` existing makes `/sleep` invisible** |
+| Where | A single `/sleep.bmp` at the root wins; else `/.sleep/` if it holds a valid image, else `/sleep/` (one file picked at random per sleep). Since 1.6.x `POST /mkdir` refuses dot-prefixed names (403), so **the suite uses `/sleep` only** |
 | Names | Anything starting with `.` is skipped inside those folders, whatever it holds |
 | Enabled by | Settings → Display → Sleep Screen = **Custom** (enum index 2; `COVER` draws the open book's cover instead, `COVER_CUSTOM` does both by context) |
 | Bit depths accepted | 1, 2, 4, 8, 24, 32; `BI_RGB` only (`BI_BITFIELDS` for 32) |

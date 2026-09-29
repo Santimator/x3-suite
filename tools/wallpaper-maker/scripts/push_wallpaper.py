@@ -33,19 +33,14 @@ to be missing — a local DNS filter or reverse proxy will happily answer for
 address is tried before the name, and the firmware's own UDP discovery ping
 after both.
 
-Where they land, and why it is decided for you:
+Where they land: **/sleep/**, always. The firmware still looks in /.sleep
+first, but since 1.6.x `POST /mkdir` refuses any dot-prefixed name (403
+`Cannot create protected item`) and WebDAV refuses dotted segments too, so
+nothing remote can create /.sleep any more. /sleep is visible and read
+whenever /.sleep holds no valid image — i.e. on any card that has no /.sleep.
 
-  /.sleep/     The firmware's preferred pool — checked first, one file picked at
-               random each time the device sleeps. Hidden, so it stays out of
-               the file browser. This is the default target.
-  /sleep/      The visible fallback, only read when /.sleep does not exist. If
-               you already keep wallpapers here we push here instead, because
-               creating /.sleep would silently shadow everything in it.
-
-Two firmware behaviours worth knowing, both handled here: an upload onto an
-existing name is *rejected*, not overwritten (so we delete first and retry),
-and WebDAV — the other way in — refuses every path segment beginning with a
-dot, which rules out /.sleep entirely. Hence the plain HTTP API.
+One firmware behaviour worth knowing, handled here: an upload onto an
+existing name is *rejected*, not overwritten, so we delete first and retry.
 """
 
 from __future__ import annotations
@@ -61,8 +56,7 @@ from crosspoint_device import (DeviceError, delete, find_device, list_dir, mkdir
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DIR = REPO_ROOT / "workspace" / "wallpapers" / "build"
 
-PREFERRED_DIR = "/.sleep"
-FALLBACK_DIR = "/sleep"
+SLEEP_DIR = "/sleep"
 
 # SLEEP_SCREEN_MODE in src/CrossPointSettings.h; the web settings key is
 # "sleepScreen" and takes the enum index.
@@ -75,17 +69,10 @@ def bmps_in(host: str, path: str) -> list:
 
 
 def choose_dir(host: str, create: bool = True) -> str:
-    """Pick /.sleep or /sleep — whichever the device is actually reading.
-
-    The firmware checks /.sleep first and only falls back to /sleep when it does
-    not exist. So if there are already wallpapers in /sleep, creating /.sleep
-    would make them all disappear without a word. Respect what is there.
-    """
-    if bmps_in(host, FALLBACK_DIR):
-        return FALLBACK_DIR
+    """The wallpaper folder, created if asked to. See the module docstring."""
     if create:
-        mkdir(host, "/", PREFERRED_DIR.lstrip("/"))
-    return PREFERRED_DIR
+        mkdir(host, "/", SLEEP_DIR.lstrip("/"))
+    return SLEEP_DIR
 
 
 def set_custom_mode(host: str) -> bool:
@@ -101,8 +88,8 @@ def main() -> int:
                     help="the reader's address. Remembered on success, and "
                          "tried first next time. Without it: the remembered "
                          "address, then crosspoint.local, then UDP discovery")
-    ap.add_argument("--dir", help="target folder on the SD card "
-                                  f"(default: {PREFERRED_DIR}, or {FALLBACK_DIR} if in use)")
+    ap.add_argument("--dir", help=f"target folder on the SD card (default: {SLEEP_DIR}). "
+                                  "No dot-prefixed names: the firmware refuses to create them")
     ap.add_argument("--list", action="store_true", help="show what is there and stop")
     ap.add_argument("--replace", action="store_true",
                     help="delete the wallpapers already on the device first")
@@ -128,8 +115,7 @@ def main() -> int:
         say(f"reader at {host}: {info.get('model', 'unknown model')}, "
             f"firmware {info.get('version', '?')}")
 
-        # --list must not change the device: creating /.sleep to look inside it
-        # would shadow whatever is in /sleep.
+        # --list must not change the device.
         target = args.dir or choose_dir(host, create=not args.list)
         if args.dir and not args.list:
             parent, _, name = args.dir.rstrip("/").rpartition("/")
@@ -144,9 +130,6 @@ def main() -> int:
             say(f"\n{target}/ — {len(present)} wallpaper(s)")
             for f in present:
                 say(f"  {f['name']}  ({f.get('size', 0) // 1024} KB)")
-            if target == PREFERRED_DIR:
-                say("\n(this folder is hidden; the device's file browser will "
-                    "not show it unless Show Hidden Files is on)")
             if args.json:
                 json.dump(report, sys.stdout, ensure_ascii=False)
             return 0
