@@ -2185,9 +2185,12 @@ class Bot:
         queued = self.queued_sources()
         lines = [f"🖼 <b>{len(walls)} wallpaper(s)</b>"
                  + (f" — page {page + 1} of {pages}" if pages > 1 else "")]
+        clear = self.transparent_items(report)
         for n, w in enumerate(shown, first):
-            mark = " 📤" if w["path"] in queued else ""
+            mark = (" ◻" if n in clear else "") + (" 📤" if w["path"] in queued else "")
             lines.append(f"{n} {html.escape(w['name'][:34])}{mark}")
+        if clear:
+            lines.append("◻ has its own transparency (striped on the sheet)")
 
         sent = self.send_preview(chat, Path(report["png"]),
                                  "\n".join(lines)[:1000],
@@ -2195,6 +2198,12 @@ class Bot:
         if sent and sent.get("message_id"):
             self.sheets[sent["message_id"]] = {"walls": shown, "page": page,
                                                "pages": pages, "start": first}
+
+    @staticmethod
+    def transparent_items(report: dict) -> set:
+        """Numbers on a contact sheet whose picture is transparent anywhere."""
+        return {i.get("n") for i in (report or {}).get("items", [])
+                if i.get("transparent")}
 
     def queued_sources(self) -> set:
         """Originals that have a built copy waiting in the queue."""
@@ -3042,8 +3051,13 @@ class Bot:
                 report = suite.contact_sheet(local, sheet)
                 lines = [f"🖼 <b>{len(shown)} on the reader</b> — "
                          f"<code>{html.escape(path)}</code>"]
+                clear = self.transparent_items(report)
                 lines += [f"{n} {html.escape(e.get('name', '')[:34])}"
+                          + (" ◻" if n in clear else "")
                           for n, e in enumerate(shown, 1)]
+                if clear:
+                    lines.append("◻ transparent — the page shows through "
+                                 "the striped parts")
                 sent = self.send_preview(
                     chat, Path(report["png"]), "\n".join(lines)[:1000],
                     self.device_sheet_keyboard(path, payloads))

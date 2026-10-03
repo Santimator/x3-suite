@@ -1350,6 +1350,20 @@ def check_wallpaper_collection(tmp: Path) -> None:
               and "build" not in caption, caption)
         check("the overview is one picture, not one per wallpaper",
               len(tg.sent) == 1 and "photo" in tg.sent[-1], str(len(tg.sent)))
+        flagged = suite.contact_sheet
+        suite.contact_sheet = lambda files, dest, start=1: {
+            **fake_sheet(files, dest, start),
+            "items": [{"n": start + i, "name": Path(f).name,
+                       "transparent": Path(f).name == "icon.png"}
+                      for i, f in enumerate(files)]}
+        tg.sent.clear()
+        bot.handle(cb("m:wl"))
+        marked = tg.sent[-1]["text"].splitlines()
+        suite.contact_sheet = flagged
+        check("a transparent original is marked ◻ in the list, and only it",
+              [l for l in marked if " ◻" in l and not l.startswith("◻")]
+              == [l for l in marked if "icon.png" in l]
+              and any(l.startswith("◻") for l in marked), str(marked))
         check("the caption marks what is already queued",
               any("dawn.jpg" in line and "📤" in line
                   for line in caption.splitlines()), caption)

@@ -172,6 +172,12 @@ thumbnails in a single image, newest first, with the names and queue marks in
 the caption and numbered buttons underneath. Tap a number for the picture
 itself, then put it on the reader, rename or delete it.
 
+**Transparency shows on the sheet.** Wherever a picture is clear it is drawn
+*striped* rather than white, so you see where the page will show through, not
+only that it will; a small checkerboard sits by its number, and its line in
+the caption carries a ◻. On 🖼 Wallpapers that means an original with its own
+alpha channel; on the reader's sheet, a PNG that went over transparent.
+
 The numbers are the whole design. A sheet you cannot point at is decoration, so
 `contact_sheet.py` draws each cell's index onto it and the buttons carry the
 same numbers. Past 24 it pages rather than growing the image, because Telegram

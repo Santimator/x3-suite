@@ -23,7 +23,9 @@ full-size preview still goes through the port, because that is where "what the
 device actually draws" is the whole question.
 
 Emits JSON on stdout: the path written, the cell size, and the names in the
-order they were numbered.
+order they were numbered, each with whether it is transparent anywhere — shown
+on the sheet as stripes where it is clear and a small checkerboard by its
+number.
 """
 
 from __future__ import annotations
@@ -54,19 +56,51 @@ def _font():
         return ImageFont.load_default()
 
 
-def _thumb(src: Path) -> Image.Image:
-    """One cell: rotated as the camera meant, flattened onto white (a
-    transparent wallpaper's clear parts are where the page shows), fitted."""
+def _hatch(size) -> Image.Image:
+    """Light diagonal stripes: what a clear area looks like on the sheet."""
+    w, h = size
+    img = Image.new("L", (w, h), 255)
+    draw = ImageDraw.Draw(img)
+    for k in range(-h, w, 7):
+        draw.line((k, h, k + h, 0), fill=175, width=1)
+    return img
+
+
+def _thumb(src: Path) -> tuple:
+    """One cell, and whether the picture is transparent anywhere.
+
+    Rotated as the camera meant and fitted. Where the picture is clear it is
+    shown *striped* rather than white, so the sheet says where the page will
+    show through, not just that it will — a white sky and a cut-out window
+    look different here, as they do on the reader.
+    """
     img = Image.open(src)
     img.draft("RGB", (CELL_W * 2, CELL_H * 2))     # JPEG: decode small, fast
     img = ImageOps.exif_transpose(img)
     rgba = img.convert("RGBA")
-    flat = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
-    img = Image.alpha_composite(flat, rgba).convert("L")
-    img.thumbnail((CELL_W, CELL_H), Image.LANCZOS)
+    rgba.thumbnail((CELL_W, CELL_H), Image.LANCZOS)
+    alpha = rgba.getchannel("A")
+    clear = alpha.getextrema()[0] < 128
+    ground = (_hatch(rgba.size) if clear else Image.new("L", rgba.size, 255))
+    ground = ground.convert("RGBA")
+    # Binary, as the wallpaper itself is: half-clear is clear.
+    rgba.putalpha(alpha.point(lambda v: 255 if v >= 128 else 0))
+    pic = Image.alpha_composite(ground, rgba).convert("L")
     cell = Image.new("L", (CELL_W, CELL_H), BACKGROUND)
-    cell.paste(img, ((CELL_W - img.width) // 2, (CELL_H - img.height) // 2))
-    return cell
+    cell.paste(pic, ((CELL_W - pic.width) // 2, (CELL_H - pic.height) // 2))
+    return cell, clear
+
+
+def _badge(draw, x: int, y: int) -> None:
+    """A tiny checkerboard — the usual sign for "transparent" — drawn rather
+    than typed, so it does not depend on what glyphs the font carries."""
+    s = 5
+    for r in range(2):
+        for c in range(2):
+            fill = 255 if (r + c) % 2 == 0 else 110
+            draw.rectangle((x + c * s, y + r * s, x + c * s + s - 1, y + r * s + s - 1),
+                           fill=fill)
+    draw.rectangle((x - 1, y - 1, x + 2 * s, y + 2 * s), outline=255)
 
 
 def build(files: list, dest: Path, *, start: int = 1, cols: int = 8) -> dict:
@@ -85,8 +119,9 @@ def build(files: list, dest: Path, *, start: int = 1, cols: int = 8) -> dict:
         col, row = i % cols, i // cols
         x = MARGIN + col * (CELL_W + GAP)
         y = MARGIN + row * (CELL_H + LABEL_H + GAP)
+        clear = False
         try:
-            thumb = _thumb(src)
+            thumb, clear = _thumb(src)
         except Exception:
             # An unreadable file still gets a cell, so the numbering never
             # shifts under the buttons that refer to it.
@@ -102,7 +137,10 @@ def build(files: list, dest: Path, *, start: int = 1, cols: int = 8) -> dict:
                        fill=30)
         draw.text((x + CELL_W // 2, y + CELL_H + LABEL_H // 2), n,
                   fill=255, font=font, anchor="mm")
-        named.append({"n": start + i, "name": src.name, "path": str(src)})
+        if clear:
+            _badge(draw, x + CELL_W - 16, y + CELL_H + (LABEL_H - 10) // 2)
+        named.append({"n": start + i, "name": src.name, "path": str(src),
+                      "transparent": clear})
 
     dest.parent.mkdir(parents=True, exist_ok=True)
     sheet.save(dest, optimize=True)
