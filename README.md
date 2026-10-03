@@ -243,15 +243,16 @@ before you've dropped anything in.
 
 ```bash
 .venv/bin/pip install -r tools/wallpaper-maker/requirements.txt
-.venv/bin/python tools/wallpaper-maker/scripts/make_wallpaper.py   # -> .../build/*.bmp
+.venv/bin/python tools/wallpaper-maker/scripts/make_wallpaper.py   # -> .../build/*.png
 python3 tools/wallpaper-maker/scripts/push_wallpaper.py            # -> the device
 ```
 
-Nothing to configure and nothing to answer: 528×792, greyscale BMP,
+Nothing to configure and nothing to answer: 528×792, a four-grey PNG,
 cover-cropped, tone-stretched for e-ink. Each of those has a right answer on
 this panel, so it's already chosen — the table in the SKILL says why each one
-and not the alternative. Add `--preview` to get a PNG you can look at before it
-goes anywhere near the device.
+and not the alternative. The one real choice is `--transparent`, for a drawing
+the page should show through. Add `--preview` to see what the panel will show
+before it goes anywhere near the device.
 
 The dithering — choosing which of the panel's four shades each pixel gets —
 **reproduces CrossPoint's own algorithm**, ported from the firmware and run
@@ -294,9 +295,10 @@ a pull, and this device only pulls books.
 So it's a push instead, into the file-transfer web server the firmware already
 ships. On the device: **Home → File Transfer → Join a Network**; it prints an
 address and holds the server up while that screen is open. `push_wallpaper.py`
-uploads into `/sleep/` — the web API refuses to create dot-prefixed folders
-since firmware 1.6.x, so `/.sleep` is not an option — and sets the sleep
-screen to Custom so the pool is actually used.
+uploads into `/sleep-overlay/` and sets the sleep screen to **Transparent
+custom** (CrossPoint 1.6+), which draws a wallpaper over the page you were
+reading: opaque ones cover it, transparent ones let it show through, and both
+kinds share one folder.
 
 To find the reader it tries the address that answered last time, then
 `crosspoint.local`, then the firmware's own UDP discovery ping. If mDNS doesn't

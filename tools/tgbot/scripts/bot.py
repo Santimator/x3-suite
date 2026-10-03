@@ -53,6 +53,9 @@ from state import Notes, Queue, Tokens
 from telegram import GETFILE_LIMIT, Telegram, TelegramError
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
+# What the reader's overlay sleep screen opens, and so what the device browser
+# offers to preview.
+WALLPAPER_SUFFIXES = (".png", ".bmp")
 MATS = [("≈ waves", "waves"), ("▣ edges", "edges"),
         ("◌ blur", "blur"), ("— white", "none")]
 NAV_PAGE = 7
@@ -409,16 +412,12 @@ class Bot:
             if not inside(self.workspace, src):
                 return self.say(chat, "⚠️ that file is outside the workspace.")
             name = Path(text).name
-            if not name.lower().endswith(".bmp"):
-                name += ".bmp"
+            if not name.lower().endswith(src.suffix.lower()):
+                name += src.suffix
             dest = safe_join(src.parent, name)
             if dest.exists():
                 return self.say(chat, "⚠️ something is already called that.")
             src.rename(dest)
-            # The preview beside it carries the same stem, so it follows.
-            png = src.with_suffix(".png")
-            if png.exists():
-                png.rename(dest.with_suffix(".png"))
             return self.say(chat, f"✅ renamed to <code>{html.escape(dest.name)}</code>",
                             [[("🖼 Wallpapers", "m:wl")]])
 
@@ -532,21 +531,25 @@ class Bot:
             return self.on_wallpaper_callback(
                 chat, rest, (cb.get("message") or {}).get("message_id"))
 
-        if head == "wp":                       # wp:<token>:<mat>
-            token, _, mat = rest.partition(":")
-            src = self.tokens.get(token)
+        if head == "wq":                       # put an original on the reader
+            src = self.tokens.get(rest)
             if not src:
                 return self.stale(chat)
-            return self.submit(chat, lambda: self.make_wallpaper(chat, Path(src), mat))
-        if head == "wpq":                      # queue an already-built BMP
-            bmp = self.tokens.get(rest)
-            if not bmp:
+            return self.submit(chat, lambda: self.start_wallpaper(chat, Path(src)))
+        if head == "wm":                       # the mat was chosen off the sheet
+            job = self.tokens.get(rest)
+            if not job:
                 return self.stale(chat)
-            self.queue.add("wallpaper", bmp)
-            return self.say(chat, f"🖼 queued — {len(self.queue)} waiting.",
-                            [[("📲 Push now", "push:ask"), ("🏠 Menu", "m:main")]])
+            return self.ask_wallpaper_mode(chat, Path(job["src"]), job["mat"])
+        if head == "wo":                       # opaque or transparent: build, queue
+            job = self.tokens.get(rest)
+            if not job:
+                return self.stale(chat)
+            return self.submit(chat, lambda: self.queue_wallpaper(
+                chat, Path(job["src"]), job["mat"], job["clear"]))
         if head == "wpx":
-            return self.say(chat, "Dropped it.", [[("🏠 Menu", "m:main")]])
+            return self.say(chat, "Kept on the server — it is in 🖼 Wallpapers.",
+                            [[("🖼 Wallpapers", "m:wl"), ("🏠 Menu", "m:main")]])
 
         if head == "bq":                       # queue a book for the SD card
             book = self.tokens.get(rest)
@@ -580,12 +583,18 @@ class Bot:
                     chat, job["key"], job["alias"]))
 
         if head == "qdel":
+            for item in self.queue.items():
+                if item["id"] == rest and item.get("kind") == "wallpaper":
+                    suite.drop_build(Path(item["path"]))
             self.queue.remove(rest)
             return self.show_queue(chat)
         if head == "qclr":
             return self.say(chat, "Clear the whole queue?",
                             [[("Yes, clear it", "qclr!"), ("No", "m:q")]])
         if head == "qclr!":
+            for item in self.queue.items():
+                if item.get("kind") == "wallpaper":
+                    suite.drop_build(Path(item["path"]))
             n = self.queue.clear()
             return self.say(chat, f"Cleared {n}.", [[("🏠 Menu", "m:main")]])
 
@@ -699,40 +708,79 @@ class Bot:
     # -- wallpapers --------------------------------------------------------
 
     def offer_wallpaper(self, chat, src: Path) -> None:
-        """Ask about the mat only when there is a choice to make.
+        """A picture arrived: it is kept, and that is all, unless you say more.
 
-        An image that fills the panel has no mat, so it gets built and offered
-        straight away. One that does not is previewed on plain white — you see
-        exactly what is yours and what is filling — and the four fillings are
-        the buttons. Picking one builds and queues in the same tap; asking
-        twice for one decision is what makes a phone tiring.
+        The original is the wallpaper collection — 🖼 Wallpapers lists exactly
+        these files. Putting one on the reader is a separate, explicit step,
+        and everything it needs is made fresh from the original at that point.
         """
-        report = suite.probe_image(src)
         token = self.tokens.put(str(src))
+        self.say(chat,
+                 f"🖼 <code>{html.escape(src.name)}</code> is in your "
+                 f"wallpapers.\n\nPut it on the reader?",
+                 [[("📤 Yes, put it on the reader", f"wq:{token}")],
+                  [("Just keep it", "wpx:")]])
+
+    def start_wallpaper(self, chat, src: Path) -> None:
+        """Step one of putting an original on the reader: the mat, if any.
+
+        An image that fills the panel has no mat to choose. One that does not
+        gets every mat built for real and shown as one numbered sheet, so the
+        choice is made by looking rather than by remembering what "waves"
+        means.
+        """
+        if not src.exists():
+            return self.say(chat, "That picture is gone from the server.")
+        report = suite.probe_image(src)
         if report["fills"]:
-            return self.make_wallpaper(chat, src, "waves", offer_queue=True)
+            return self.ask_wallpaper_mode(chat, src, "waves")
+        self.say(chat, "Building the ways to fill it…")
+        sheet = suite.mat_sheet(src, self.state_dir / "cache" / "mats",
+                                [style for _, style in MATS])
+        lines = [f"{report['width']}×{report['height']} — too small to fill "
+                 f"528×792. How should the rest be filled?"]
+        lines += [f"{n} {label}" for n, (label, _) in enumerate(MATS, 1)]
+        buttons = [(f"{n}", f"wm:{self.tokens.put({'src': str(src), 'mat': style})}")
+                   for n, (_, style) in enumerate(MATS, 1)]
+        self.send_preview(chat, Path(sheet["png"]), "\n".join(lines),
+                          [buttons, [("✗ Cancel", "wpx:")]])
 
-        _, png = suite.build_wallpaper(src, "none")
-        caption = (f"{report['width']}×{report['height']} — too small to fill "
-                   f"528×792. How should the rest be filled?")
-        keyboard = [[(label, f"wp:{token}:{style}") for label, style in MATS[:2]],
-                    [(label, f"wp:{token}:{style}") for label, style in MATS[2:]],
-                    [("✗ discard", "wpx:")]]
-        self.send_preview(chat, png, caption, keyboard)
+    def ask_wallpaper_mode(self, chat, src: Path, mat: str) -> None:
+        """Step two: does it cover the page, or let it show through?"""
+        job = {"src": str(src), "mat": mat}
+        self.say(chat,
+                 f"<code>{html.escape(src.name)}</code> — how should it sit "
+                 f"over the page?\n\n"
+                 f"◼ <b>Opaque</b>: covers the page completely. Right for "
+                 f"photos.\n"
+                 f"◻ <b>Transparent</b>: white lets the page show through — or "
+                 f"the picture's own transparency, if it has one. Right for "
+                 f"drawings on a white ground.",
+                 [[("◼ Opaque", f"wo:{self.tokens.put({**job, 'clear': False})}"),
+                   ("◻ Transparent", f"wo:{self.tokens.put({**job, 'clear': True})}")],
+                  [("✗ Cancel", "wpx:")]])
 
-    def make_wallpaper(self, chat, src: Path, mat: str,
-                       offer_queue: bool = False) -> None:
-        bmp, png = suite.build_wallpaper(src, mat)
-        if offer_queue:
-            token = self.tokens.put(str(bmp))
-            return self.send_preview(
-                chat, png, f"{bmp.name} — fills the panel, no mat needed.",
-                [[("✓ Queue it", f"wpq:{token}"), ("✗ discard", "wpx:")]])
-        # A mat was chosen deliberately, so queue it without asking again.
-        self.queue.add("wallpaper", str(bmp))
-        self.send_preview(chat, png,
-                          f"✅ {bmp.name} — queued ({len(self.queue)} waiting).",
-                          [[("📲 Push now", "push:ask"), ("🏠 Menu", "m:main")]])
+    def queue_wallpaper(self, chat, src: Path, mat: str, clear: bool) -> None:
+        """Step three: build it into build/ and queue it.
+
+        One queued copy per original: asking again with other choices replaces
+        the waiting one rather than sending both, since they land under the
+        same name on the card anyway.
+        """
+        png, preview = suite.build_wallpaper(src, mat, transparent=clear)
+        for item in self.queue.items():
+            if item.get("kind") == "wallpaper" and item["path"] == str(png):
+                self.queue.remove(item["id"])
+        item = self.queue.add("wallpaper", str(png),
+                              meta={"source": str(src), "mat": mat,
+                                    "transparent": clear})
+        how = "transparent" if clear else "opaque"
+        self.send_preview(
+            chat, preview,
+            f"✅ {html.escape(png.name)} — {how}, queued "
+            f"({len(self.queue)} waiting).",
+            [[("📲 Push now", "push:ask"), ("↩ Unqueue", f"qdel:{item['id']}")],
+             [("🏠 Menu", "m:main")]])
 
     def send_preview(self, chat, png: Path, caption: str, keyboard):
         try:
@@ -2038,20 +2086,19 @@ class Bot:
         return rows
 
     def show_wallpapers(self, chat, page: int = 0) -> None:
-        """Everything built here, as one picture you can point at.
+        """Every picture you sent, as one sheet you can point at.
 
         The counterpart of 📚 Library and 🔤 Fonts: a collection that lives on
-        the server, browsable and re-sendable. Pushing one never removed the
-        file, so this is also the answer to "the card got wiped, put them all
-        back" — which is exactly when you want to see thirty at once rather
-        than scroll thirty messages.
+        the server, browsable and re-sendable. These are the *originals*;
+        what the reader gets is made from them when one is sent, so this is
+        also the answer to "the card got wiped, put them all back".
         """
         walls = suite.local_wallpapers()
         if not walls:
             return self.say(
                 chat,
-                "🖼 No wallpapers built yet.\n\nSend me a picture and it "
-                "becomes one — they collect here afterwards.",
+                "🖼 No wallpapers yet.\n\nSend me a picture — as a file, if "
+                "it has transparency to keep — and it collects here.",
                 [[("📲 On the device", "wl:dev:")], [("🏠 Menu", "m:main")]])
 
         pages = (len(walls) + self.PAGE - 1) // self.PAGE
@@ -2062,7 +2109,7 @@ class Bot:
         sheet = self.state_dir / "cache" / f"wallpapers-{page}.png"
         report = suite.contact_sheet([w["path"] for w in shown], sheet, start=first)
 
-        queued = {i["path"] for i in self.queue.items()}
+        queued = self.queued_sources()
         lines = [f"🖼 <b>{len(walls)} wallpaper(s)</b>"
                  + (f" — page {page + 1} of {pages}" if pages > 1 else "")]
         for n, w in enumerate(shown, first):
@@ -2075,6 +2122,11 @@ class Bot:
         if sent and sent.get("message_id"):
             self.sheets[sent["message_id"]] = {"walls": shown, "page": page,
                                                "pages": pages, "start": first}
+
+    def queued_sources(self) -> set:
+        """Originals that have a built copy waiting in the queue."""
+        return {(i.get("meta") or {}).get("source") for i in self.queue.items()
+                if i.get("kind") == "wallpaper"}
 
     def sheet_keyboard(self, shown: list, page: int, pages: int, first: int,
                        picking: bool = False) -> list:
@@ -2166,7 +2218,7 @@ class Bot:
             more = f"\n… and {len(names) - 15} more" if len(names) > 15 else ""
             return self.say(
                 chat,
-                f"Delete <b>{len(names)}</b> wallpaper(s) from the server?\n"
+                f"Delete <b>{len(names)}</b> original(s) from the server?\n"
                 f"{listed}{more}\n\n"
                 f"Any already on the reader stay there.",
                 [[("Yes, delete them", f"wl:del!:{msg_id or 0}"),
@@ -2180,7 +2232,6 @@ class Bot:
                     kept.append(path.name)
                     continue
                 path.unlink(missing_ok=True)
-                path.with_suffix(".png").unlink(missing_ok=True)
                 gone += 1
             self.selected.clear()
             self.sheets.pop(int(token) if token.isdigit() else None, None)
@@ -2198,10 +2249,11 @@ class Bot:
             if not wall:
                 return self.stale(chat)
             self.pending = {"kind": "wlrename", "path": wall["path"]}
+            suffix = Path(wall["path"]).suffix
             return self.say(chat, f"Send me the new name for\n"
                                   f"<code>{html.escape(Path(wall['path']).name)}</code>"
-                                  f"\n\n(the <code>.bmp</code> is added if you "
-                                  f"leave it off)")
+                                  f"\n\n(the <code>{html.escape(suffix)}</code> is "
+                                  f"added if you leave it off)")
 
         if action == "dev":
             return self.submit(chat, lambda: self.browse(chat, suite.SLEEP_DIR))
@@ -2212,34 +2264,15 @@ class Bot:
         path = Path(wall["path"])
 
         if action == "one":
-            def work():
-                # A wallpaper built before --preview existed, or by the CLI, has
-                # no PNG beside it. Render one the way the panel would draw it
-                # rather than showing nothing.
-                png = Path(wall["png"]) if wall.get("png") else \
-                    path.with_suffix(".png")
-                if not png.exists():
-                    suite.bmp_preview(path, png)
-                queued = any(i["path"] == str(path) for i in self.queue.items())
-                self.send_preview(
-                    chat, png,
-                    f"<b>{html.escape(path.name)}</b>\n{human(wall['bytes'])}"
-                    + ("\n📤 already queued" if queued else ""),
-                    [[("📤 Queue for the device", f"wl:q:{token}")],
-                     [("✏️ Rename", f"wl:rn:{token}"),
-                      ("🗑 Delete", f"wl:rm:{token}")],
-                     [("🖼 Wallpapers", "m:wl")]])
-            return self.submit(chat, work)
-
-        if action == "q":
-            if any(i["path"] == str(path) for i in self.queue.items()):
-                return self.say(chat, "Already in the queue.",
-                                [[("📲 Push now", "push:ask"),
-                                  ("🖼 Wallpapers", "m:wl")]])
-            self.queue.add("wallpaper", str(path))
-            return self.say(chat, f"📤 queued — {len(self.queue)} waiting.",
-                            [[("📲 Push now", "push:ask"),
-                              ("🖼 Wallpapers", "m:wl")]])
+            queued = str(path) in self.queued_sources()
+            return self.send_preview(
+                chat, path,
+                f"<b>{html.escape(path.name)}</b>\n{human(wall['bytes'])}"
+                + ("\n📤 queued for the reader" if queued else ""),
+                [[("📤 Put on the reader", f"wq:{self.tokens.put(str(path))}")],
+                 [("✏️ Rename", f"wl:rn:{token}"),
+                  ("🗑 Delete", f"wl:rm:{token}")],
+                 [("🖼 Wallpapers", "m:wl")]])
 
         if action == "rm":
             return self.say(chat, f"Delete <code>{html.escape(path.name)}</code> "
@@ -2251,7 +2284,6 @@ class Bot:
             if not inside(self.workspace, path):
                 return self.say(chat, "⚠️ that is outside the workspace.")
             path.unlink(missing_ok=True)
-            path.with_suffix(".png").unlink(missing_ok=True)
             return self.say(chat, "🗑 gone.", [[("🖼 Wallpapers", "m:wl")]])
 
         log("unhandled wallpaper callback:", action, token)
@@ -2876,7 +2908,7 @@ class Bot:
                 host, _ = self.device_host()
                 bmps = [e for e in suite.device.list_dir(host, path)
                         if not e.get("isDirectory")
-                        and e.get("name", "").lower().endswith(".bmp")]
+                        and e.get("name", "").lower().endswith(WALLPAPER_SUFFIXES)]
                 if not bmps:
                     return self.say(chat, "No wallpapers here.")
                 shown = bmps[:self.PAGE]
@@ -2926,7 +2958,7 @@ class Bot:
                     [("🗑 Delete", f"dev:rm:{token}"),
                      ("⬇️ Pull to server", f"dev:get:{token}")],
                     [("📂 Back", back_callback)]]
-            if name.lower().endswith(".bmp"):
+            if name.lower().endswith(WALLPAPER_SUFFIXES):
                 rows.insert(0, [("👁 Preview", f"dev:see:{token}")])
             return self.panel(
                 chat, msg_id,
@@ -2935,7 +2967,7 @@ class Bot:
         if action == "see":
             def work():
                 host, _ = self.device_host()
-                self.preview_bmp(chat, host, parent, name, payload["size"])
+                self.preview_wallpaper(chat, host, parent, name, payload["size"])
             return self.submit(chat, work)
 
         if action == "rn":
@@ -2988,15 +3020,15 @@ class Bot:
                                f"{html.escape(name)}</code>")
             return self.submit(chat, work)
 
-    def preview_bmp(self, chat, host: str, parent: str, name: str,
+    def preview_wallpaper(self, chat, host: str, parent: str, name: str,
                     size: int = 0) -> None:
         """Pull a wallpaper off the device and show what the panel would draw.
 
         The whole reason this exists: wallpapers end up on the SD card with
         names that say nothing, and there is no way to tell three of them apart
-        without looking. Rendering goes through `crosspoint_bmp`, the port of
-        the firmware's own reader, so the picture in the chat is the picture on
-        the panel — including the black field around an under-size one, and
+        without looking. Rendering goes through a port of the firmware's own
+        reader (`crosspoint_overlay` for PNG, `crosspoint_bmp` for BMP), so the
+        picture in the chat is the picture on the panel — including the black field around an under-size one, and
         saying so when the file is one the reader dithers itself, where the
         preview can only approximate what lands.
         """
@@ -3004,18 +3036,33 @@ class Bot:
         cache = self.state_dir / "cache"
         local = safe_join(cache, Path(name).name)
         suite.device.download(host, full, local)
-        report = suite.bmp_preview(local, local.with_suffix(".png"))
-
-        bits = [f"<b>{html.escape(name)}</b>",
-                f"{report['width']}×{report['height']} · {report['bpp']}-bpp · "
-                f"{human(size or local.stat().st_size)}"]
+        shown = local.parent / f"{local.stem}.preview.png"
+        if name.lower().endswith(".png"):
+            report = suite.overlay_preview(local, shown)
+            kind = ("transparent — page shown through it" if report.get("transparent")
+                    else "opaque")
+            bits = [f"<b>{html.escape(name)}</b>",
+                    f"{report['width']}×{report['height']} · PNG, {kind} · "
+                    f"{human(size or local.stat().st_size)}"]
+        else:
+            report = suite.bmp_preview(local, shown)
+            bits = [f"<b>{html.escape(name)}</b>",
+                    f"{report['width']}×{report['height']} · {report['bpp']}-bpp · "
+                    f"{human(size or local.stat().st_size)}"]
+            if parent.rstrip("/") == suite.SLEEP_DIR:
+                bits.append("⚠️ a BMP here leaves its white unpainted, and its "
+                            "greys let the page ghost through — re-send it "
+                            "from 🖼 Wallpapers as a PNG")
         if not report.get("drawn_by_sleep_scan"):
             bits.append("⚠️ the sleep-screen scan skips this name")
-        if not report.get("exact"):
-            # Not a warning any more: shipping continuous tone and letting the
-            # reader's Atkinson quantise it is what wallpaper-maker now does by
-            # default, because it looks better. The preview just cannot show the
-            # dither the device will apply, so say that plainly.
+        if not report.get("exact") and name.lower().endswith(".png"):
+            # The overlay path does not dither: it shifts each grey down to a
+            # level. Exact in the preview too — just not what was drawn.
+            bits.append("its greys are not the panel's four, so the reader "
+                        "rounds each one down — darker than drawn")
+        elif not report.get("exact"):
+            # A BMP that is not 4-bpp native: the reader quantises it itself,
+            # and the preview cannot show that dither, so say so plainly.
             bits.append("preview is approximate — the reader does its own "
                         "dithering on this one")
         elif report.get("scaled_down"):
@@ -3337,7 +3384,7 @@ class Bot:
             return rows
 
         bmps = sum(1 for e in files
-                   if e.get("name", "").lower().endswith(".bmp"))
+                   if e.get("name", "").lower().endswith(WALLPAPER_SUFFIXES))
         if bmps:
             rows.append([(f"👁 Preview all {bmps}", f"dev:wpall:{self.tokens.put(path)}")])
         here = self.tokens.put(path)
@@ -3426,7 +3473,12 @@ class Bot:
             show_progress(f"📤 {what}" + (f" ({total})" if total else ""))
             report = suite.push([i["path"] for i in walls], host=host)
             landed = {r["name"] for r in report.get("items", []) if r.get("ok")}
-            done += [i for i in walls if Path(i["path"]).name in landed]
+            landed_walls = [i for i in walls if Path(i["path"]).name in landed]
+            done += landed_walls
+            # On the card now, so the built copy has done its job. The
+            # original stays; it is what the next push is made from.
+            for item in landed_walls:
+                suite.drop_build(Path(item["path"]))
             if report.get("target"):
                 lines.append(f"🖼 <code>{html.escape(report['target'])}</code>")
             for r in report.get("items", []):
@@ -3435,7 +3487,7 @@ class Bot:
                              + ("" if r.get("ok")
                                 else f" — {html.escape(str(r.get('error'))[:80])}"))
             if report.get("sleep_mode_set"):
-                lines.append("Sleep screen set to Custom.")
+                lines.append("Sleep screen set to Transparent custom.")
             show_progress()
 
         if books:

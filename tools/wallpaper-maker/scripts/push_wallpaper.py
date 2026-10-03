@@ -20,7 +20,7 @@ On the device: **Home -> File Transfer -> Join a Network**. It prints an
 address and sits on that screen while we work; the server stops when you leave
 it. Then:
 
-    push_wallpaper.py                       # find the reader, push build/*.bmp
+    push_wallpaper.py                       # find the reader, push build/*.png
     push_wallpaper.py --ip 192.168.1.42     # if mDNS is unhelpful here
     push_wallpaper.py --list                # what is on the device now
     push_wallpaper.py --replace             # delete its wallpapers first
@@ -33,11 +33,13 @@ to be missing — a local DNS filter or reverse proxy will happily answer for
 address is tried before the name, and the firmware's own UDP discovery ping
 after both.
 
-Where they land: **/sleep/**, always. The firmware still looks in /.sleep
-first, but since 1.6.x `POST /mkdir` refuses any dot-prefixed name (403
-`Cannot create protected item`) and WebDAV refuses dotted segments too, so
-nothing remote can create /.sleep any more. /sleep is visible and read
-whenever /.sleep holds no valid image — i.e. on any card that has no /.sleep.
+Where they land: **/sleep-overlay/**, always, and the sleep screen is set to
+**Transparent custom** (CrossPoint 1.6+). One folder for every wallpaper, opaque
+and transparent alike: an opaque PNG paints the whole panel, a transparent one
+lets the page you were reading show through, and the reader picks one at
+random each time. (The firmware looks in /.sleep-overlay first, but since 1.6.x
+`POST /mkdir` refuses dot-prefixed names, so the visible one is the one we can
+make.)
 
 One firmware behaviour worth knowing, handled here: an upload onto an
 existing name is *rejected*, not overwritten, so we delete first and retry.
@@ -56,16 +58,20 @@ from crosspoint_device import (DeviceError, delete, find_device, list_dir, mkdir
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DIR = REPO_ROOT / "workspace" / "wallpapers" / "build"
 
-SLEEP_DIR = "/sleep"
+SLEEP_DIR = "/sleep-overlay"
 
 # SLEEP_SCREEN_MODE in src/CrossPointSettings.h; the web settings key is
-# "sleepScreen" and takes the enum index.
-SLEEP_MODE_CUSTOM = 2
+# "sleepScreen" and takes the enum index. TRANSPARENT_CUSTOM is new in 1.6.
+SLEEP_MODE_OVERLAY = 7
+
+# What the overlay scan opens (findNextValidSleepImage): PNG, and BMP too.
+WALLPAPER_SUFFIXES = (".png", ".bmp")
 
 
-def bmps_in(host: str, path: str) -> list:
+def wallpapers_in(host: str, path: str) -> list:
     return [f for f in list_dir(host, path)
-            if not f.get("isDirectory") and f.get("name", "").lower().endswith(".bmp")]
+            if not f.get("isDirectory")
+            and f.get("name", "").lower().endswith(WALLPAPER_SUFFIXES)]
 
 
 def choose_dir(host: str, create: bool = True) -> str:
@@ -75,8 +81,8 @@ def choose_dir(host: str, create: bool = True) -> str:
     return SLEEP_DIR
 
 
-def set_custom_mode(host: str) -> bool:
-    return set_settings(host, {"sleepScreen": SLEEP_MODE_CUSTOM})
+def set_overlay_mode(host: str) -> bool:
+    return set_settings(host, {"sleepScreen": SLEEP_MODE_OVERLAY})
 
 
 def main() -> int:
@@ -94,7 +100,7 @@ def main() -> int:
     ap.add_argument("--replace", action="store_true",
                     help="delete the wallpapers already on the device first")
     ap.add_argument("--no-set-mode", action="store_true",
-                    help="do not switch the sleep screen to Custom")
+                    help="do not switch the sleep screen to Transparent custom")
     ap.add_argument("--json", action="store_true",
                     help="report as JSON on stdout instead of prose — one "
                          "record per file, so a caller can say which ones "
@@ -121,7 +127,7 @@ def main() -> int:
             parent, _, name = args.dir.rstrip("/").rpartition("/")
             mkdir(host, parent or "/", name)
         report["target"] = target
-        present = bmps_in(host, target)
+        present = wallpapers_in(host, target)
 
         if args.list:
             report["ok"] = True
@@ -139,12 +145,12 @@ def main() -> int:
         for item in inputs:
             if item.is_dir():
                 sources += sorted(p for p in item.iterdir()
-                                  if p.suffix.lower() == ".bmp")
+                                  if p.suffix.lower() in WALLPAPER_SUFFIXES)
             elif item.is_file():
                 sources.append(item)
         if not sources:
             where = ", ".join(str(i) for i in inputs)
-            report["error"] = f"no .bmp files in {where}"
+            report["error"] = f"no .png or .bmp files in {where}"
             if args.json:
                 json.dump(report, sys.stdout, ensure_ascii=False)
             else:
@@ -168,7 +174,9 @@ def main() -> int:
             try:
                 if src.name in on_device:
                     delete(host, f"{target}/{src.name}")
-                upload(host, target, src, content_type="image/bmp")
+                upload(host, target, src,
+                       content_type=("image/png" if src.suffix.lower() == ".png"
+                                     else "image/bmp"))
                 item["ok"] = True
                 say(f"  {src.name}  ({src.stat().st_size // 1024} KB)")
             except DeviceError as exc:
@@ -180,14 +188,14 @@ def main() -> int:
             report["items"].append(item)
 
         if not args.no_set_mode:
-            report["sleep_mode_set"] = set_custom_mode(host)
+            report["sleep_mode_set"] = set_overlay_mode(host)
             if report["sleep_mode_set"]:
-                say("\nsleep screen set to Custom")
+                say("\nsleep screen set to Transparent custom")
             else:
                 say("\ncould not set the sleep screen mode — do it on the device: "
-                    "Settings -> Display -> Sleep Screen -> Custom")
+                    "Settings -> Display -> Sleep Screen -> Transparent custom")
         else:
-            say("\nSleep screen must be set to Custom for these to show: "
+            say("\nSleep screen must be set to Transparent custom for these to show: "
                 "Settings -> Display -> Sleep Screen")
 
         say("Leave the File Transfer screen and let it sleep.")

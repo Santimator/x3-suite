@@ -390,6 +390,30 @@ rule at 480px width (`prepare.py`).
 
 ## The sleep screen (wallpaper)
 
+### Transparent custom — what the suite uses since 1.6
+
+*Source-confirmed against 1.6.5 (`SleepActivity.cpp`:
+`renderTransparentCustomSleepScreen`, `tryRenderTransparentOverlayBmp`,
+`renderTransparentOverlayPng`; `PngToFramebufferConverter.cpp`;
+`DirectPixelWriter.h`). **Device-confirmed 2026-10** on an X3 running 1.6.5,
+with hand-made test files and old wallpapers, as noted per row.*
+
+Sleep Screen = **Transparent custom** (enum index **7**, new in 1.6) draws one
+image *over the current screen* — the page you were reading — instead of
+clearing it first. `tools/wallpaper-maker/` targets this mode only: opaque and
+transparent wallpapers share one folder and the reader picks among them.
+
+| What | Requirement |
+|---|---|
+| Where | `/sleep-overlay.bmp`, then `/sleep-overlay.png` at the root (either wins outright); else `/.sleep-overlay/`, else `/sleep-overlay/`, one file at random, avoiding recent ones. The suite uses `/sleep-overlay/` — `/mkdir` refuses dot names. **Device-confirmed** |
+| Formats | `.png` and `.bmp`, dot names skipped |
+| **PNG** | Decoded on-device: bit depth 8, or 1/2/4 for grey and indexed; palette grey `(77r+150g+29b) >> 8`, alpha from tRNS. **No dithering** — each pixel is `grey >> 6`, so off-level greys round *down*. A pixel draws when alpha ≥ 8 and above a 4x4 Bayer threshold: partial alpha is a stipple, not a blend. With an alpha line, **white is written** — an opaque white pixel erases the page. **Device-confirmed:** an opaque indexed PNG covered the page completely, a transparent one showed it exactly through its clear parts |
+| **BMP, 32-bit with alpha** | Same draw rule as PNG, BGRA, but only taken when at least one pixel is non-opaque — a file whose alpha is 255 everywhere falls to the plain-BMP route below. **Device-confirmed** to draw like the PNG, a little slower, at 1.7 MB per panel |
+| **Plain BMP** | Drawn over the page with white *skipped*: white is transparent whether you meant it or not. **Device-observed: on the X3 the greys ghost the page as well** — text shows faintly through dark and mid greys, not only through white. Inferred cause: the grey levels are a differential nudge over a black/white base that kept the page, so pixels that were text land on a different grey than pixels that were paper. Whatever the cause, plain BMPs do not belong in this folder |
+| Speed | PNG went to sleep a little faster than either BMP, by eye (device-observed, not timed) |
+
+### Custom — the BMP route, for reference
+
 *Source-confirmed against the firmware (`src/activities/boot_sleep/SleepActivity.cpp`,
 `lib/GfxRenderer/Bitmap.cpp`, `lib/GfxRenderer/BitmapHelpers.cpp`,
 `lib/FsHelpers/FsHelpers.cpp`), tags 1.5.0 and master @ 2026-08 — byte-identical
@@ -406,7 +430,7 @@ pushes them.
 |---|---|
 | Format | **BMP only.** The folder scan filters on `hasBmpExtension` (case-insensitive) and opens nothing else |
 | `.pxc` | **Not a wallpaper format** — it is the EPUB reader's *pixel cache* (`lib/Epub/Epub/converters/PixelCache.h`), written beside a decoded JPEG. Web converters that offer `.pxc` for a sleep screen are wrong for this firmware; the file is skipped in silence |
-| Where | A single `/sleep.bmp` at the root wins; else `/.sleep/` if it holds a valid image, else `/sleep/` (one file picked at random per sleep). Since 1.6.x `POST /mkdir` refuses dot-prefixed names (403), so **the suite uses `/sleep` only** |
+| Where | A single `/sleep.bmp` at the root wins; else `/.sleep/` if it holds a valid image, else `/sleep/` (one file picked at random per sleep). Since 1.6.x `POST /mkdir` refuses dot-prefixed names (403). The suite no longer writes here: it uses Transparent custom, above |
 | Names | Anything starting with `.` is skipped inside those folders, whatever it holds |
 | Enabled by | Settings → Display → Sleep Screen = **Custom** (enum index 2; `COVER` draws the open book's cover instead, `COVER_CUSTOM` does both by context) |
 | Bit depths accepted | 1, 2, 4, 8, 24, 32; `BI_RGB` only (`BI_BITFIELDS` for 32) |

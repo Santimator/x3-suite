@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Many wallpapers as one small picture, numbered so you can point at them.
 
-    contact_sheet.py OUT.png a.bmp b.bmp c.bmp
-    contact_sheet.py OUT.png workspace/wallpapers/build --start 25
+    contact_sheet.py OUT.png a.png b.jpg c.bmp
+    contact_sheet.py OUT.png workspace/wallpapers --start 25
 
-Wallpapers are all exactly 528x792, so a sheet of them is a clean 2:3 grid with
-no letterboxing to arrange around. Each cell carries its **index**, drawn on the
+Every cell is 2:3, the panel's shape. A built wallpaper fills it exactly; an
+original photo of any other shape is fitted inside it on the sheet's ground,
+so what you see is the picture, not a crop of it. Each cell carries its **index**, drawn on the
 image, because a contact sheet you cannot point at is only decoration: the
 caller puts numbered buttons underneath and the two line up.
 
@@ -32,7 +33,7 @@ import json
 import sys
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
 # A cell wide enough to recognise a photograph you took, small enough that two
 # dozen fit in an image Telegram will not recompress into mush.
@@ -53,6 +54,21 @@ def _font():
         return ImageFont.load_default()
 
 
+def _thumb(src: Path) -> Image.Image:
+    """One cell: rotated as the camera meant, flattened onto white (a
+    transparent wallpaper's clear parts are where the page shows), fitted."""
+    img = Image.open(src)
+    img.draft("RGB", (CELL_W * 2, CELL_H * 2))     # JPEG: decode small, fast
+    img = ImageOps.exif_transpose(img)
+    rgba = img.convert("RGBA")
+    flat = Image.new("RGBA", rgba.size, (255, 255, 255, 255))
+    img = Image.alpha_composite(flat, rgba).convert("L")
+    img.thumbnail((CELL_W, CELL_H), Image.LANCZOS)
+    cell = Image.new("L", (CELL_W, CELL_H), BACKGROUND)
+    cell.paste(img, ((CELL_W - img.width) // 2, (CELL_H - img.height) // 2))
+    return cell
+
+
 def build(files: list, dest: Path, *, start: int = 1, cols: int = 8) -> dict:
     files = [Path(f) for f in files]
     rows = (len(files) + cols - 1) // cols
@@ -70,8 +86,7 @@ def build(files: list, dest: Path, *, start: int = 1, cols: int = 8) -> dict:
         x = MARGIN + col * (CELL_W + GAP)
         y = MARGIN + row * (CELL_H + LABEL_H + GAP)
         try:
-            thumb = Image.open(src).convert("L").resize((CELL_W, CELL_H),
-                                                        Image.LANCZOS)
+            thumb = _thumb(src)
         except Exception:
             # An unreadable file still gets a cell, so the numbering never
             # shifts under the buttons that refer to it.
@@ -100,7 +115,7 @@ def main(argv=None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out", type=Path)
     ap.add_argument("inputs", nargs="+", type=Path,
-                    help="BMPs, or a folder of them")
+                    help="images, or a folder of them")
     ap.add_argument("--start", type=int, default=1,
                     help="number the first cell from here (for later pages)")
     ap.add_argument("--cols", type=int, default=8)
@@ -109,8 +124,9 @@ def main(argv=None) -> int:
     files = []
     for item in args.inputs:
         if item.is_dir():
-            files += sorted(p for p in item.iterdir()
-                            if p.suffix.lower() == ".bmp")
+            files += sorted(p for p in item.iterdir() if p.is_file()
+                            and p.suffix.lower() in (".png", ".bmp", ".jpg",
+                                                     ".jpeg", ".webp"))
         elif item.is_file():
             files.append(item)
     if not files:

@@ -2,7 +2,7 @@
 """Turn any image into an X3 sleep-screen wallpaper. No questions asked.
 
 Drop pictures in `workspace/wallpapers/`, run this, collect
-`workspace/wallpapers/build/*.bmp`. That is the whole interface: every choice
+`workspace/wallpapers/build/*.png`. That is the whole interface: every choice
 below is made for you, because every one of them has a right answer on this
 device and none of them is a matter of taste you should have to hold in your
 head at 11pm.
@@ -23,11 +23,18 @@ What comes out, and why each part of it:
                          path (--mat waves), so the picture appears to carry on
                          in all four directions through rippled glass; --mat
                          edges is the quiet version, a flat level per sector.
-  4-bpp indexed BMP      BMP because the sleep screen reads nothing else — not
-                         PNG, not JPEG, and not .pxc, which is the EPUB reader's
-                         internal pixel cache and has never been a wallpaper
-                         format. Indexed on the panel's own four states, so the
-                         firmware maps it straight through and quantises nothing.
+  indexed PNG            For the *Transparent custom* sleep mode, which reads
+                         /sleep-overlay/ and takes PNG as well as BMP. PNG
+                         because it is the only overlay format that is small
+                         (tens of KB, against 1.7 MB for a 32-bit BMP) and
+                         paints white: with an alpha line the firmware writes
+                         every opaque pixel, white included, so an opaque
+                         wallpaper hides the page. A plain BMP there leaves
+                         white unpainted and ghosts the page through its greys.
+                         Indexed on the panel's own four states (plus one fully
+                         transparent entry with --transparent), so the firmware
+                         maps each pixel straight through: grey >> 6, no
+                         dithering on that path.
   CrossPoint's own       We reproduce the reader's quantiser rather than invent
   quantiser, run here    one: crosspoint_bmp.firmware_quantise is a port of its
                          AtkinsonDitherer. The panel therefore gets exactly the
@@ -50,7 +57,8 @@ Usage:
   make_wallpaper.py                       # workspace/wallpapers/ -> .../build/
   make_wallpaper.py photo.jpg             # one file, same output folder
   make_wallpaper.py shots/ --out /tmp/w   # anywhere in, anywhere out
-  make_wallpaper.py photo.jpg --preview   # also write a PNG you can look at
+  make_wallpaper.py photo.jpg --preview   # also previews/<name>.png, as the panel shows it
+  make_wallpaper.py art.png --transparent # white (or the source's alpha) shows the page
   make_wallpaper.py small.png --waves     # ripple a small one out to the edges
 
 Then get them onto the reader with `push_wallpaper.py`, which is the part OPDS
@@ -67,12 +75,15 @@ import random
 import re
 import struct
 import sys
+import zlib
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageOps, ImageStat
+from PIL import (Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps,
+                 ImageStat)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import crosspoint_bmp as cp                                  # noqa: E402
+import crosspoint_overlay as co                              # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -144,6 +155,23 @@ def load_grayscale(path: Path) -> Image.Image:
         bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
         img = Image.alpha_composite(bg, img)
     return img.convert("L")
+
+
+def source_alpha(path: Path) -> Image.Image | None:
+    """The source's own transparency, if it has any worth keeping.
+
+    Same EXIF rotation as `load_grayscale`, so the two stay aligned through
+    every crop and resize after. None when the image has no alpha band, or has
+    one that is opaque everywhere — which is most PNGs that carry one at all.
+    """
+    img = Image.open(path)
+    img.load()
+    img = ImageOps.exif_transpose(img)
+    if img.mode not in ("RGBA", "LA", "PA") and not (
+            img.mode == "P" and "transparency" in img.info):
+        return None
+    alpha = img.convert("RGBA").getchannel("A")
+    return alpha if alpha.getextrema()[0] < 255 else None
 
 
 def scale_to_panel(img: Image.Image, mode: str = "cover") -> Image.Image:
@@ -549,84 +577,116 @@ def dither(img: Image.Image, algorithm: str = "floyd") -> bytearray:
     return out
 
 
-def encode_bmp4(levels: bytearray, w: int, h: int) -> bytes:
-    """Pack level indices into a 4-bpp indexed BMP the firmware maps straight
-    through.
+def transparency(src: Path, levels: bytearray, *, fit: str = "cover") -> bytearray:
+    """Which panel pixels let the page through, for `--transparent`. 1 = clear.
 
-    Written by hand rather than by Pillow (which cannot emit 4-bpp at all), and
-    written to a *40-byte* BITMAPINFOHEADER on purpose: the firmware reads the
-    palette from the fixed offset right after those 40 bytes, so a V4/V5 header
-    would feed it colour-space fields as if they were colours. Rows go bottom-up,
-    the ordinary BMP convention, so a desktop viewer shows the same image the
-    reader will.
+    Two sources of transparency, and the rule is the one that keeps a
+    deliberate cut-out intact:
+
+      the source has alpha      inside the picture, *its* alpha decides (cut
+                                at half); white there stays white. The mat
+                                around a small one still clears where white.
+      it has none               every white pixel clears, mat included — line
+                                art on a white ground becomes line art on the
+                                page.
+
+    Binary on purpose. The firmware would turn partial alpha into a Bayer
+    stipple, which on four levels reads as dirt along every soft edge.
     """
-    row_bytes = (w * 4 + 31) // 32 * 4
-
-    # 16 entries, not 4: some viewers assume a full 2**bpp table. The unused
-    # twelve are black, which is also a native level, so the firmware's
-    # native-palette test still passes.
-    palette = bytearray()
-    for i in range(16):
-        v = LEVELS[i] if i < 4 else 0
-        palette += bytes((v, v, v, 0))
-
-    off_bits = 14 + 40 + len(palette)
-    pixel_bytes = row_bytes * h
-
-    header = struct.pack("<2sIHHI", b"BM", off_bits + pixel_bytes, 0, 0, off_bits)
-    dib = struct.pack("<IiiHHIIiiII", 40, w, h, 1, 4, 0, pixel_bytes,
-                      2835, 2835, 16, 16)
-
-    rows = []
-    for y in range(h - 1, -1, -1):          # bottom-up
-        base = y * w
-        row = bytearray(row_bytes)
-        for x in range(0, w, 2):
-            hi = levels[base + x]
-            lo = levels[base + x + 1] if x + 1 < w else 0
-            row[x >> 1] = (hi << 4) | lo
-        rows.append(bytes(row))
-
-    return bytes(header) + bytes(dib) + bytes(palette) + b"".join(rows)
+    mask = bytearray(1 if v == 3 else 0 for v in levels)
+    alpha = source_alpha(src)
+    if alpha is None:
+        return mask
+    alpha = scale_to_panel(alpha, fit)              # same geometry as the picture
+    ox, oy = (PANEL_W - alpha.width) // 2, (PANEL_H - alpha.height) // 2
+    data = alpha.tobytes()
+    for y in range(alpha.height):
+        row, src_row = (oy + y) * PANEL_W + ox, y * alpha.width
+        for x in range(alpha.width):
+            mask[row + x] = 1 if data[src_row + x] < 128 else 0
+    return mask
 
 
-def encode_bmp24(img: Image.Image) -> bytes:
-    """A plain 24-bit greyscale BMP: continuous tone, for the reader to quantise.
+def _png_chunk(kind: bytes, body: bytes) -> bytes:
+    return (struct.pack(">I", len(body)) + kind + body
+            + struct.pack(">I", zlib.crc32(kind + body) & 0xFFFFFFFF))
 
-    Not what the converter ships — `encode_bmp4` is — but kept because it is the
-    other legitimate shape, it is what the gate uses to demonstrate that an
-    undithered file really is re-dithered on-device, and it is the fallback if
-    the port in `crosspoint_bmp` ever drifts from the firmware. Six times the
-    bytes, and the ESP32 does the arithmetic on every sleep.
+
+def encode_png(levels: bytearray, w: int, h: int,
+               clear: bytearray | None = None) -> bytes:
+    """An indexed PNG the firmware maps straight through.
+
+    Written by hand, like the BMP encoder, so every byte is ours and the file
+    is identical run to run whatever Pillow version is installed. Palette
+    entries 0-3 are the four levels as exact greys — the firmware's
+    (77r + 150g + 29b) >> 8 gives back the same value, and >> 6 the level. With
+    `clear`, entry 4 is white at alpha 0 (tRNS), and every other entry alpha
+    255, so opaque white is *painted*. 2 bits per pixel when four entries are
+    enough, 4 when the fifth is needed; filter 0 throughout, which on packed
+    low-depth rows compresses as well as the adaptive filters and decodes on
+    the device's cheapest path.
     """
-    w, h = img.size
-    row_bytes = (w * 3 + 3) // 4 * 4
-    px = img.tobytes()
+    bits = 4 if clear is not None else 2
+    per_byte = 8 // bits
+    palette = b"".join(bytes((v, v, v)) for v in LEVELS)
+    if clear is not None:
+        palette += bytes((255, 255, 255))
 
-    off_bits = 14 + 40
-    pixel_bytes = row_bytes * h
-    header = struct.pack("<2sIHHI", b"BM", off_bits + pixel_bytes, 0, 0, off_bits)
-    dib = struct.pack("<IiiHHIIiiII", 40, w, h, 1, 24, 0, pixel_bytes,
-                      2835, 2835, 0, 0)
-
-    rows = []
-    for y in range(h - 1, -1, -1):              # bottom-up, as BMP wants
+    raw = bytearray()
+    for y in range(h):
+        raw.append(0)                               # filter: none
         base = y * w
-        row = bytearray(row_bytes)
-        for x in range(w):
-            v = px[base + x]
-            row[x * 3] = row[x * 3 + 1] = row[x * 3 + 2] = v
-        rows.append(bytes(row))
+        for x0 in range(0, w, per_byte):
+            byte = 0
+            for k in range(per_byte):
+                x = x0 + k
+                v = 0
+                if x < w:
+                    v = 4 if clear is not None and clear[base + x] else levels[base + x]
+                byte |= v << (8 - bits * (k + 1))
+            raw.append(byte)
 
-    return bytes(header) + bytes(dib) + b"".join(rows)
+    out = b"\x89PNG\r\n\x1a\n"
+    out += _png_chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, bits, 3, 0, 0, 0))
+    out += _png_chunk(b"PLTE", palette)
+    if clear is not None:
+        out += _png_chunk(b"tRNS", bytes((255, 255, 255, 255, 0)))
+    out += _png_chunk(b"IDAT", zlib.compress(bytes(raw), 9))
+    out += _png_chunk(b"IEND", b"")
+    return out
 
 
-def levels_to_image(levels: bytearray, w: int, h: int) -> Image.Image:
-    """The dithered result as an ordinary grey PNG — what the panel will show,
-    for looking at on a computer."""
-    img = Image.new("L", (w, h))
-    img.putdata([LEVELS[v] for v in levels])
-    return img
+# Shown through a transparent preview, so the cut-out reads as what it is: a
+# window onto the page you were reading. Any text would do; this is long enough
+# to fill the panel and has no accents the default font might lack.
+SAMPLE_TEXT = (
+    "It was the best of times, it was the worst of times, it was the age of "
+    "wisdom, it was the age of foolishness, it was the epoch of belief, it was "
+    "the epoch of incredulity, it was the season of Light, it was the season "
+    "of Darkness, it was the spring of hope, it was the winter of despair, we "
+    "had everything before us, we had nothing before us, we were all going "
+    "direct to Heaven, we were all going direct the other way. ") * 4
+
+
+def sample_page() -> bytes:
+    """A panel of plain text, for previews of a transparent wallpaper."""
+    page = Image.new("L", (PANEL_W, PANEL_H), 255)
+    draw = ImageDraw.Draw(page)
+    try:
+        font = ImageFont.load_default(size=19)
+    except TypeError:                               # Pillow < 10.1
+        font = ImageFont.load_default()
+    line, y = "", 36
+    for word in SAMPLE_TEXT.split():
+        trial = f"{line} {word}".strip()
+        if draw.textlength(trial, font=font) > PANEL_W - 72:
+            draw.text((36, y), line, font=font, fill=0)
+            line, y = word, y + 30
+            if y > PANEL_H - 60:
+                break
+        else:
+            line = trial
+    return page.tobytes()
 
 
 def compose(src: Path, *, fit: str = "cover", mat_style: str = "waves",
@@ -682,21 +742,28 @@ def probe(src: Path, *, fit: str = "cover") -> dict:
 
 def convert(src: Path, out_dir: Path, *, fit: str = "cover",
             mat_style: str = "waves", algorithm: str = "device",
-            preview: bool = False) -> Path:
-    """Write the wallpaper: always a 4-bpp file the panel maps straight through.
+            transparent: bool = False, preview: bool = False) -> Path:
+    """Write the wallpaper: an indexed PNG the panel maps straight through.
 
-    Only the choice of *who quantises* varies. The default reproduces the
-    reader's own algorithm, so the panel gets the picture it would have computed
-    from a full-tone file — without being handed six times the bytes or having
-    to do the arithmetic on a 240 MHz core every time it sleeps.
+    Opaque by default — every pixel painted, the page hidden. `transparent`
+    clears white (or follows the source's own alpha; see `transparency`).
+    `preview` also writes previews/<name>.png: what the glass shows, over a
+    page of text when there is anything to see through. It goes in a
+    subfolder so a push of this folder never mistakes it for a wallpaper.
     """
     levels = render(src, fit=fit, mat_style=mat_style, algorithm=algorithm)
+    clear = transparency(src, levels, fit=fit) if transparent else None
 
     out_dir.mkdir(parents=True, exist_ok=True)
-    dest = out_dir / (sanitize_stem(src.stem) + ".bmp")
-    dest.write_bytes(encode_bmp4(levels, PANEL_W, PANEL_H))
+    dest = out_dir / (sanitize_stem(src.stem) + ".png")
+    dest.write_bytes(encode_png(levels, PANEL_W, PANEL_H, clear))
     if preview:
-        levels_to_image(levels, PANEL_W, PANEL_H).save(dest.with_suffix(".png"))
+        shown = co.composite(
+            [None if clear and clear[i] else v for i, v in enumerate(levels)],
+            sample_page() if clear else None)
+        (out_dir / "previews").mkdir(exist_ok=True)
+        Image.frombytes("L", (PANEL_W, PANEL_H), shown).save(
+            out_dir / "previews" / dest.name)
     return dest
 
 
@@ -740,8 +807,13 @@ def main() -> int:
                          "reader's own quantiser here, so the panel gets what "
                          "it would have computed (default). floyd / atkinson / "
                          "none: our own error diffusion instead")
+    ap.add_argument("--transparent", action="store_true",
+                    help="let the page show through: white clears, or the "
+                         "source's own alpha decides when it has one. Default "
+                         "is opaque — every pixel painted")
     ap.add_argument("--preview", action="store_true",
-                    help="also write a PNG of what is in the BMP, to look at")
+                    help="also write previews/<name>.png: what the panel shows, "
+                         "over a page of text when transparent")
     ap.add_argument("--probe", action="store_true",
                     help="write nothing; report as JSON whether each image "
                          "fills the panel or needs a mat, so a caller can ask "
@@ -778,12 +850,14 @@ def main() -> int:
     for src in sources:
         try:
             dest = convert(src, out_dir, fit=args.fit, mat_style=args.mat_style,
-                           algorithm=args.dither, preview=args.preview)
+                           algorithm=args.dither, transparent=args.transparent,
+                           preview=args.preview)
         except Exception as exc:                      # unreadable / truncated / odd
             print(f"  {src.name}: FAILED — {exc}", file=sys.stderr)
             continue
         how = ("4 levels, the reader's own quantiser" if args.dither == "device"
                else f"4 levels, our {args.dither}")
+        how += ", transparent" if args.transparent else ", opaque"
         print(f"  {src.name} -> {dest}  ({PANEL_W}x{PANEL_H}, {how}, "
               f"{dest.stat().st_size // 1024} KB)")
 

@@ -7,24 +7,25 @@ Run after changing anything in this directory:
 
 A wallpaper has three ways to fail, and only the first is visible from a
 desktop: the file is broken, the device never opens it, or the device opens it
-and *redoes the work* — re-dithering our four-level image with the ESP32's
-integer approximation, which is exactly what we spent the CPU here to avoid.
-Nothing in a normal image-validity check catches the second or third, so this
-grades every output through `crosspoint_bmp`, a port of the firmware's own
-folder scan and BMP reader.
+and draws something other than what we computed — a grey that lands on the
+wrong level, a white that lets the page through. Nothing in a normal
+image-validity check catches the second or third, so this grades every output
+through `crosspoint_overlay`, a port of the firmware's overlay folder scan, PNG
+decoder and draw rule.
 
 Checks, in order:
   1. sources of every awkward shape convert at all
   2. the firmware's folder scan would open the file we wrote
-  3. its BMP parser accepts the headers, and reads the palette we meant
-  4. the palette is *native*, so the device maps pixels through and dithers none
-  5. the file decodes, through the device's own row unpacking, to the exact
-     levels we computed — bit for bit
-  6. it lands at 0,0 unscaled: the panel's size, so nothing is resampled
-  7. a source too small to fill is framed, and the frame draws flat
-  8. the same source converts to a byte-identical file, twice
-  9. the two failure modes we designed around really are failure modes
- 10. the push protocol drives the firmware's file-transfer API correctly
+  3. its PNG decoder accepts the bit depth and colour type
+  4. every grey is an exact level, so `grey >> 6` is the level we chose
+  5. the file draws, through the device's own rule, to the exact levels we
+     computed — and, opaque, paints every pixel, white included
+  6. transparent: exactly the pixels we meant clear, a cut-out's white kept
+  7. it lands at 0,0 unscaled: the panel's size, so nothing is resampled
+  8. a source too small to fill is framed, and the frame draws flat
+  9. the same source converts to a byte-identical file, twice
+ 10. the failure modes we designed around really are failure modes
+ 11. the push protocol drives the firmware's file-transfer API correctly
 """
 
 from __future__ import annotations
@@ -33,7 +34,6 @@ import io
 import os
 import json
 import random
-import struct
 import subprocess
 import sys
 import tempfile
@@ -45,6 +45,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import crosspoint_bmp as cp
+import crosspoint_overlay as co
 import make_wallpaper as mw
 from PIL import Image, ImageDraw
 
@@ -121,6 +122,19 @@ def make_sources(directory: Path) -> list:
     made.append(directory / "rotated.jpg")
 
     return made
+
+
+def make_cutout(directory: Path) -> Path:
+    """A transparent PNG whose opaque part is mostly *white*: the case where
+    "white clears" and "the source's alpha decides" give different answers.
+    The white has to stay painted; only what the source made clear may clear."""
+    img = Image.new("RGBA", (528, 792), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((100, 200, 428, 592), fill=(255, 255, 255, 255),
+                   outline=(0, 0, 0, 255), width=8)
+    path = directory / "cutout.png"
+    img.save(path)
+    return path
 
 
 # ------------------------------------------------------- a pretend X3 ---------
@@ -233,51 +247,69 @@ def serve(root: Path):
 
 # ------------------------------------------------------------------ checks ---
 
-def grade_output(src: Path, bmp: Path, algorithm: str = "device") -> None:
-    """Grade a written wallpaper through the firmware's own reader.
+def grade_output(src: Path, png: Path, algorithm: str = "device") -> None:
+    """Grade an opaque wallpaper through the firmware's own overlay path.
 
-    Both routes ship a 4-bpp file with a native palette, so both get the strong
-    contract: the file must decode back to exactly the levels chosen here. Only
-    *who chose them* differs — the reader's own quantiser by default, our error
-    diffusion otherwise.
+    The strong contract: through the device's decoder and draw rule the file
+    must come back as exactly the levels chosen here, on every pixel — which
+    for an opaque one includes painting white rather than leaving it to the
+    page.
     """
-    data = bmp.read_bytes()
-    label = bmp.name
-
-    if not check(f"{label}: the folder scan would open it", cp.sleep_scan_accepts(bmp.name)):
+    label = png.name
+    if not check(f"{label}: the overlay folder scan would open it",
+                 co.scan_accepts(png.name)):
         return
-
     try:
-        hdr = cp.parse_headers(data)
-    except cp.BmpReaderError as exc:
-        check(f"{label}: the device's BMP parser accepts it", False, str(exc))
+        img = co.decode(png.read_bytes())
+    except co.PngError as exc:
+        check(f"{label}: the device's PNG decoder accepts it", False, str(exc))
         return
-    check(f"{label}: the device's BMP parser accepts it", True)
+    check(f"{label}: the device's PNG decoder accepts it", True)
 
     check(f"{label}: exactly the panel, so nothing is resampled",
-          (hdr.width, hdr.height) == (cp.PANEL_W, cp.PANEL_H),
-          f"{hdr.width}x{hdr.height}")
-
-    x, y, scaled = cp.placement(hdr)
+          (img["width"], img["height"]) == (co.PANEL_W, co.PANEL_H),
+          f"{img['width']}x{img['height']}")
+    x, y, scaled = co.placement(img["width"], img["height"])
     check(f"{label}: lands at 0,0 unscaled", (x, y, scaled) == (0, 0, False),
           f"x={x} y={y} scaled={scaled}")
+    check(f"{label}: indexed, 2 bits — the smallest shape that holds four levels",
+          img["colour_type"] == co.INDEXED and img["bits"] == 2,
+          f"type={img['colour_type']} bits={img['bits']}")
+    check(f"{label}: every grey is an exact level, so >> 6 is the level we chose",
+          set(img["grey"]) <= {0, 85, 170, 255}, str(sorted(set(img["grey"]))[:8]))
 
-    check(f"{label}: 4 bpp, greyscale pipeline", hdr.bpp == 4 and hdr.has_greyscale,
-          f"bpp={hdr.bpp}")
-    check(f"{label}: palette is native — the device re-dithers nothing",
-          hdr.native_palette)
-
-    # The one that matters on this route: recompute the pipeline, then read the
-    # file back the way the firmware reads it. Equal means the panel gets our
-    # pixels and nothing else.
     intended = mw.render(src, algorithm=algorithm)
-    try:
-        got = cp.decode_levels(data, hdr)
-    except cp.BmpReaderError as exc:
-        check(f"{label}: decodes to the levels we computed", False, str(exc))
-        return
-    same = len(got) == len(intended) and all(a == b for a, b in zip(got, intended))
-    check(f"{label}: decodes to the levels we computed", same)
+    got = co.panel_levels(img)
+    check(f"{label}: paints every pixel, white included — the page stays hidden",
+          None not in got)
+    check(f"{label}: draws to the levels we computed",
+          len(got) == len(intended) and all(a == b for a, b in zip(got, intended)))
+
+
+def grade_transparent(src: Path, out_dir: Path, *, expect: str) -> None:
+    """Grade a --transparent wallpaper: clear exactly where we meant, painted
+    everywhere else at exactly our levels."""
+    png = mw.convert(src, out_dir, transparent=True)
+    label = f"{png.name} --transparent"
+    img = co.decode(png.read_bytes())
+    levels = mw.render(src)
+    clear = mw.transparency(src, levels)
+    check(f"{label}: alpha is all or nothing, so no edge turns to stipple",
+          set(img["alpha"]) <= {0, 255}, str(sorted(set(img["alpha"]))))
+    got = co.panel_levels(img)
+    want = [None if clear[i] else v for i, v in enumerate(levels)]
+    check(f"{label}: clear exactly where meant, our levels everywhere else",
+          got == want)
+    whites = sum(1 for v in levels if v == 3)
+    cleared = sum(clear)
+    if expect == "white":
+        check(f"{label}: no source alpha, so white is what clears",
+              cleared == whites and cleared > 0, f"{cleared} clear, {whites} white")
+    else:
+        kept = sum(1 for i, v in enumerate(levels) if v == 3 and not clear[i])
+        check(f"{label}: the source's alpha decides — its white stays painted",
+              kept > 0 and 0 < cleared < len(levels),
+              f"{kept} white kept, {cleared} clear")
 
 
 def _block(levels: list, x: int, y: int, n: int = 16) -> set:
@@ -474,37 +506,32 @@ def check_tuning() -> None:
 
 
 def check_designed_failures() -> None:
-    """The two traps the encoder is shaped around. If these ever stop failing,
+    """The traps the encoder is shaped around. If these ever stop failing,
     the reasoning in make_wallpaper.py has gone stale and should be re-read."""
-    # Something with all four levels in it, so a misread cannot coincide with
-    # the truth the way an all-black image would.
-    levels = bytearray((x + y) % 4 for y in range(cp.PANEL_H) for x in range(cp.PANEL_W))
-    good = mw.encode_bmp4(levels, cp.PANEL_W, cp.PANEL_H)
+    # 1. A grey that is not an exact level. The overlay path does not choose
+    #    the nearest level, it shifts: 60 is nearer 85 than 0, and lands black.
+    check("a grey of 60 lands black, not on the nearest level (why the palette "
+          "holds exact levels)", (60 >> 6) == 0 and abs(60 - 85) < abs(60 - 0))
 
-    # 1. A real BITMAPV4HEADER: 68 more DIB bytes (masks, colour space, gamma)
-    #    before the palette. The firmware still reads the palette from the fixed
-    #    offset after the first 40, so those fields become the "colours".
-    v4 = bytearray(good)
-    v4[54:54] = bytes(68)
-    struct.pack_into("<I", v4, 14, 108)                       # biSize
-    (off_bits,) = struct.unpack_from("<I", v4, 10)
-    struct.pack_into("<I", v4, 10, off_bits + 68)             # bfOffBits
-    struct.pack_into("<I", v4, 2, len(v4))                    # bfSize
-    try:
-        hdr = cp.parse_headers(bytes(v4))
-        misread = cp.decode_levels(bytes(v4), hdr) != list(levels)
-    except cp.BmpReaderError:
-        misread = True
-    check("a 108-byte DIB header would be misread (why we emit 40)", misread)
-
-    # 2. A 24-bpp file. No palette, so the native test cannot pass and the
-    #    firmware dithers it itself — on an ESP32, over our finished work.
-    grey = Image.new("RGB", (cp.PANEL_W, cp.PANEL_H), (128, 128, 128))
+    # 2. 16-bit PNG: the firmware's decoder refuses it outright.
     buf = io.BytesIO()
-    grey.save(buf, "BMP")
-    hdr24 = cp.parse_headers(buf.getvalue())
-    check("a 24-bpp file would be re-dithered on-device (why we emit 4-bpp)",
-          hdr24.bpp == 24 and not hdr24.native_palette)
+    Image.new("I;16", (8, 8), 1000).save(buf, "PNG")
+    try:
+        co.decode(buf.getvalue())
+        refused = False
+    except co.PngError:
+        refused = True
+    check("a 16-bit PNG is refused by the device's decoder", refused)
+
+    # 3. Partial alpha is not blending: it is a Bayer stipple. Half alpha
+    #    draws half the pixels of a 4x4 tile, at full strength.
+    tile = sum(co.drawn(128, x, y) for y in range(4) for x in range(4))
+    check("half alpha draws a stipple, not a blend (why we cut alpha at half)",
+          tile == 8, f"{tile} of 16")
+
+    # 4. Opaque really is opaque: alpha 255 clears every Bayer threshold.
+    check("alpha 255 draws on every pixel of the Bayer tile",
+          all(co.drawn(255, x, y) for y in range(4) for x in range(4)))
 
 
 def check_push(build_dir: Path) -> None:
@@ -522,23 +549,23 @@ def check_push(build_dir: Path) -> None:
             # Looking must not change anything.
             listed = run("--list")
             check("push: --list leaves the device alone",
-                  listed.returncode == 0 and not (sd / "sleep").exists(),
+                  listed.returncode == 0 and not (sd / "sleep-overlay").exists(),
                   listed.stderr.strip())
 
             first = run()
-            pushed = sorted(p.name for p in (sd / "sleep").glob("*.bmp")) \
-                if (sd / "sleep").is_dir() else []
-            expected = sorted(p.name for p in build_dir.glob("*.bmp"))
-            check("push: creates /sleep and uploads every wallpaper",
+            pushed = sorted(p.name for p in (sd / "sleep-overlay").glob("*.png")) \
+                if (sd / "sleep-overlay").is_dir() else []
+            expected = sorted(p.name for p in build_dir.glob("*.png"))
+            check("push: creates /sleep-overlay and uploads every wallpaper",
                   first.returncode == 0 and pushed == expected,
                   first.stderr.strip() or f"{pushed} != {expected}")
-            check("push: switches the sleep screen to Custom",
-                  FakeDevice.settings.get("sleepScreen") == 2,
+            check("push: switches the sleep screen to Transparent custom",
+                  FakeDevice.settings.get("sleepScreen") == 7,
                   str(FakeDevice.settings))
 
             # The firmware rejects an upload onto an existing name, so a second
             # push must delete first rather than silently doing nothing.
-            marker = sorted((sd / "sleep").glob("*.bmp"))[0]
+            marker = sorted((sd / "sleep-overlay").glob("*.png"))[0]
             marker.write_bytes(b"stale")
             again = run()
             check("push: replaces a file already on the device",
@@ -548,7 +575,7 @@ def check_push(build_dir: Path) -> None:
             cleared = run("--replace")
             check("push: --replace clears the folder first",
                   cleared.returncode == 0
-                  and sorted(p.name for p in (sd / "sleep").glob("*.bmp")) == expected,
+                  and sorted(p.name for p in (sd / "sleep-overlay").glob("*.png")) == expected,
                   cleared.stderr.strip())
 
             # --ip is meant to be a one-off: the address that answered is
@@ -566,20 +593,19 @@ def check_push(build_dir: Path) -> None:
         finally:
             server.shutdown()
 
-    # A card that already has /sleep: the push adds to it rather than failing
-    # on "Folder already exists".
+    # A card that already has /sleep-overlay: the push adds to it rather than
+    # failing on "Folder already exists".
     with tempfile.TemporaryDirectory() as sd_dir:
         sd = Path(sd_dir)
-        (sd / "sleep").mkdir()
-        (sd / "sleep" / "existing.bmp").write_bytes(b"x")
+        (sd / "sleep-overlay").mkdir()
+        (sd / "sleep-overlay" / "existing.bmp").write_bytes(b"x")
         server, host = serve(sd)
         try:
             result = subprocess.run(
                 [sys.executable, str(SCRIPTS / "push_wallpaper.py"), str(build_dir),
                  "--host", host], capture_output=True, text=True, timeout=60)
-            check("push: adds to an existing /sleep",
-                  result.returncode == 0 and not (sd / ".sleep").exists()
-                  and len(list((sd / "sleep").glob("*.bmp"))) > 1,
+            check("push: adds to an existing /sleep-overlay",
+                  result.returncode == 0 and len(list((sd / "sleep-overlay").glob("*.png"))) > 1,
                   result.stderr.strip())
         finally:
             server.shutdown()
@@ -603,16 +629,25 @@ def main() -> int:
             except Exception as exc:
                 check(f"{src.name}: converts", False, str(exc))
 
-        print("\nthrough the device's own reader — the default route:")
-        for src, bmp in outputs:
-            grade_output(src, bmp)
+        print("\nthrough the device's own overlay path — opaque, the default:")
+        for src, png in outputs:
+            grade_output(src, png)
 
-        # The 4-bpp route is still supported and still has to hold its much
-        # stronger contract: the panel gets exactly the pixels we chose.
-        print("\n... and the route that quantises with our own dither (--dither floyd):")
+        print("\n... with the levels chosen by our own dither (--dither floyd):")
         for src in sources[:3]:
-            bmp = mw.convert(src, build / "floyd", algorithm="floyd")
-            grade_output(src, bmp, algorithm="floyd")
+            png = mw.convert(src, build / "floyd", algorithm="floyd")
+            grade_output(src, png, algorithm="floyd")
+
+        print("\n--transparent:")
+        by_name = {src.name: src for src in sources}
+        grade_transparent(by_name["gradient.png"], build / "clear", expect="white")
+        grade_transparent(by_name["split.png"], build / "clear", expect="white")
+        grade_transparent(make_cutout(work), build / "clear", expect="alpha")
+        preview = mw.convert(by_name["split.png"], build / "pv", transparent=True,
+                             preview=True)
+        check("--preview goes in previews/, where a push of the folder never looks",
+              (build / "pv" / "previews" / preview.name).is_file()
+              and [p.name for p in (build / "pv").glob("*.png")] == [preview.name])
 
         print("\nthe mat, on sources too small to fill the panel:")
         check_mat(sources)
@@ -630,10 +665,10 @@ def main() -> int:
         check_designed_failures()
 
         print("\ndeterminism:")
-        for src, bmp in outputs:
-            before = bmp.read_bytes()
+        for src, png in outputs:
+            before = png.read_bytes()
             again = mw.convert(src, build / "again")
-            check(f"{bmp.name}: byte-identical on a second run",
+            check(f"{png.name}: byte-identical on a second run",
                   before == again.read_bytes())
 
         print("\nthe push protocol, against a port of the device's API:")

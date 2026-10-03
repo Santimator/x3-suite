@@ -110,7 +110,7 @@ catalog edit, not device preparation, and the bot says so before writing.
 
 ```
 📚 Library    books the catalog would serve  ┐
-🖼 Wallpapers sleep screens built here       ├ three collections on the server
+🖼 Wallpapers the pictures you sent          ├ three collections on the server
 🔤 Fonts      families in this repo          ┘
 📥 Inbox      files you dropped in workspace/inbox/ by hand
 📲 Device     find it, browse the SD card, its wallpapers and fonts, push
@@ -119,10 +119,13 @@ catalog edit, not device preparation, and the bot says so before writing.
 ```
 
 The first three are deliberately the same shape: a list of what this server
-holds, each item openable, each sendable to the reader. Wallpapers were the odd
-one out for a while — you built one, pushed it, and it vanished from view even
-though the BMP was still sitting in `workspace/wallpapers/build/`. Nothing ever
-cleaned that folder, so the collection already existed; it just had no door.
+holds, each item openable, each sendable to the reader. For wallpapers what the
+server holds is the **originals**, exactly as they arrived in
+`workspace/wallpapers/`. What the reader gets is made from one when it is sent
+— a second or two — and `workspace/wallpapers/build/` holds only what is in the
+queue: a built file is deleted when it lands, or when you unqueue it. No second
+library to drift out of step, and a change in how wallpapers are built (as when
+they moved from BMP to PNG) reaches every picture the next time it goes out.
 
 ### A photo becomes a sleep screen
 
@@ -133,14 +136,26 @@ recompressed to JPEG (and scaled down to ~1280 px on the long side), which
 arrives byte for byte, PNG and alpha channel intact. For an ordinary photo
 either works; for anything meant to be transparent, only the file does.
 
-Send one. The bot asks `make_wallpaper.py --probe` whether the image fills the
-panel, and only then decides what to ask you:
+Send one and it is **kept, and asked about**: *Put it on the reader?* "Just
+keep it" leaves it in 🖼 Wallpapers for later. "Yes" — here, or from the
+picture in 🖼 Wallpapers any time after — walks two short steps:
 
-- **It fills** (528×792 after at most 1.5× enlargement) — built, previewed,
-  and offered with **✓ Queue it**.
-- **It does not** — previewed on plain white, so you can see exactly what is
-  yours and what is filler, with the four mats as buttons: **≈ waves ▣ edges
-  ◌ blur — white**. Tapping one builds *and* queues in the same tap.
+1. **The mat, only if there is one to choose.** The bot asks
+   `make_wallpaper.py --probe` whether the image fills the panel (528×792
+   after at most 1.5× enlargement). If it does, there is nothing to ask. If it
+   does not, all four mats are built for real and come back as **one numbered
+   sheet** — **1 ≈ waves, 2 ▣ edges, 3 ◌ blur, 4 — white** — so you choose by
+   looking.
+2. **Opaque or transparent.** All wallpapers share one folder,
+   `/sleep-overlay`, under the reader's *Transparent custom* sleep mode, which
+   draws each over the page you were reading. ◼ **Opaque** covers it — right
+   for photos. ◻ **Transparent** lets it through wherever the picture is white,
+   or wherever its own alpha says, if it has one — right for drawings. A mat
+   that came out white is clear too, on purpose.
+
+Then it is built into `build/`, previewed as the panel will draw it (over a
+page of sample text, when transparent), and queued. Asking again for the same
+picture replaces the waiting copy rather than queueing two.
 
 The threshold is asked, never copied. "Smaller than 528×792" is the wrong
 test and would misfire on real photos: a 500×750 image is smaller in both
@@ -148,12 +163,12 @@ dimensions and still fills, because it only has to grow 1.06×. `MAX_UPSCALE`
 and `MIN_MAT_AREA` are judgement calls that live in `make_wallpaper.py`, and
 `probe()` exists so this bot can ask rather than re-derive them.
 
-### The wallpapers you have built
+### The wallpapers you have sent
 
-**🖼 Wallpapers** shows them as **one contact sheet** — 24 numbered thumbnails
-in a single image, newest first, with the names and queue marks in the caption
-and numbered buttons underneath. Tap a number for the full-size preview, then
-queue, rename or delete it.
+**🖼 Wallpapers** shows the originals as **one contact sheet** — 24 numbered
+thumbnails in a single image, newest first, with the names and queue marks in
+the caption and numbered buttons underneath. Tap a number for the picture
+itself, then put it on the reader, rename or delete it.
 
 The numbers are the whole design. A sheet you cannot point at is decoration, so
 `contact_sheet.py` draws each cell's index onto it and the buttons carry the
@@ -166,13 +181,11 @@ delete confirmation and made the button look broken. One sheet is one upload
 however many wallpapers there are, and the pacing hack that worked around it is
 gone.
 
-Thumbnails are decoded with Pillow rather than through `crosspoint_bmp`, which
-is the opposite of the rule everywhere else in this repo and deliberate: at
-110 px across, what the firmware would do with the dithering is invisible, and
-Pillow is about eight times faster per file. The *single* preview still goes
-through the port, because that is where "what the panel actually draws" is the
-entire question — including rendering one on demand when the `.png` beside the
-BMP is missing, as it will be for anything built before `--preview`.
+Thumbnails are decoded with Pillow — the sheet shows originals, which are
+ordinary pictures in whatever format they arrived. "What the panel actually
+draws" is answered where it matters: the preview after you choose a mat and a
+mode, and 👁 Preview on the device, both through the port of the firmware's
+own decoder.
 
 **☑ Pick several** turns the numbers into tick boxes *in the same places*, so
 your eye stays on the picture while your thumb works down the row. Tap the ones
@@ -186,13 +199,13 @@ only part that can change. What each sheet is showing is remembered by message
 id, in memory, which means a sheet from before a restart cannot be ticked
 against; it says so instead of acting on the wrong wallpapers.
 
-Queueing the same file twice is refused rather than doubled, since re-sending
-one you already queued is a slip, not an instruction. Renaming takes the
-preview PNG along with it. **📲 On the device** jumps to the folder the reader
-actually reads — and shows *that* as a contact sheet too.
+Deleting or renaming touches the original and nothing beside it. **📲 On the
+device** jumps to the folder the reader actually reads — and shows *that* as a
+contact sheet too.
 
-This is what makes a wiped SD card a non-event: everything you ever built is
-still here, and putting it all back is a few taps.
+This is what makes a wiped SD card a non-event: every picture you ever sent is
+still here, and putting it all back is a few taps — redoing two choices each,
+which is cheaper than keeping a copy of every answer forever.
 
 ### A push session
 
@@ -265,19 +278,20 @@ one is that the device names OPDS downloads `<author> - <title>.epub`, and
 books from other catalogs arrive with names like
 `Historia-de-la-magia-resumen-de-sus-procedimientos-...-Rafael-Urbano.epub`.
 
-**🖼 Wallpapers** jumps straight to `/sleep`, the folder `push_wallpaper.py`
-fills. Not `/.sleep`: since firmware 1.6.x the web API refuses to create a
-dot-prefixed folder, and the bot's own *New folder* refuses one up front.
+**🖼 Wallpapers** jumps straight to `/sleep-overlay`, the folder
+`push_wallpaper.py` fills. Not `/.sleep-overlay`: since firmware 1.6.x the web
+API refuses to create a dot-prefixed folder, and the bot's own *New folder*
+refuses one up front.
 
-Any `.bmp` offers **👁 Preview**, and a folder full of them offers *Preview
-all* — which is the answer to three wallpapers with names that say nothing.
-The picture is rendered by `crosspoint_bmp.py`, the port of the firmware's own
-reader, so what arrives in the chat is what the panel draws: the same
-native-palette direct map, and an under-size wallpaper shown in the black field
-it will actually sit in. If the file is one the device would *re-dither* — a
-foreign BMP, a non-native palette — the preview falls back to an ordinary
-decode and says so, because identifying the picture is still the job and "the
-device will redo this one" is worth knowing.
+Any `.png` or `.bmp` offers **👁 Preview**, and a folder full of them offers
+*Preview all* — which is the answer to three wallpapers with names that say
+nothing. A PNG is rendered by `crosspoint_overlay.py`, the port of the
+firmware's overlay decoder and draw rule, with its clear parts over a page of
+sample text; a BMP by `crosspoint_bmp.py`, the port of its BMP reader — the
+native-palette direct map, and an under-size wallpaper in the black field it
+will actually sit in. A BMP found in `/sleep-overlay` is called out: there its
+white is left unpainted and the page ghosts through its greys
+(device-observed), so it wants re-sending from 🖼 Wallpapers.
 
 **Folders can be renamed, but only some.** `/rename` and `/move` refuse
 directories outright ("Only files can be renamed"), so a folder goes through

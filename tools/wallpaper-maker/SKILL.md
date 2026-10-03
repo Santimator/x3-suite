@@ -24,7 +24,16 @@ Deterministic, like the builder and the server: no model anywhere in it. The
 same image converts to a byte-identical file every time. What stands in for
 this suite's "gate after every model step" is
 [`scripts/selftest.py`](scripts/selftest.py), which grades every output through
-a port of the **device's own BMP reader** — see *The gate* below.
+a port of the **device's own PNG decoder and overlay draw rule** — see *The
+gate* below.
+
+**One folder, one mode, opaque and transparent mixed.** Everything goes to
+`/sleep-overlay/` and the reader's sleep screen is set to **Transparent custom**
+(CrossPoint 1.6+). Each sleep it picks one file at random and draws it *over
+the page you were reading*: an opaque wallpaper covers it completely, a
+transparent one lets it show through wherever it is clear. So a photograph and
+a cartoon whose speech bubble is a window onto your book share one pool, and
+you never have to switch modes on the device.
 
 ## Usage
 
@@ -33,7 +42,7 @@ a port of the **device's own BMP reader** — see *The gate* below.
 
 # 1. drop images in workspace/wallpapers/, then:
 .venv/bin/python tools/wallpaper-maker/scripts/make_wallpaper.py
-#    -> workspace/wallpapers/build/*.bmp
+#    -> workspace/wallpapers/build/*.png        (add --transparent for a cut-out)
 #    (workspace/wallpapers/finally-some-peace.png ships with the repo, so this
 #     produces something on a fresh clone with nothing dropped in yet)
 
@@ -44,11 +53,13 @@ python3 tools/wallpaper-maker/scripts/push_wallpaper.py
 There is nothing to configure and nothing to answer. Every parameter below has
 a right answer on this device, so it is already chosen.
 
-Flags exist for the things that are genuinely taste — `--fit contain` to keep
-the whole frame instead of cropping, `--mat edges|blur|none` for a different
-surround on an image too small to fill the panel, `--preview` to also write a
-PNG of what went into the BMP — plus `--dither floyd`, which substitutes our
-own error diffusion for the reader's (*Who quantises*, below). For the
+Flags exist for the things that are genuinely taste — `--transparent` to let
+the page show through, `--fit contain` to keep the whole frame instead of
+cropping, `--mat edges|blur|none` for a different surround on an image too
+small to fill the panel, `--preview` to also write `previews/<name>.png` (what
+the glass shows, over a page of text when transparent) — plus `--dither
+floyd`, which substitutes our own error diffusion for the reader's (*Who
+quantises*, below). For the
 push: `--ip` when the reader cannot be found by name, `--list` to see what is
 on the device, `--replace` to clear it first.
 
@@ -57,14 +68,35 @@ on the device, `--replace` to clear it first.
 | Choice | Why it is that and not something else |
 |---|---|
 | **528x792 exactly** | The panel, portrait. The firmware centres an image that fits and only ever scales *down* — so a smaller image is a stamp in a black field, and a larger one is resampled by an ESP32. |
-| **BMP** | The sleep screen reads nothing else. Not PNG, not JPEG, and **not `.pxc`** — see the note below. |
-| **4 bpp, indexed, palette on the four states** | Quantised here with the reader's *own* algorithm, then mapped straight through by it — a sixth of the size of a full-tone file, and it bypasses the firmware's X4-tuned constants, which are too bright on an X3. See *Who quantises* below. |
-| **40-byte DIB header** | The firmware reads the palette from a fixed offset after the first 40 header bytes, not from `biSize` or `bfOffBits`. A BITMAPV4/V5 header feeds it colour-space fields as colours. |
-| **0 / 85 / 170 / 255** | The palette values that make the reader map the file through untouched (`lum >> 6`), *and* — device-confirmed — a fair model of what the four states actually look like on an X3, which is why the quantiser aims at them too. |
+| **PNG** | The overlay folder opens PNG and BMP. PNG is the one that is both small and *paints white*: with an alpha line the firmware writes every opaque pixel, white included, so an opaque wallpaper hides the page. A plain BMP there leaves white unpainted, and on the X3 lets the page ghost through its greys too (device-observed 2026-10). The only BMP with alpha the firmware takes is 32-bit: 1.7 MB a file against ~50 KB. Not JPEG, and **not `.pxc`** — see the note below. |
+| **indexed, 2 bits; 4 with `--transparent`** | Four palette entries, the panel's four states — a fifth, white at alpha 0 (tRNS), only when something is clear. Quantised here with the reader's *own* algorithm and mapped straight through by it: this path does no dithering at all, it takes `grey >> 6`. See *Who quantises* below. |
+| **0 / 85 / 170 / 255, exactly** | Because the path *shifts* rather than rounds: 60 is nearer 85 than 0, and still lands black. Exact palette greys make `>> 6` the level we chose — and they are, device-confirmed, a fair model of what the four states look like on an X3, which is why the quantiser aims at them too. |
+| **alpha 0 or 255, nothing between** | The firmware does not blend partial alpha, it stipples it against a 4x4 Bayer tile. On four levels that reads as dirt along every soft edge, so transparency is cut at half. |
+| **written by hand, filter 0** | Every byte ours, identical run to run whatever Pillow is installed; on packed 2-bit rows filter 0 compresses as well as the adaptive ones. |
 | **autocontrast → gamma 0.85 → sharpen** | A phone photo uses half the range; on four levels that half becomes two. Stretch, then lift midtones (e-ink reflects less than the screen you chose the image on), then restore the local contrast the downscale cost. All before dithering. |
 | **cover-crop, centred** | A wallpaper should reach all four edges. `--fit contain` if the whole frame matters. |
 | **enlargement stops at 1.5x** | Past about half again, a photo is a smear even after dithering. What is left over gets a mat — a picture in a frame beats a blurred one that fills the screen. |
 | **EXIF rotation honoured first** | A phone portrait is stored landscape with a rotate flag; cropping before rotating crops the wrong axis. |
+
+## `--transparent`: which pixels let the page through
+
+Opaque is the default — right for photographs, where a stray white highlight
+would otherwise open a hole onto the text. `--transparent` clears pixels by
+one of two rules, chosen by the source:
+
+| Source | What clears |
+|---|---|
+| **has its own alpha** (a PNG with a real cut-out) | inside the picture, exactly what the source made clear (cut at half). Its *white* stays painted: a white speech bubble in a cut-out is a white bubble |
+| **has none** | every pixel that lands on white — line art on a white ground becomes line art on the page |
+
+Around an image too small to fill the panel, the mat follows the second rule
+either way: whatever it fills with white is clear. That is deliberate, not an
+accident to work around — a small drawing on white, matted with `--mat none`,
+floats on the page.
+
+Getting a cut-out here intact means getting it here as a *file*: a messenger
+that recompresses photos to JPEG (Telegram does, for anything sent as a photo)
+throws the alpha away first. `tools/tgbot/` says so where it asks.
 
 ## The mat: what surrounds an image too small to fill the panel
 
@@ -147,10 +179,12 @@ panorama gets framed rather than barred.
 The panel has four states and a photograph has 256 tones, so something has to
 choose. `crosspoint_bmp.firmware_quantise` is a port of the firmware's
 `AtkinsonDitherer::processPixel` — 1/8 of the error to each of six neighbours,
-no serpentine — run here on a real CPU. The result ships as a 4-bpp file whose
-palette sits on the panel's four states, so the reader maps it straight through
-and quantises nothing. **Same algorithm, a sixth of the bytes of a full-tone
-file, and none of the device's work.**
+no serpentine — run here on a real CPU. The result ships as a PNG whose palette
+sits on the panel's four states, so the reader maps it straight through and
+quantises nothing. **Same algorithm, a fraction of the bytes, and none of the
+device's work.** (The overlay PNG path has no ditherer of its own at all — it
+takes `grey >> 6` — so quantising here is not an optimisation on this route,
+it is the only way a photograph gets dithered.)
 
 ### The two sets of numbers, and why we use the disabled ones
 
@@ -189,10 +223,11 @@ overshoots by +30.9 and the even branch lands within −4.8.
 
 **This means our output is deliberately not what the device would make of a
 full-tone file** — it is what the device would make of one if it were tuned for
-the X3. Shipping 4-bpp on a native palette is exactly what buys us that: the
-file is mapped straight through, so the X4 tuning never gets to run. Hand the
-reader an undithered image instead and you get the X4 tuning and the bright
-picture, which is what the earlier default did.
+the X3. (When these were BMPs in `/sleep`, handing the reader an undithered
+image got the X4 tuning and the bright picture. 1.6 retuned that branch to
+30/55/150 → 15/35/90/210 and uses the even one on SSD1677 panels; the X3's
+UC8279 still gets the legacy one. None of it applies to the overlay PNG path,
+which does not dither.)
 
 `--dither floyd` (or `atkinson`, `none`) substitutes our own error diffusion
 against the same even ramp. Kept for comparison and because the gate can grade
@@ -246,8 +281,8 @@ It is worth saying plainly, because converters on the web offer it and this
 repo used to imply it: `.pxc` is CrossPoint's **EPUB image pixel cache**
 (`lib/Epub/Epub/converters/PixelCache.h`) — what the reader writes beside a
 decoded JPEG so it does not decode it thirteen times per page. The sleep-screen
-scan filters on `hasBmpExtension` and opens nothing else. A `.pxc` in `/.sleep`
-is skipped in silence.
+scan opens `.bmp` (and, in the overlay folders, `.png`) and nothing else. A
+`.pxc` there is skipped in silence.
 
 ## Getting them onto the device
 
@@ -292,15 +327,17 @@ a reason to go hunting and push to whatever turns up. On success it is written
 down, so `--ip` is normally a one-off: the next run finds the reader on its
 own, until the DHCP lease moves and the fallbacks take over again.
 
-Where the files land is decided, not asked: **`/sleep/`**, created if missing.
-One file is picked at random each time the device sleeps. The firmware looks
-in `/.sleep` first, but since 1.6.x `POST /mkdir` answers 403 to any
-dot-prefixed name (and WebDAV refuses dotted segments), so nothing remote can
-create it; `/sleep` is read whenever `/.sleep` holds no valid image.
+Where the files land is decided, not asked: **`/sleep-overlay/`**, created if
+missing. One file is picked at random each time the device sleeps, avoiding the
+last few shown. The firmware checks, in order, `/sleep-overlay.bmp` and
+`/sleep-overlay.png` at the root (either one wins outright), then
+`/.sleep-overlay/`, then `/sleep-overlay/`; since 1.6.x `POST /mkdir` answers
+403 to any dot-prefixed name, so the visible folder is the one we can make.
 
-Then the sleep screen has to be set to **Custom** to use the pool at all, so
-the push does that too (`POST /api/settings {"sleepScreen": 2}`);
+Then the sleep screen has to be set to **Transparent custom** to use it at all,
+so the push does that too (`POST /api/settings {"sleepScreen": 7}`);
 `--no-set-mode` if you would rather set it by hand under Settings → Display.
+Plain **Custom** (2) reads `/sleep/` instead and ignores this folder.
 
 One firmware behaviour the pusher works around, worth knowing before you
 reach for `curl`: an upload onto an existing filename is **rejected**, not
@@ -323,10 +360,13 @@ default sleep screen, with no message anywhere. In order of likelihood:
 
 | Symptom | Cause |
 |---|---|
-| Default CrossPoint sleep screen | Sleep screen is not set to **Custom** (Settings → Display), or `sleep`/`.sleep` holds no file the scan accepts. |
-| Some images appear, one never does | Its name starts with `.` (skipped whatever it contains), or the extension is not `.bmp`, or the header did not parse. |
-| Images stopped appearing after a push | A `/.sleep` with valid images (made on the card by hand) takes priority; `/sleep` is then ignored. Empty or delete `/.sleep`. |
-| Grainier or flatter than the preview | The file is not 4-bpp-indexed with a native palette, so the firmware re-dithered it on-device. Re-run `make_wallpaper.py`; do not hand-edit the BMP in an image editor, which will re-save it 24-bpp. |
+| Default CrossPoint sleep screen | Sleep screen is not set to **Transparent custom** (Settings → Display), or `sleep-overlay` holds no file the scan accepts. |
+| Always the same one | A `/sleep-overlay.png` or `.bmp` at the SD root wins over the folder. Delete it. |
+| Some images appear, one never does | Its name starts with `.` (skipped whatever it contains), or the extension is not `.png`/`.bmp`, or it did not decode. |
+| The page shows through white, and ghosts through the greys | It is a BMP — an old one, moved over from `/sleep`. A plain BMP in the overlay folder leaves white unpainted. Re-make it here as PNG (opaque). |
+| The page shows through a photo's highlights | It was made `--transparent`. Photos want opaque. |
+| A cut-out came out solid | The source lost its alpha on the way — sent as a *photo* through a messenger that recompresses to JPEG. Send it as a file. |
+| Darker than the preview | The file's greys are not exactly 0/85/170/255, so `>> 6` rounds them down. Re-run `make_wallpaper.py`; an image editor re-saving it will not keep the palette. |
 | A picture floating in a black frame | Not 528x792 — the firmware never scales *up*, and that black is the device's, not our mat. Re-run `make_wallpaper.py`. |
 | Upload fails with "File already exists" | The firmware refuses collisions. `--replace`, or delete on the device. |
 | `push_wallpaper: cannot reach ...` | The device is not on the File Transfer screen — the web server only runs while it is. |
@@ -335,14 +375,19 @@ default sleep screen, with no message anywhere. In order of likelihood:
 ## The gate
 
 An image-validity check would pass files this device never draws, and files it
-draws by redoing our work. So [`scripts/selftest.py`](scripts/selftest.py)
+draws other than we meant. So [`scripts/selftest.py`](scripts/selftest.py)
 grades every output through
-[`scripts/crosspoint_bmp.py`](scripts/crosspoint_bmp.py) — a port of the
-firmware's folder scan, header parsing, palette read and per-bpp row unpacking,
-quirks deliberately included. It checks that the scan would open the file, that
-the parser accepts it, that the palette is native so **nothing is re-dithered**,
-that the file decodes back to the exact levels we computed, that it lands at
-0,0 unscaled, and that a second run is byte-identical.
+[`scripts/crosspoint_overlay.py`](scripts/crosspoint_overlay.py) — a stdlib port
+of the firmware's overlay folder scan, its PNG decoder (supported bit depths,
+`(77r + 150g + 29b) >> 8` palette grey, tRNS alpha) and its draw rule (alpha
+≥ 8 and above the Bayer threshold; level `grey >> 6`; white written). It checks
+that the scan would open the file, that the decoder accepts it, that every grey
+is an exact level, that it draws back to exactly the levels we computed —
+**opaque, on every pixel, white included** — that a transparent one clears
+exactly the pixels meant (and keeps a cut-out's white painted), that it lands
+at 0,0 unscaled, and that a second run is byte-identical.
+`crosspoint_bmp.py` stays: its port of the firmware's quantiser is what the
+converter runs, and the bot previews BMPs still on a card through it.
 
 It checks the mat the same way, by the property that matters on this panel: a
 block of border must decode to a *single* level, and the sectors above and
@@ -352,14 +397,15 @@ edge and never moves more than one across per step — and then proves the
 consequence directly: a source containing no black must paint a mat containing
 no black, since the canvas starts black and any hole would still be showing.
 
-It also asserts the two failure modes the encoder is *shaped around* still
-fail — a 108-byte DIB header is misread, a 24-bpp file is not native — so that
-if the firmware ever changes, the reasoning in the code fails loudly instead of
-quietly going stale.
+It also asserts the failure modes the encoder is *shaped around* still fail —
+a grey off the levels lands on the wrong one, a 16-bit PNG is refused, half
+alpha stipples rather than blends — so that if the firmware ever changes, the
+reasoning in the code fails loudly instead of quietly going stale.
 
 The push protocol is graded the same way, against a port of the device's
 file-transfer API that keeps its awkward parts: dot-prefixed entries hidden
-from `/api/files`, and uploads rejected rather than overwritten.
+from `/api/files`, dot-prefixed folders refused by `/mkdir`, and uploads
+rejected rather than overwritten.
 
 Fixtures cover the shapes that break a naive converter: a wide landscape (the
 crop must take the middle), an image far smaller than the panel (must be framed
@@ -368,10 +414,18 @@ own edge), an alpha image (must flatten onto white, not multiply to black), a
 phone-style EXIF rotation (must rotate before cropping), and a flat gradient
 (where dithering either works or bands visibly).
 
-**Status: device-confirmed (2026-08), end to end.** An X3 drew a wallpaper built
-here as its sleep screen, quantised with the tuning below, converted and pushed
-from `tools/tgbot/` over WiFi without a terminal touching it. The reader was found by
-name, `/.sleep` created and filled, the mode switched to Custom.
+**Status: device-confirmed (2026-10) for the overlay mode, on CrossPoint
+1.6.5.** In `/sleep-overlay/` with Transparent custom, an opaque indexed PNG of
+a photograph covered the page completely; a transparent PNG cartoon showed the
+page through exactly its clear window; the same images as 32-bit BMPs drew
+alike but went to sleep a little slower; and three old 4-bpp BMPs moved over
+from `/sleep` let white through and ghosted the page's text through their greys
+— the reason this tool writes PNG. The files were hand-made for that test and
+uploaded by hand; the PNG encoder here produces the same shape (indexed, exact
+greys, tRNS), which the gate checks, but its own output has not yet been on the
+glass. **Before that (2026-08, CrossPoint 1.5):** an X3 drew a 4-bpp BMP built
+here from `/.sleep` in Custom mode, pushed from `tools/tgbot/` — the tone tuning
+below dates from then and carries over unchanged.
 
 The route there is worth keeping, because two of the three steps were wrong at
 some point and only the panel said so:
@@ -396,9 +450,11 @@ SKILL.md                     this file
 requirements.txt             Pillow (the only dependency)
 last-device.json             gitignored; the reader's address, once one answers
 scripts/
-  make_wallpaper.py          image -> X3 sleep-screen BMP
-  push_wallpaper.py          BMPs -> the device, over its file-transfer API
-  crosspoint_bmp.py          port of the device's BMP reader — the gate's oracle
+  make_wallpaper.py          image -> X3 overlay sleep-screen PNG
+  push_wallpaper.py          PNGs -> /sleep-overlay, over the file-transfer API
+  crosspoint_overlay.py      port of the device's overlay PNG path — the gate's oracle
+  crosspoint_bmp.py          port of its BMP reader and quantiser
+  contact_sheet.py           many images -> one numbered picture (for the bot)
   selftest.py                the gate
 ```
 
@@ -406,7 +462,9 @@ scripts/
 
 Firmware paths behind every claim here, for when this needs re-checking:
 `src/activities/boot_sleep/SleepActivity.cpp` (the scan, the folders, the
-placement), `lib/GfxRenderer/Bitmap.cpp` and `lib/GfxRenderer/BitmapHelpers.cpp`
+placement, the overlay mode), `lib/Epub/Epub/converters/PngToFramebufferConverter.cpp`
+and `DirectPixelWriter.h` (the PNG decoder, alpha, white written),
+`lib/GfxRenderer/Bitmap.cpp` and `lib/GfxRenderer/BitmapHelpers.cpp`
 (the reader, the native-palette test, `adjustPixel`),
 `lib/FsHelpers/FsHelpers.cpp` (`hasBmpExtension`),
 `src/network/CrossPointWebServer.cpp` and `src/network/WebDAVHandler.cpp`

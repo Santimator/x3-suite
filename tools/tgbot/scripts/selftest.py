@@ -23,9 +23,11 @@ Checks 1 and 3 are why this file exists at all: they are invariants about
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -431,27 +433,36 @@ def check_push_is_all_or_nothing(tmp: Path) -> None:
     # One lands, one fails: exactly the one that landed leaves.
     print("\na push where one file lands and one does not:")
     bot, tg = make_bot(tmp)
-    for name in ("wall.bmp", "other.bmp"):
-        p = bot.workspace / name
-        p.write_bytes(b"BM fake")
+    build = bot.workspace / "wallpapers" / "build"
+    (build / "previews").mkdir(parents=True, exist_ok=True)
+    for name in ("wall.png", "other.png"):
+        p = build / name
+        p.write_bytes(b"PNG fake")
+        (build / "previews" / name).write_bytes(b"x")
         bot.queue.add("wallpaper", str(p), name)
 
-    original = suite.push
+    original = suite.push, suite.WALLPAPER_OUT
     try:
+        suite.WALLPAPER_OUT = build
         bot.device_host = lambda: ("10.0.0.5", {})
         suite.push = lambda files, host=None: {
-            "ok": False, "host": "10.0.0.5", "target": "/sleep",
-            "items": [{"name": "wall.bmp", "ok": True},
-                      {"name": "other.bmp", "ok": False, "error": "File already exists"}]}
+            "ok": False, "host": "10.0.0.5", "target": "/sleep-overlay",
+            "items": [{"name": "wall.png", "ok": True},
+                      {"name": "other.png", "ok": False, "error": "File already exists"}]}
         bot.do_push(bot.user_id)
         left = [i["label"] for i in bot.queue.items()]
-        check("only the file that landed leaves the queue", left == ["other.bmp"],
+        check("only the file that landed leaves the queue", left == ["other.png"],
               str(left))
         check("the failure is reported per item",
               any("❌" in s["text"] and "✅" in s["text"] for s in tg.sent),
               tg.sent[-1]["text"] if tg.sent else "")
+        check("the built copy of what landed is deleted; what failed keeps its",
+              not (build / "wall.png").exists()
+              and not (build / "previews" / "wall.png").exists()
+              and (build / "other.png").exists(),
+              str(sorted(p.name for p in build.rglob("*"))))
     finally:
-        suite.push = original
+        suite.push, suite.WALLPAPER_OUT = original
 
     print("\ntwo books build one live push report:")
     bot, tg = make_bot(tmp)
@@ -1199,73 +1210,154 @@ def check_tokens(tmp: Path) -> None:
 
 
 def check_wallpaper_collection(tmp: Path) -> None:
-    print("\nwallpapers as a collection, not a one-way trip:")
+    print("\nwallpapers: originals kept, builds only while queued:")
     bot, tg = make_bot(tmp)
-    build = bot.workspace / "wallpapers" / "build"
-    build.mkdir(parents=True, exist_ok=True)
+    walls = bot.workspace / "wallpapers"
+    build = walls / "build"
+    walls.mkdir(parents=True, exist_ok=True)
 
-    original_out, original_preview = suite.WALLPAPER_OUT, suite.bmp_preview
+    saved = (suite.WALLPAPER_IN, suite.WALLPAPER_OUT, suite.probe_image,
+             suite.build_wallpaper, suite.mat_sheet, suite.contact_sheet)
+    built = []
+
+    def fake_build(src, mat="waves", transparent=False, out_dir=None):
+        # What make_wallpaper does, minus Pillow: a PNG named after the
+        # original, and its preview beside it in previews/.
+        out = Path(out_dir or suite.WALLPAPER_OUT)
+        (out / "previews").mkdir(parents=True, exist_ok=True)
+        png = out / (Path(src).stem + ".png")
+        png.write_bytes(b"PNG " + mat.encode() + (b" clear" if transparent else b""))
+        (out / "previews" / png.name).write_bytes(b"x")
+        built.append((Path(src).name, mat, transparent))
+        return png, out / "previews" / png.name
+
+    def fake_sheet(files, dest, start=1):
+        Path(dest).parent.mkdir(parents=True, exist_ok=True)
+        Path(dest).write_bytes(b"x")
+        return {"png": str(dest), "count": len(files), "items": [
+            {"n": start + i, "name": Path(f).name} for i, f in enumerate(files)]}
+
     try:
-        suite.WALLPAPER_OUT = build
-        suite.bmp_preview = lambda bmp, png: (Path(png).write_bytes(b"x"),
-                                              {"png": str(png)})[-1]
-        # The sheet needs Pillow; this gate must not. Stub it and check the
-        # thing that matters here — that the numbers, the caption and the
-        # buttons all describe the same wallpapers.
-        suite.contact_sheet = lambda files, dest, start=1: (
-            Path(dest).parent.mkdir(parents=True, exist_ok=True),
-            Path(dest).write_bytes(b"x"),
-            {"png": str(dest), "count": len(files), "items": [
-                {"n": start + i, "name": Path(f).name} for i, f in enumerate(files)]}
-        )[-1]
+        suite.WALLPAPER_IN, suite.WALLPAPER_OUT = walls, build
+        suite.build_wallpaper = fake_build
+        suite.contact_sheet = fake_sheet
+        sizes = {"dawn.jpg": True, "icon.png": False}
+        suite.probe_image = lambda src: {"fills": sizes[Path(src).name],
+                                         "width": 100, "height": 140}
+        suite.mat_sheet = lambda src, cache, mats: (
+            [fake_build(src, m, out_dir=Path(cache) / m) for m in mats],
+            fake_sheet(mats, Path(cache) / "sheet.png"))[-1]
 
         tg.sent.clear()
         bot.handle(cb("m:wl"))
         check("an empty collection says so rather than nothing",
               "No wallpapers" in tg.sent[-1]["text"], tg.sent[-1]["text"][:60])
 
-        for name in ("dawn.bmp", "harbour.bmp"):
-            (build / name).write_bytes(b"BM" + b"\0" * 100)
+        # A picture arrives: kept, and a question — nothing built yet.
+        (walls / "dawn.jpg").write_bytes(b"JPEG")
+        tg.sent.clear()
+        bot.route_local(OWNER, walls / "dawn.jpg")
+        buttons = [b for row in tg.sent[-1]["keyboard"] for b in row]
+        check("a new picture is kept and asked about, not built",
+              not built and not build.exists()
+              and any("put it on the reader" in t for t, _ in buttons),
+              str(buttons))
+        bot.handle(cb(next(d for t, d in buttons if "Just keep" in t)))
+        check("... and 'just keep it' leaves it in the collection, unqueued",
+              len(bot.queue) == 0 and "Wallpapers" in tg.sent[-1]["text"],
+              tg.sent[-1]["text"])
 
+        # Putting it on the reader: it fills, so no mat — straight to the mode.
+        bot.handle(cb(next(d for t, d in buttons if "put it on the reader" in t)))
+        modes = [b for row in tg.sent[-1]["keyboard"] for b in row]
+        check("a picture that fills skips the mat and asks opaque or transparent",
+              any("Opaque" in t for t, _ in modes)
+              and any("Transparent" in t for t, _ in modes), str(modes))
+        bot.handle(cb(next(d for t, d in modes if "Transparent" in t)))
+        items = bot.queue.items()
+        check("choosing builds into build/ and queues it, with what was chosen",
+              len(items) == 1 and Path(items[0]["path"]).parent == build
+              and items[0]["meta"] == {"source": str(walls / "dawn.jpg"),
+                                       "mat": "waves", "transparent": True},
+              str(items))
+        check("... and the preview of the built file is what is shown",
+              "photo" in tg.sent[-1] and "transparent" in tg.sent[-1]["text"],
+              str(tg.sent[-1])[:120])
+
+        # Same original again, the other way: one queued copy, not two.
+        bot.handle(cb(next(d for t, d in buttons if "put it on the reader" in t)))
+        modes = [b for row in tg.sent[-1]["keyboard"] for b in row]
+        bot.handle(cb(next(d for t, d in modes if "Opaque" in t)))
+        items = bot.queue.items()
+        check("asking again replaces the waiting copy instead of adding one",
+              len(items) == 1 and items[0]["meta"]["transparent"] is False,
+              str(items))
+
+        # Too small: every mat built and shown as one numbered sheet.
+        (walls / "icon.png").write_bytes(b"PNG")
+        tg.sent.clear()
+        built.clear()
+        bot.handle(cb(f"wq:{bot.tokens.put(str(walls / 'icon.png'))}"))
+        sheet = tg.sent[-1]
+        nums = [b for row in sheet["keyboard"] for b in row if b[0].isdigit()]
+        check("a small picture gets one sheet with every mat, numbered",
+              "photo" in sheet and len(nums) == 4
+              and sorted(m for _, m, _ in built) == sorted(
+                  ["waves", "edges", "blur", "none"]),
+              str(sheet)[:160])
+        check("... built outside build/, so nothing half-chosen is queued",
+              not any(p.name == "icon.png" for p in build.glob("*.png")),
+              str(sorted(p.name for p in build.glob("*.png"))))
+        bot.handle(cb(nums[1][1]))                       # "2" — edges
+        modes = [b for row in tg.sent[-1]["keyboard"] for b in row]
+        bot.handle(cb(next(d for t, d in modes if "Opaque" in t)))
+        icon = [i for i in bot.queue.items() if "icon" in i["path"]]
+        check("the number picked is the mat that gets queued",
+              icon and icon[0]["meta"]["mat"] == "edges", str(icon))
+
+        # Unqueueing deletes the build; the original stays.
+        tg.sent.clear()
+        bot.handle(cb(f"qdel:{icon[0]['id']}"))
+        check("unqueueing deletes the built copy and keeps the original",
+              not (build / "icon.png").exists()
+              and not (build / "previews" / "icon.png").exists()
+              and (walls / "icon.png").exists(),
+              str(sorted(p.name for p in build.rglob("*"))))
+
+        # The collection is the originals, newest first, numbered.
         tg.sent.clear()
         bot.handle(cb("m:wl"))
         caption = tg.sent[-1]["text"]
-        check("a pushed wallpaper is still listed afterwards",
-              "dawn.bmp" in caption, caption)
+        check("the collection lists the originals, not what was built",
+              "dawn.jpg" in caption and "icon.png" in caption
+              and "build" not in caption, caption)
         check("the overview is one picture, not one per wallpaper",
               len(tg.sent) == 1 and "photo" in tg.sent[-1], str(len(tg.sent)))
-
-        # The caption numbers the wallpapers; the buttons carry those numbers.
+        check("the caption marks what is already queued",
+              any("dawn.jpg" in line and "📤" in line
+                  for line in caption.splitlines()), caption)
         order = [line.split(" ", 1) for line in caption.splitlines()[1:]]
-        index = next(n for n, name in order if "dawn.bmp" in name)
         labels = [b[0] for row in (tg.sent[-1]["keyboard"] or []) for b in row]
         check("every listed wallpaper has a numbered button",
               all(n in labels for n, _ in order), f"{labels} vs {order}")
-        one = [b[1] for row in (tg.sent[-1]["keyboard"] or []) for b in row
+        index = next(n for n, name in order if "icon.png" in name)
+        one = [b[1] for row in tg.sent[-1]["keyboard"] for b in row
                if b[0] == index][0]
         tg.sent.clear()
         bot.handle(cb(one))
-        check("tapping it renders a preview even with no PNG beside it",
-              "photo" in tg.sent[-1], str(tg.sent[-1])[:120])
+        opened = [b for row in tg.sent[-1]["keyboard"] for b in row]
+        check("opening one shows the original, ready to send again",
+              "photo" in tg.sent[-1]
+              and any("Put on the reader" in t for t, _ in opened),
+              str(tg.sent[-1])[:160])
 
-        send = [b[1] for row in (tg.sent[-1]["keyboard"] or []) for b in row
-                if "Queue" in b[0]][0]
-        bot.handle(cb(send))
-        check("it can be queued from here", len(bot.queue) == 1,
-              str(bot.queue.items()))
-        tg.sent.clear()
-        bot.handle(cb(send))
-        check("and queueing it twice is refused, not doubled",
-              len(bot.queue) == 1 and "Already" in tg.sent[-1]["text"],
-              tg.sent[-1]["text"])
-
-        tg.sent.clear()
-        bot.handle(cb("m:wl"))
-        check("the caption marks what is already queued",
-              "📤" in tg.sent[-1]["text"], tg.sent[-1]["text"])
-
-        # Picking several off the sheet, which is the whole point of a sheet:
-        # tap tap tap, one confirmation, gone.
+        # Picking several off the sheet: tap tap tap, one confirmation, gone.
+        # dawn.jpg goes first, with a *different* original called dawn.png
+        # beside it — the BMP-era delete also removed "the .png next to it".
+        (walls / "dawn.png").write_bytes(b"another picture")
+        os.utime(walls / "dawn.png", (1000, 1000))
+        future = time.time() + 100
+        os.utime(walls / "dawn.jpg", (future, future))
         tg.sent.clear()
         bot.handle(cb("m:wl"))
         mid = tg.sent[-1]["message_id"]
@@ -1277,70 +1369,47 @@ def check_wallpaper_collection(tmp: Path) -> None:
                 "message": {"message_id": mid, "chat": {"id": OWNER}}}})
             return tg.sent[-1]
 
-        labels = lambda m: [b[0] for r in (m["keyboard"] or []) for b in r]
-        check("the sheet offers a way to pick several",
-              any("Pick" in x for x in labels(tg.sent[-1])), str(labels(tg.sent[-1])))
-
         picking = press("wl:pick:")
         check("picking swaps the same numbers for tick boxes, in place",
-              all(x.startswith("☐") for x in labels(picking)[:2])
-              and picking.get("edited") == mid, str(labels(picking)))
-
-        ticked = press("wl:t:1")
-        check("a number ticks", "☑1" in labels(ticked), str(labels(ticked)))
-        check("and the delete button counts what is picked",
-              any("Delete 1" in x for x in labels(ticked)), str(labels(ticked)))
-        check("tapping it again unticks", "☐1" in labels(press("wl:t:1")))
-
+              picking.get("edited") == mid)
         press("wl:t:1")
-        first_name = Path(bot.sheets[mid]["walls"][0]["path"]).name
+        first = Path(bot.sheets[mid]["walls"][0]["path"])
         confirm = press("wl:del:")
         check("deleting several asks once, and names them",
-              "Delete <b>1</b>" in confirm["text"] and first_name in confirm["text"],
-              confirm["text"][:120])
+              first.name in confirm["text"], confirm["text"][:120])
         press(f"wl:del!:{mid}")
-        check("... and then they are gone", not (build / first_name).exists(),
-              str(sorted(p.name for p in build.iterdir())))
-        check("the picks are forgotten afterwards", not bot.selected)
+        check("... and then that original is gone, and nothing beside it",
+              first.name == "dawn.jpg" and not first.exists()
+              and (walls / "dawn.png").exists(),
+              str(sorted(p.name for p in walls.iterdir())))
+        first.write_bytes(b"x")                           # back for what follows
 
-        (build / first_name).write_bytes(b"BM")        # put it back for later checks
-
-        # A sheet from before a restart cannot be ticked against.
         bot.sheets.clear()
         stale_reply = press("wl:t:1")
         check("a sheet the bot no longer remembers says so",
               "stale" in stale_reply["text"] or "restart" in stale_reply["text"],
               stale_reply["text"][:80])
 
-        # Renaming takes the preview along with it, or the pair comes apart.
-        (build / "harbour.png").write_bytes(b"x")
-        tok = bot.tokens.put({"path": str(build / "harbour.bmp"), "bytes": 2,
-                              "name": "harbour.bmp", "png": None})
+        tok = bot.tokens.put({"path": str(walls / "icon.png"), "bytes": 3,
+                              "name": "icon.png"})
         bot.handle(cb(f"wl:rn:{tok}"))
-        bot.handle(msg("sunrise"))
-        check("renaming adds .bmp and moves the preview too",
-              (build / "sunrise.bmp").exists() and (build / "sunrise.png").exists()
-              and not (build / "harbour.bmp").exists(),
-              str(sorted(p.name for p in build.iterdir())))
+        bot.handle(msg("logo"))
+        check("renaming an original keeps its own extension",
+              (walls / "logo.png").exists() and not (walls / "icon.png").exists(),
+              str(sorted(p.name for p in walls.iterdir())))
 
-        # Deleting here removes the server copy only — the card keeps its own.
-        rm = one.replace("wl:one:", "wl:rm!:")
-        bot.handle(cb(rm))
-        check("deleting removes the BMP and its preview",
-              not (build / "dawn.bmp").exists()
-              and not (build / "dawn.png").exists())
-
-        outsider = tmp / "elsewhere.bmp"
-        outsider.write_bytes(b"BM")
-        token = bot.tokens.put({"path": str(outsider), "bytes": 2,
-                                "name": "elsewhere.bmp", "png": None})
+        outsider = tmp / "elsewhere.jpg"
+        outsider.write_bytes(b"x")
+        token = bot.tokens.put({"path": str(outsider), "bytes": 1,
+                                "name": "elsewhere.jpg"})
         tg.sent.clear()
         bot.handle(cb(f"wl:rm!:{token}"))
-        check("and it will not reach outside the workspace",
+        check("deleting will not reach outside the workspace",
               outsider.exists() and "outside" in tg.sent[-1]["text"],
               tg.sent[-1]["text"])
     finally:
-        suite.WALLPAPER_OUT, suite.bmp_preview = original_out, original_preview
+        (suite.WALLPAPER_IN, suite.WALLPAPER_OUT, suite.probe_image,
+         suite.build_wallpaper, suite.mat_sheet, suite.contact_sheet) = saved
 
 
 # -- 4c. fonts -------------------------------------------------------------
@@ -1921,6 +1990,42 @@ def check_never_silent(tmp: Path) -> None:
     yes = [b[1] for row in (tg.sent[-1]["keyboard"] or []) for b in row
            if "Yes" in b[0]]
     check("... and the confirm button carries the same file", bool(yes), str(tg.sent[-1]))
+
+    # A wallpaper on the card is previewed through the port that matches its
+    # format, and a BMP left in the overlay folder is called out.
+    saved = suite.device.download, suite.overlay_preview, suite.bmp_preview
+    seen = []
+
+    def fake_preview(kind, transparent=False):
+        def render(src, dest):
+            seen.append(kind)
+            Path(dest).write_bytes(b"x")
+            return {"png": str(dest), "width": 528, "height": 792, "bpp": 4,
+                    "transparent": transparent, "exact": True,
+                    "drawn_by_sleep_scan": True}
+        return render
+    try:
+        suite.device.download = lambda h, src, dest: (
+            Path(dest).parent.mkdir(parents=True, exist_ok=True),
+            Path(dest).write_bytes(b"x"))
+        suite.overlay_preview = fake_preview("png", transparent=True)
+        suite.bmp_preview = fake_preview("bmp")
+        bot.device_host = lambda: ("10.0.0.5", {})
+        for name in ("menu.png", "old.bmp"):
+            tok = bot.tokens.put({"parent": suite.SLEEP_DIR, "name": name,
+                                  "path": f"{suite.SLEEP_DIR}/{name}", "size": 1})
+            tg.sent.clear()
+            bot.handle(cb(f"dev:see:{tok}"))
+            if name.endswith(".png"):
+                check("a PNG on the card is previewed through the overlay port",
+                      seen[-1:] == ["png"] and "transparent" in tg.sent[-1]["text"],
+                      str(tg.sent[-1])[:160])
+            else:
+                check("a BMP in the overlay folder is previewed, and called out",
+                      seen[-1:] == ["bmp"] and "ghost" in tg.sent[-1]["text"],
+                      str(tg.sent[-1])[:200])
+    finally:
+        suite.device.download, suite.overlay_preview, suite.bmp_preview = saved
 
 
 def check_poll_timeout_is_transient() -> None:

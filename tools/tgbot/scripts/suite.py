@@ -228,39 +228,78 @@ def probe_image(src: Path) -> dict:
     return reports[0]
 
 
-def build_wallpaper(src: Path, mat: str = "waves") -> tuple:
-    """Convert one image. Returns (bmp, preview_png)."""
-    rc, out, err = run([PY_DEPS, "tools/wallpaper-maker/scripts/make_wallpaper.py",
-                        str(src), "--out", str(WALLPAPER_OUT),
-                        "--mat", mat, "--preview"], timeout=300)
+# What counts as an original in workspace/wallpapers/. The same set the bot
+# accepts from the chat; build/ and anything else below it is not one.
+ORIGINAL_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif",
+                     ".tiff", ".heic", ".avif"}
+
+
+def build_wallpaper(src: Path, mat: str = "waves", transparent: bool = False,
+                    out_dir: Path | None = None) -> tuple:
+    """Convert one original. Returns (wallpaper_png, preview_png).
+
+    Into `build/` by default, which is not a collection: a file there is one
+    queued for the reader, and it is deleted once it lands (see `drop_build`).
+    The original is what the server keeps; this is redone whenever it is asked
+    for, because it is cheap and a stored copy only goes stale.
+    """
+    out_dir = Path(out_dir or WALLPAPER_OUT)
+    cmd = [PY_DEPS, "tools/wallpaper-maker/scripts/make_wallpaper.py",
+           str(src), "--out", str(out_dir), "--mat", mat, "--preview"]
+    if transparent:
+        cmd.append("--transparent")
+    rc, out, err = run(cmd, timeout=300)
     if rc != 0:
         raise SuiteError((err or out).strip() or "the converter failed")
     # make_wallpaper sanitizes the stem; find what it actually wrote rather
     # than guessing at its naming rules.
-    candidates = sorted(WALLPAPER_OUT.glob("*.bmp"), key=lambda p: p.stat().st_mtime)
+    candidates = sorted(out_dir.glob("*.png"), key=lambda p: p.stat().st_mtime)
     if not candidates:
         raise SuiteError("the converter reported success but wrote nothing")
-    bmp = candidates[-1]
-    return bmp, bmp.with_suffix(".png")
+    png = candidates[-1]
+    return png, out_dir / "previews" / png.name
+
+
+def drop_build(png: Path) -> None:
+    """Delete a built wallpaper and its preview — only ever inside build/."""
+    png = Path(png)
+    try:
+        png.resolve().relative_to(WALLPAPER_OUT.resolve())
+    except ValueError:
+        return
+    png.unlink(missing_ok=True)
+    (png.parent / "previews" / png.name).unlink(missing_ok=True)
+
+
+def mat_sheet(src: Path, cache: Path, mats: list) -> dict:
+    """Every way of filling the panel around a small image, side by side.
+
+    Built for real, one conversion per mat, into a scratch folder — what is on
+    the sheet is exactly what would be queued. Numbered in `mats` order.
+    """
+    previews = []
+    for style in mats:
+        _, preview = build_wallpaper(src, style, out_dir=Path(cache) / style)
+        previews.append(preview)
+    return contact_sheet(previews, Path(cache) / "sheet.png")
 
 
 def local_wallpapers() -> list:
-    """Every wallpaper this server has built, newest first.
+    """The originals you sent, newest first — the wallpaper collection.
 
-    `workspace/wallpapers/build/` was always the collection — the converter
-    writes there and nothing ever cleans it — but until now the only way to see
-    it was over ssh. Pushing a wallpaper leaves the file behind by design, so
-    the folder accumulates exactly the set worth re-sending after a card wipe.
+    Kept exactly as they arrived; everything the reader gets is made from them
+    on the way out. That keeps one copy of each picture, and means a change in
+    how wallpapers are built (as when they moved from BMP to PNG) applies to
+    every one of them the next time it is sent.
     """
     out = []
-    if not WALLPAPER_OUT.is_dir():
+    if not WALLPAPER_IN.is_dir():
         return out
-    for bmp in sorted(WALLPAPER_OUT.glob("*.bmp"),
-                      key=lambda p: p.stat().st_mtime, reverse=True):
-        png = bmp.with_suffix(".png")
-        out.append({"name": bmp.name, "path": str(bmp),
-                    "bytes": bmp.stat().st_size, "mtime": bmp.stat().st_mtime,
-                    "png": str(png) if png.exists() else None})
+    for f in sorted((p for p in WALLPAPER_IN.iterdir()
+                     if p.is_file() and p.suffix.lower() in ORIGINAL_SUFFIXES),
+                    key=lambda p: p.stat().st_mtime, reverse=True):
+        out.append({"name": f.name, "path": str(f),
+                    "bytes": f.stat().st_size, "mtime": f.stat().st_mtime})
     return out
 
 
@@ -275,6 +314,17 @@ def contact_sheet(files: list, dest: Path, start: int = 1) -> dict:
            "--start", str(start)] + [str(f) for f in files]
     rc, out, err = run(cmd, timeout=300)
     return _json_out(rc, out, err, "contact sheet")
+
+
+def overlay_preview(wallpaper: Path, png: Path) -> dict:
+    """Render a PNG wallpaper as the panel draws it in the overlay mode —
+    through `crosspoint_overlay`, the port of the firmware's decoder and draw
+    rule. Clear parts are shown over a page of sample text, so a cut-out reads
+    as the window it is."""
+    rc, out, err = run([PY_DEPS, "tools/wallpaper-maker/scripts/crosspoint_overlay.py",
+                        str(wallpaper), "--png", str(png), "--sample-page"],
+                       timeout=180)
+    return _json_out(rc, out, err, "preview")
 
 
 def bmp_preview(bmp: Path, png: Path) -> dict:
@@ -501,10 +551,9 @@ def rescan_device_fonts(host: str) -> None:
     device.fonts(host)          # the GET is what acts on the dirty flag
 
 
-# Where wallpapers live on the card — the same folder push_wallpaper.py fills.
-# Not /.sleep: since 1.6.x the firmware refuses to create dot-prefixed names
-# over the web API, so /sleep is the only wallpaper folder we can make.
-SLEEP_DIR = "/sleep"
+# Where wallpapers live on the card — the same folder push_wallpaper.py fills,
+# read by the Transparent custom sleep mode (CrossPoint 1.6+).
+SLEEP_DIR = "/sleep-overlay"
 
 
 def device_book_name(author: str, title: str, host: str | None = None) -> str:
