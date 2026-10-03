@@ -1454,18 +1454,25 @@ def check_wallpaper_collection(tmp: Path) -> None:
         # The server keeps state and workspace on different disks, where a
         # rename fails with EXDEV. Simulate that for the whole move.
         import errno
-        real_rename = os.rename
+        real_rename, real_replace = os.rename, os.replace
 
-        def cross_device(src, dst, *a, **k):
-            raise OSError(errno.EXDEV, "Invalid cross-device link", str(src))
-        os.rename = cross_device
+        def crossing(real):
+            # Only a move from the state dir into the workspace crosses the
+            # simulated disk boundary; the queue's own atomic saves do not.
+            def move(src, dst, *a, **k):
+                if (str(bot.state_dir) in str(src)
+                        and str(bot.workspace) in str(dst)):
+                    raise OSError(errno.EXDEV, "Invalid cross-device link", str(src))
+                return real(src, dst, *a, **k)
+            return move
+        os.rename, os.replace = crossing(real_rename), crossing(real_replace)
         try:
             tg.sent.clear()
             tok = bot.tokens.put({"src": str(walls / "logo.png"), "mat": "edges",
                                   "clear": True})
             bot.handle(cb(f"wo:{tok}"))
         finally:
-            os.rename = real_rename
+            os.rename, os.replace = real_rename, real_replace
         logo = [i for i in bot.queue.items()
                 if (i.get("meta") or {}).get("source", "").endswith("logo.png")]
         check("building works when state and workspace are on different disks",
