@@ -293,6 +293,10 @@ will actually sit in. A BMP found in `/sleep-overlay` is called out: there its
 white is left unpainted and the page ghosts through its greys
 (device-observed), so it wants re-sending from 🖼 Wallpapers.
 
+The *Preview all* sheet has **☑ Pick several** too: the numbers become tick
+boxes in place, and the folder listing's 📦 Move / 🗑 Delete act on what is
+ticked — the same machinery, driven from the picture instead of the names.
+
 **Folders can be renamed, but only some.** `/rename` and `/move` refuse
 directories outright ("Only files can be renamed"), so a folder goes through
 WebDAV `MOVE`, which has no such check. WebDAV's own guard is stricter in the

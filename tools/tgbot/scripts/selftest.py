@@ -2028,6 +2028,83 @@ def check_never_silent(tmp: Path) -> None:
         suite.device.download, suite.overlay_preview, suite.bmp_preview = saved
 
 
+def check_device_wallpaper_sheet(tmp: Path) -> None:
+    from telegram import TelegramError
+    print("\nthe reader's wallpapers as a sheet:")
+    bot, tg = make_bot(tmp)
+    folder = suite.SLEEP_DIR
+    card = {folder: [{"name": n, "size": 10, "isDirectory": False}
+                     for n in ("a.png", "b.png", "c.png")]}
+    deleted = []
+    saved = (suite.device.list_dir, suite.device.download,
+             suite.device.delete_many, suite.contact_sheet)
+
+    def press(data, mid):
+        bot.handle({"update_id": 1, "callback_query": {
+            "id": "c", "data": data, "from": {"id": OWNER},
+            "message": {"message_id": mid, "chat": {"id": OWNER}}}})
+        return tg.sent[-1]
+
+    labels = lambda m: [b[0] for r in (m["keyboard"] or []) for b in r]
+    data_of = lambda m, text: next(d for r in m["keyboard"] for t, d in r
+                                   if text in t)
+    try:
+        suite.device.list_dir = lambda h, p: card.get(p, [])
+        suite.device.download = lambda h, src, dest: (
+            Path(dest).parent.mkdir(parents=True, exist_ok=True),
+            Path(dest).write_bytes(b"x"))
+        suite.device.delete_many = lambda h, paths: (deleted.extend(paths), (True, ""))[1]
+        suite.contact_sheet = lambda files, dest, start=1: (
+            Path(dest).parent.mkdir(parents=True, exist_ok=True),
+            Path(dest).write_bytes(b"x"), {"png": str(dest)})[-1]
+        bot.device_host = lambda: ("10.0.0.5", {})
+
+        bot.handle(cb(f"dev:wpall:{bot.tokens.put(folder)}"))
+        sheet = tg.sent[-1]
+        sheet_id = len(tg.sent)
+        check("the sheet offers a way to pick several",
+              "photo" in sheet and any("Pick" in x for x in labels(sheet)),
+              str(labels(sheet)))
+
+        picking = press("dev:pick:", sheet_id)
+        check("picking turns the numbers into tick boxes, in place",
+              picking.get("edited") == sheet_id
+              and labels(picking)[:3] == ["☐1", "☐2", "☐3"], str(labels(picking)))
+        ticked = press(data_of(picking, "☐2"), sheet_id)
+        check("a number ticks, and Delete counts it",
+              "☑2" in labels(ticked)
+              and any("Delete 1" in x for x in labels(ticked)), str(labels(ticked)))
+        confirm = press(data_of(ticked, "Delete 1"), sheet_id)
+        check("deleting asks once, naming the file", "b.png" in confirm["text"],
+              confirm["text"][:120])
+        press(data_of(confirm, "Yes"), len(tg.sent))
+        check("... and deletes exactly what was ticked",
+              deleted == [f"{folder}/b.png"], str(deleted))
+
+        # Back from a sheet: the photo cannot become a text listing, so a new
+        # message is sent — and Pick several on *that* must still work.
+        bot.handle(cb(f"dev:wpall:{bot.tokens.put(folder)}"))
+        sheet_id = len(tg.sent)
+        real_edit = tg.edit_message
+
+        def refuse_photo(chat_id, message_id, text, keyboard=None):
+            if message_id == sheet_id:
+                raise TelegramError("Bad Request: there is no text in the message to edit")
+            return real_edit(chat_id, message_id, text, keyboard)
+        tg.edit_message = refuse_photo
+        back = press(data_of(tg.sent[-1], "Back"), sheet_id)
+        listing_id = len(tg.sent)
+        check("Back from a sheet arrives as a fresh listing", "📂" in back["text"],
+              back["text"][:80])
+        picked = press(data_of(back, "Pick several"), listing_id)
+        check("... whose Pick several works, rather than claiming a restart",
+              "restart" not in (picked.get("text") or "")
+              and picked.get("edited") == listing_id, str(picked)[:160])
+    finally:
+        (suite.device.list_dir, suite.device.download,
+         suite.device.delete_many, suite.contact_sheet) = saved
+
+
 def check_poll_timeout_is_transient() -> None:
     """The SSL read timeout seen in production stays inside the poll loop."""
     print("\na stalled Telegram long-poll:")
@@ -2264,6 +2341,7 @@ def main() -> int:
         check_fonts(tmp)
         check_font_queue(tmp)
         check_device_files(tmp)
+        check_device_wallpaper_sheet(tmp)
         check_device_fonts(tmp)
         check_tokens(tmp)
         check_device_menu(tmp)

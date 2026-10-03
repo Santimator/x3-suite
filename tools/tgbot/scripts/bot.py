@@ -2752,6 +2752,10 @@ class Bot:
         if action == "nop":
             return
         if action in ("pick", "pall", "pnone", "pdone", "t"):
+            # "No" on a delete confirmation arrives from that message, and
+            # names the listing it belongs to instead.
+            if action == "pdone" and token.isdigit() and int(token) in self.listings:
+                msg_id = int(token)
             listing = self.listings.get(msg_id)
             if not listing:
                 return self.stale(chat)
@@ -2769,6 +2773,10 @@ class Bot:
                 if not payload:
                     return self.stale(chat)
                 self.picked ^= {payload["path"]}
+            if listing.get("sheet"):
+                self.tg.edit_markup(chat, msg_id, self.device_sheet_keyboard(
+                    path, listing["sheet"], action != "pdone"))
+                return
             self.tg.edit_markup(chat, msg_id,
                                 self.browse_keyboard(path, entries,
                                                      action != "pdone",
@@ -2788,7 +2796,7 @@ class Bot:
                             f"Delete <b>{len(names)}</b> file(s) from the "
                             f"reader?\n{listed}{more}",
                             [[("Yes, delete them", f"dev:rmpick!:{msg_id or 0}"),
-                              ("No", "dev:pdone:")]])
+                              ("No", f"dev:pdone:{msg_id or 0}")]])
 
         if action == "rmpick!":
             def work():
@@ -2933,10 +2941,14 @@ class Bot:
                          f"<code>{html.escape(path)}</code>"]
                 lines += [f"{n} {html.escape(e.get('name', '')[:34])}"
                           for n, e in enumerate(shown, 1)]
-                rows = self.sheet_rows(payloads, "dev:f:")
-                rows.append([("📂 Back", f"dev:ls:{self.tokens.put(path)}")])
-                self.send_preview(chat, Path(report["png"]),
-                                  "\n".join(lines)[:1000], rows)
+                sent = self.send_preview(
+                    chat, Path(report["png"]), "\n".join(lines)[:1000],
+                    self.device_sheet_keyboard(path, payloads))
+                # Registered like a listing, so the same pick/delete/move
+                # machinery works off the numbers on the picture.
+                if sent and sent.get("message_id"):
+                    self.listings[sent["message_id"]] = {
+                        "path": path, "entries": shown, "sheet": payloads}
             return self.submit(chat, work)
 
         payload = self.tokens.get(token)
@@ -3260,7 +3272,11 @@ class Bot:
                               grouped_names=grouped_names))
         # Remembered by message id, like a contact sheet, so ☑ Pick several can
         # swap this listing's buttons in place instead of sending it again.
-        panel_id = message_id or ((sent or {}).get("message_id"))
+        # The id is the one the listing actually landed in: coming back from a
+        # contact sheet, the photo cannot be edited into text, so `panel` sends
+        # a fresh message — and remembering the photo's id instead left Pick
+        # several pointing at nothing.
+        panel_id = (sent or {}).get("message_id") or message_id
         if panel_id:
             self.listings[panel_id] = {
                 "path": path, "entries": entries,
@@ -3328,6 +3344,36 @@ class Bot:
             lines = ["Nothing to do — they are already there."]
         self.say(chat, "\n".join(lines))
         self.browse(chat, dest if moved else back)
+
+    def device_sheet_keyboard(self, path: str, payloads: list,
+                              picking: bool = False) -> list:
+        """The buttons under a sheet of the reader's wallpapers.
+
+        Browsing: a number opens that file. Picking: the same numbers in the
+        same places become tick boxes, and the folder listing's Move/Delete
+        row appears — deciding by looking, as on the server's own sheet.
+        """
+        if not picking:
+            rows = self.sheet_rows(payloads, "dev:f:")
+            rows.append([("☑ Pick several", "dev:pick:"),
+                         ("📂 Back", f"dev:ls:{self.tokens.put(path)}")])
+            return rows
+        rows, row = [], []
+        for n, payload in enumerate(payloads, 1):
+            mark = "☑" if payload["path"] in self.picked else "☐"
+            row.append((f"{mark}{n}", f"dev:t:{self.tokens.put(payload)}"))
+            if len(row) == 5:
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
+        chosen = len(self.picked & {p["path"] for p in payloads})
+        rows.append([(f"📦 Move {chosen}", "dev:mvpick:"),
+                     (f"🗑 Delete {chosen}", "dev:rmpick:")]
+                    if chosen else [("Tap the numbers to pick", "dev:nop:")])
+        rows.append([("All", "dev:pall:"), ("None", "dev:pnone:"),
+                     ("✖ Done", "dev:pdone:")])
+        return rows
 
     def browse_keyboard(self, path: str, entries: list,
                         picking: bool = False, *, series_groups: list = None,
