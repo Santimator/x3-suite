@@ -509,6 +509,7 @@ class Bot:
         chat = cb["message"]["chat"]["id"]
         message_id = (cb.get("message") or {}).get("message_id")
         self.tg.answer_callback(cb["id"])
+        self._last_callback = (data, message_id)
         head, _, rest = data.partition(":")
 
         if head == "m":
@@ -658,6 +659,9 @@ class Bot:
                  rows)
 
     def stale(self, chat) -> None:
+        # Which button, on which message: without it a stale report cannot be
+        # told apart from a bug that loses track of a live menu.
+        log("stale:", getattr(self, "_last_callback", None))
         self.say(chat, "That menu is from before a restart — open it again.",
                  [[("🏠 Menu", "m:main")]])
 
