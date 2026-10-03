@@ -771,13 +771,7 @@ class Bot:
         the waiting one rather than sending both, since they land under the
         same name on the card anyway.
         """
-        png, preview = suite.build_wallpaper(src, mat, transparent=clear)
-        for item in self.queue.items():
-            if item.get("kind") == "wallpaper" and item["path"] == str(png):
-                self.queue.remove(item["id"])
-        item = self.queue.add("wallpaper", str(png),
-                              meta={"source": str(src), "mat": mat,
-                                    "transparent": clear})
+        item, png, preview = self.build_and_queue(src, mat, clear)
         how = "transparent" if clear else "opaque"
         self.send_preview(
             chat, preview,
@@ -785,6 +779,55 @@ class Bot:
             f"({len(self.queue)} waiting).",
             [[("📲 Push now", "push:ask"), ("↩ Unqueue", f"qdel:{item['id']}")],
              [("🏠 Menu", "m:main")]])
+
+    def build_and_queue(self, src: Path, mat: str, clear: bool) -> tuple:
+        """Build one original into build/ and queue it, replacing any copy of
+        *it* already waiting. Returns (queue item, built png, preview)."""
+        png, preview = suite.build_wallpaper(
+            src, mat, transparent=clear,
+            out_dir=self.state_dir / "cache" / "building")
+        replace = None
+        for item in self.queue.items():
+            if (item.get("kind") == "wallpaper"
+                    and (item.get("meta") or {}).get("source") == str(src)):
+                replace = Path(item["path"])
+                self.queue.remove(item["id"])
+        png, preview = suite.place_build(png, preview, replace)
+        item = self.queue.add("wallpaper", str(png),
+                              meta={"source": str(src), "mat": mat,
+                                    "transparent": clear})
+        return item, png, preview
+
+    def queue_wallpapers(self, chat, sources: list, clear: bool) -> None:
+        """Several originals at once, picked off the sheet.
+
+        One question for the batch — opaque or transparent — rather than two
+        per picture. A picture too small to fill the panel takes the default
+        mat, and the report names them: any one can be opened and sent again
+        to choose its mat by looking, which replaces the queued copy.
+        """
+        done, matted, failed = 0, [], []
+        for src in map(Path, sources):
+            try:
+                if not suite.probe_image(src)["fills"]:
+                    matted.append(src.name)
+                self.build_and_queue(src, "waves", clear)
+                done += 1
+            except Exception as exc:
+                # One unreadable picture must not cost the rest of the batch.
+                failed.append(f"{src.name} — {str(exc)[:60]}")
+        how = "transparent" if clear else "opaque"
+        lines = [f"📤 {done} queued, {how} ({len(self.queue)} waiting)."]
+        if matted:
+            lines.append("\nToo small to fill the screen, so framed with the "
+                         "≈ waves mat — open one in 🖼 Wallpapers to pick "
+                         "another:\n" + "\n".join(
+                             f"· {html.escape(n)}" for n in matted))
+        if failed:
+            lines.append("\n❌ " + "\n❌ ".join(html.escape(f) for f in failed))
+        self.say(chat, "\n".join(lines),
+                 [[("📲 Push now", "push:ask"), ("📤 Queue", "m:q")],
+                  [("🏠 Menu", "m:main")]])
 
     def send_preview(self, chat, png: Path, caption: str, keyboard):
         try:
@@ -2157,7 +2200,9 @@ class Bot:
 
         if picking:
             here = {w["path"] for w in shown}
-            rows.append([(f"🗑 Delete {len(self.selected)}", "wl:del:")]
+            n = len(self.selected)
+            rows.append([(f"📤 Put {n} on the reader", "wl:send:"),
+                         (f"🗑 Delete {n}", "wl:del:")]
                         if self.selected else [("Tap the numbers to pick", "wl:nop:")])
             rows.append([("All", "wl:all:"), ("None", "wl:none:"),
                          ("✖ Done", "wl:browse:")]
@@ -2194,6 +2239,10 @@ class Bot:
         if action == "nop":
             return
         if action in ("pick", "browse", "all", "none", "t"):
+            # Cancel/No on a confirmation arrive from that message, and name
+            # the sheet they belong to instead.
+            if action == "browse" and token.isdigit() and int(token) in self.sheets:
+                msg_id = int(token)
             sheet = self.sheets.get(msg_id)
             if not sheet:
                 return self.stale(chat)
@@ -2214,6 +2263,30 @@ class Bot:
                 self.selected.symmetric_difference_update({path})
             return self.redraw_sheet(chat, msg_id, action != "browse")
 
+        if action == "send":
+            if not self.selected:
+                return self.say(chat, "Nothing picked.")
+            picked = sorted(self.selected)
+            names = "\n".join(f"· {html.escape(Path(p).name)}" for p in picked[:15])
+            more = f"\n… and {len(picked) - 15} more" if len(picked) > 15 else ""
+            return self.say(
+                chat,
+                f"Put <b>{len(picked)}</b> on the reader:\n{names}{more}\n\n"
+                f"◼ <b>Opaque</b> covers the page — photos.\n"
+                f"◻ <b>Transparent</b> lets it through where the picture is "
+                f"white, or its own transparency says — drawings.",
+                [[("◼ Opaque", f"wl:send!:{self.tokens.put({'paths': picked, 'clear': False})}"),
+                  ("◻ Transparent", f"wl:send!:{self.tokens.put({'paths': picked, 'clear': True})}")],
+                 [("✗ Cancel", f"wl:browse:{msg_id or 0}")]])
+
+        if action == "send!":
+            job = self.tokens.get(token)
+            if not job:
+                return self.stale(chat)
+            self.selected.clear()
+            return self.submit(chat, lambda: self.queue_wallpapers(
+                chat, job["paths"], job["clear"]))
+
         if action == "del":
             if not self.selected:
                 return self.say(chat, "Nothing picked.")
@@ -2226,7 +2299,7 @@ class Bot:
                 f"{listed}{more}\n\n"
                 f"Any already on the reader stay there.",
                 [[("Yes, delete them", f"wl:del!:{msg_id or 0}"),
-                  ("No", "wl:browse:")]])
+                  ("No", f"wl:browse:{msg_id or 0}")]])
 
         if action == "del!":
             gone, kept = 0, []

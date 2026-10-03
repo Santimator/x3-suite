@@ -260,6 +260,30 @@ def build_wallpaper(src: Path, mat: str = "waves", transparent: bool = False,
     return png, out_dir / "previews" / png.name
 
 
+def place_build(png: Path, preview: Path, replace: Path | None = None) -> tuple:
+    """Move a freshly built wallpaper into build/ under a name of its own.
+
+    Built elsewhere first, because two originals can share a stem — dawn.jpg
+    and dawn.png both build to dawn.png — and building straight into build/
+    would overwrite the one already queued. `replace` is the queued copy of
+    the *same* original, whose name it takes over; anything else gets the
+    first free name: dawn.png, dawn-2.png, ...
+    """
+    if replace is not None:
+        dest = Path(replace)
+    else:
+        dest, n = WALLPAPER_OUT / png.name, 2
+        while dest.exists():
+            dest = WALLPAPER_OUT / f"{png.stem}-{n}{png.suffix}"
+            n += 1
+    (dest.parent / "previews").mkdir(parents=True, exist_ok=True)
+    Path(png).replace(dest)
+    dest_preview = dest.parent / "previews" / dest.name
+    if Path(preview).exists():
+        Path(preview).replace(dest_preview)
+    return dest, dest_preview
+
+
 def drop_build(png: Path) -> None:
     """Delete a built wallpaper and its preview — only ever inside build/."""
     png = Path(png)

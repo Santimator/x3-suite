@@ -189,9 +189,19 @@ own decoder.
 
 **☑ Pick several** turns the numbers into tick boxes *in the same places*, so
 your eye stays on the picture while your thumb works down the row. Tap the ones
-you don't want, then **🗑 Delete 4** — one confirmation naming them, and they
-are gone. That is the shape a contact sheet earns: deciding by looking, rather
-than open-check-delete-open-check-delete.
+you want, then either:
+
+- **📤 Put 4 on the reader** — one question for the batch, opaque or
+  transparent, and all four are built and queued. A picture too small to fill
+  the panel gets the default ≈ waves mat and the report names it; open that one
+  and send it again to choose its mat by looking, which replaces the queued
+  copy.
+- **🗑 Delete 4** — one confirmation naming them, and they are gone.
+
+That is the shape a contact sheet earns: deciding by looking, rather than
+open-check-act-open-check-act. Two originals that share a name (`dawn.jpg`,
+`dawn.png`) are built to `dawn.png` and `dawn-2.png`, so neither overwrites the
+other on the way.
 
 The keyboard is swapped with `editMessageReplyMarkup`, so the sheet itself
 never moves — a photo has a caption rather than text, so its buttons are the

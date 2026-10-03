@@ -1226,7 +1226,8 @@ def check_wallpaper_collection(tmp: Path) -> None:
         out = Path(out_dir or suite.WALLPAPER_OUT)
         (out / "previews").mkdir(parents=True, exist_ok=True)
         png = out / (Path(src).stem + ".png")
-        png.write_bytes(b"PNG " + mat.encode() + (b" clear" if transparent else b""))
+        png.write_bytes(b"PNG " + Path(src).name.encode() + b" " + mat.encode()
+                        + (b" clear" if transparent else b""))
         (out / "previews" / png.name).write_bytes(b"x")
         built.append((Path(src).name, mat, transparent))
         return png, out / "previews" / png.name
@@ -1242,7 +1243,7 @@ def check_wallpaper_collection(tmp: Path) -> None:
         suite.build_wallpaper = fake_build
         suite.contact_sheet = fake_sheet
         sizes = {"dawn.jpg": True, "icon.png": False}
-        suite.probe_image = lambda src: {"fills": sizes[Path(src).name],
+        suite.probe_image = lambda src: {"fills": sizes.get(Path(src).name, True),
                                          "width": 100, "height": 140}
         suite.mat_sheet = lambda src, cache, mats: (
             [fake_build(src, m, out_dir=Path(cache) / m) for m in mats],
@@ -1397,6 +1398,58 @@ def check_wallpaper_collection(tmp: Path) -> None:
         check("renaming an original keeps its own extension",
               (walls / "logo.png").exists() and not (walls / "icon.png").exists(),
               str(sorted(p.name for p in walls.iterdir())))
+
+        # Several off the sheet, straight to the reader: one question for the
+        # batch, and the small one named as having been given the default mat.
+        for item in bot.queue.items():
+            bot.queue.remove(item["id"])
+        labels = lambda m: [b[0] for r in (m["keyboard"] or []) for b in r]
+        tg.sent.clear()
+        bot.handle(cb("m:wl"))
+        mid = tg.sent[-1]["message_id"]
+        press("wl:pick:")
+        picked = press("wl:t:1")
+        press("wl:t:2")
+        sheet_now = bot.sheets[mid]["walls"]
+        chosen = {sheet_now[0]["name"], sheet_now[1]["name"]}
+        offer = press("wl:t:2") and press("wl:t:2")      # untick, tick: still 2
+        check("picking offers to put them on the reader, counted",
+              any("Put 2 on the reader" in x for x in labels(offer)),
+              str(labels(offer)))
+        ask = press("wl:send:")
+        check("... which asks opaque or transparent once, for all of them",
+              all(n in ask["text"] for n in chosen)
+              and any("Opaque" in x for x in labels(ask)), ask["text"][:160])
+        cancel = press(next(d for r in ask["keyboard"] for t, d in r
+                            if "Cancel" in t))
+        check("Cancel goes back to the sheet, not to 'before a restart'",
+              cancel.get("edited") == mid, str(cancel)[:120])
+        sizes["logo.png"] = False                         # the small one, renamed
+        press("wl:pick:")
+        press("wl:all:")
+        chosen = {w["name"] for w in bot.sheets[mid]["walls"]}
+        ask = press("wl:send:")
+        report = press(next(d for r in ask["keyboard"] for t, d in r
+                            if "Opaque" in t))
+        queued = {Path((i.get("meta") or {}).get("source", "")).name
+                  for i in bot.queue.items()}
+        check("both are built and queued, opaque",
+              queued == chosen
+              and all(i["meta"]["transparent"] is False for i in bot.queue.items()),
+              f"{queued} vs {chosen}")
+        paths = [Path(i["path"]) for i in bot.queue.items()]
+        check("two originals sharing a name (dawn.jpg, dawn.png) get a built "
+              "file each, neither overwriting the other",
+              len(set(paths)) == len(paths) == len(chosen)
+              and all(p.exists() for p in paths)
+              and len({p.read_bytes() for p in paths}) == len(paths),
+              str(sorted(p.name for p in paths)))
+        check("the report names the picture that was given the default mat",
+              "logo.png" in chosen and "logo.png" in report["text"]
+              and "waves" in report["text"]
+              and not any(n in report["text"] for n in chosen - {"logo.png"}
+                          if n != "logo.png" and n in report["text"].split("waves")[1]),
+              report["text"][:240])
 
         outsider = tmp / "elsewhere.jpg"
         outsider.write_bytes(b"x")
