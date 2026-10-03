@@ -1451,14 +1451,15 @@ def check_wallpaper_collection(tmp: Path) -> None:
                           if n != "logo.png" and n in report["text"].split("waves")[1]),
               report["text"][:240])
 
-        # The server keeps state and workspace on different disks, where a
-        # rename fails with EXDEV. Simulate that for the whole move.
+        # Under the systemd unit, workspace/ and the state dir are separate
+        # ReadWritePaths bind mounts: a rename from one into the other fails
+        # with EXDEV, on a single disk. Simulate that boundary.
         import errno
         real_rename, real_replace = os.rename, os.replace
 
         def crossing(real):
             # Only a move from the state dir into the workspace crosses the
-            # simulated disk boundary; the queue's own atomic saves do not.
+            # simulated mount boundary; the queue's own atomic saves do not.
             def move(src, dst, *a, **k):
                 if (str(bot.state_dir) in str(src)
                         and str(bot.workspace) in str(dst)):
@@ -1475,7 +1476,8 @@ def check_wallpaper_collection(tmp: Path) -> None:
             os.rename, os.replace = real_rename, real_replace
         logo = [i for i in bot.queue.items()
                 if (i.get("meta") or {}).get("source", "").endswith("logo.png")]
-        check("building works when state and workspace are on different disks",
+        check("building works when state and workspace are separate mounts "
+              "(as under the systemd unit)",
               len(logo) == 1 and logo[0]["meta"]["mat"] == "edges"
               and Path(logo[0]["path"]).exists()
               and "Errno" not in tg.sent[-1]["text"],

@@ -783,9 +783,13 @@ class Bot:
     def build_and_queue(self, src: Path, mat: str, clear: bool) -> tuple:
         """Build one original into build/ and queue it, replacing any copy of
         *it* already waiting. Returns (queue item, built png, preview)."""
+        # Scratch space inside build/ itself, so the move into place stays on
+        # one mount. Under the systemd unit, workspace/ and the state dir are
+        # separate ReadWritePaths bind mounts, and a rename between them fails
+        # with EXDEV even on a single disk.
         png, preview = suite.build_wallpaper(
             src, mat, transparent=clear,
-            out_dir=self.state_dir / "cache" / "building")
+            out_dir=suite.WALLPAPER_OUT / ".building")
         old = [item for item in self.queue.items()
                if item.get("kind") == "wallpaper"
                and (item.get("meta") or {}).get("source") == str(src)]

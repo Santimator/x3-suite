@@ -277,9 +277,10 @@ def place_build(png: Path, preview: Path, replace: Path | None = None) -> tuple:
         while dest.exists():
             dest = WALLPAPER_OUT / f"{png.stem}-{n}{png.suffix}"
             n += 1
-    # shutil.move, not Path.replace: the scratch folder lives under the bot's
-    # state directory and build/ under the workspace, and on a real server
-    # those can be different disks — a rename across them fails with EXDEV.
+    # The bot builds in build/.building, so this is a plain rename. shutil.move
+    # rather than Path.replace only so that a scratch folder on another mount
+    # (systemd ReadWritePaths are separate bind mounts: rename across them is
+    # EXDEV, even on one disk) degrades to a copy instead of failing.
     (dest.parent / "previews").mkdir(parents=True, exist_ok=True)
     shutil.move(str(png), str(dest))
     dest_preview = dest.parent / "previews" / dest.name
