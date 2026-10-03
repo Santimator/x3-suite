@@ -786,13 +786,15 @@ class Bot:
         png, preview = suite.build_wallpaper(
             src, mat, transparent=clear,
             out_dir=self.state_dir / "cache" / "building")
-        replace = None
-        for item in self.queue.items():
-            if (item.get("kind") == "wallpaper"
-                    and (item.get("meta") or {}).get("source") == str(src)):
-                replace = Path(item["path"])
-                self.queue.remove(item["id"])
+        old = [item for item in self.queue.items()
+               if item.get("kind") == "wallpaper"
+               and (item.get("meta") or {}).get("source") == str(src)]
+        replace = Path(old[0]["path"]) if old else None
+        # Placed first, unqueued after: if the move fails, the copy already
+        # waiting stays queued rather than vanishing with it.
         png, preview = suite.place_build(png, preview, replace)
+        for item in old:
+            self.queue.remove(item["id"])
         item = self.queue.add("wallpaper", str(png),
                               meta={"source": str(src), "mat": mat,
                                     "transparent": clear})

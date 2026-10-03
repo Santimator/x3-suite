@@ -1451,6 +1451,29 @@ def check_wallpaper_collection(tmp: Path) -> None:
                           if n != "logo.png" and n in report["text"].split("waves")[1]),
               report["text"][:240])
 
+        # The server keeps state and workspace on different disks, where a
+        # rename fails with EXDEV. Simulate that for the whole move.
+        import errno
+        real_rename = os.rename
+
+        def cross_device(src, dst, *a, **k):
+            raise OSError(errno.EXDEV, "Invalid cross-device link", str(src))
+        os.rename = cross_device
+        try:
+            tg.sent.clear()
+            tok = bot.tokens.put({"src": str(walls / "logo.png"), "mat": "edges",
+                                  "clear": True})
+            bot.handle(cb(f"wo:{tok}"))
+        finally:
+            os.rename = real_rename
+        logo = [i for i in bot.queue.items()
+                if (i.get("meta") or {}).get("source", "").endswith("logo.png")]
+        check("building works when state and workspace are on different disks",
+              len(logo) == 1 and logo[0]["meta"]["mat"] == "edges"
+              and Path(logo[0]["path"]).exists()
+              and "Errno" not in tg.sent[-1]["text"],
+              tg.sent[-1]["text"][:160])
+
         outsider = tmp / "elsewhere.jpg"
         outsider.write_bytes(b"x")
         token = bot.tokens.put({"path": str(outsider), "bytes": 1,

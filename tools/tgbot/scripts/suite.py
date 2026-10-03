@@ -27,6 +27,7 @@ import hashlib
 import importlib.util
 import json
 import struct
+import shutil
 import subprocess
 import sys
 import urllib.error
@@ -276,11 +277,14 @@ def place_build(png: Path, preview: Path, replace: Path | None = None) -> tuple:
         while dest.exists():
             dest = WALLPAPER_OUT / f"{png.stem}-{n}{png.suffix}"
             n += 1
+    # shutil.move, not Path.replace: the scratch folder lives under the bot's
+    # state directory and build/ under the workspace, and on a real server
+    # those can be different disks — a rename across them fails with EXDEV.
     (dest.parent / "previews").mkdir(parents=True, exist_ok=True)
-    Path(png).replace(dest)
+    shutil.move(str(png), str(dest))
     dest_preview = dest.parent / "previews" / dest.name
     if Path(preview).exists():
-        Path(preview).replace(dest_preview)
+        shutil.move(str(preview), str(dest_preview))
     return dest, dest_preview
 
 
