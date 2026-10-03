@@ -1243,7 +1243,9 @@ def check_wallpaper_collection(tmp: Path) -> None:
         suite.build_wallpaper = fake_build
         suite.contact_sheet = fake_sheet
         sizes = {"dawn.jpg": True, "icon.png": False}
+        alpha_names = {"cutout.png"}
         suite.probe_image = lambda src: {"fills": sizes.get(Path(src).name, True),
+                                         "has_alpha": Path(src).name in alpha_names,
                                          "width": 100, "height": 140}
         suite.mat_sheet = lambda src, cache, mats: (
             [fake_build(src, m, out_dir=Path(cache) / m) for m in mats],
@@ -1293,6 +1295,20 @@ def check_wallpaper_collection(tmp: Path) -> None:
         check("asking again replaces the waiting copy instead of adding one",
               len(items) == 1 and items[0]["meta"]["transparent"] is False,
               str(items))
+
+        # A PNG with its own transparency has answered the question already.
+        (walls / "cutout.png").write_bytes(b"PNG with alpha")
+        tg.sent.clear()
+        bot.handle(cb(f"wq:{bot.tokens.put(str(walls / 'cutout.png'))}"))
+        cut = [i for i in bot.queue.items()
+               if i["meta"]["source"].endswith("cutout.png")]
+        check("a picture with its own transparency is queued without asking",
+              len(cut) == 1 and cut[0]["meta"]["transparent"] is True
+              and not any("Opaque" in t for m in tg.sent
+                          for r in (m.get("keyboard") or []) for t, _ in r),
+              str([m["text"][:60] for m in tg.sent]))
+        bot.queue.remove(cut[0]["id"])
+        (walls / "cutout.png").unlink()
 
         # Too small: every mat built and shown as one numbered sheet.
         (walls / "icon.png").write_bytes(b"PNG")

@@ -149,9 +149,11 @@ picture in 🖼 Wallpapers any time after — walks two short steps:
 2. **Opaque or transparent.** All wallpapers share one folder,
    `/sleep-overlay`, under the reader's *Transparent custom* sleep mode, which
    draws each over the page you were reading. ◼ **Opaque** covers it — right
-   for photos. ◻ **Transparent** lets it through wherever the picture is white,
-   or wherever its own alpha says, if it has one — right for drawings. A mat
-   that came out white is clear too, on purpose.
+   for photos. ◻ **Transparent** lets it through wherever the picture is white
+   — right for drawings. A mat that came out white is clear too, on purpose.
+   **Not asked of a PNG with its own transparency:** it has answered already,
+   so its alpha is used exactly as drawn and the white elsewhere stays painted.
+   (A batch from the sheet follows the same rule per picture.)
 
 Then it is built into `build/`, previewed as the panel will draw it (over a
 page of sample text, when transparent), and queued. Asking again for the same

@@ -541,7 +541,8 @@ class Bot:
             job = self.tokens.get(rest)
             if not job:
                 return self.stale(chat)
-            return self.ask_wallpaper_mode(chat, Path(job["src"]), job["mat"])
+            return self.ask_wallpaper_mode(chat, Path(job["src"]), job["mat"],
+                                           job.get("alpha", False))
         if head == "wo":                       # opaque or transparent: build, queue
             job = self.tokens.get(rest)
             if not job:
@@ -736,21 +737,31 @@ class Bot:
         if not src.exists():
             return self.say(chat, "That picture is gone from the server.")
         report = suite.probe_image(src)
+        alpha = bool(report.get("has_alpha"))
         if report["fills"]:
-            return self.ask_wallpaper_mode(chat, src, "waves")
+            return self.ask_wallpaper_mode(chat, src, "waves", alpha)
         self.say(chat, "Building the ways to fill it…")
         sheet = suite.mat_sheet(src, self.state_dir / "cache" / "mats",
                                 [style for _, style in MATS])
         lines = [f"{report['width']}×{report['height']} — too small to fill "
                  f"528×792. How should the rest be filled?"]
         lines += [f"{n} {label}" for n, (label, _) in enumerate(MATS, 1)]
-        buttons = [(f"{n}", f"wm:{self.tokens.put({'src': str(src), 'mat': style})}")
+        buttons = [(f"{n}", f"wm:{self.tokens.put({'src': str(src), 'mat': style, 'alpha': alpha})}")
                    for n, (_, style) in enumerate(MATS, 1)]
         self.send_preview(chat, Path(sheet["png"]), "\n".join(lines),
                           [buttons, [("✗ Cancel", "wpx:")]])
 
-    def ask_wallpaper_mode(self, chat, src: Path, mat: str) -> None:
-        """Step two: does it cover the page, or let it show through?"""
+    def ask_wallpaper_mode(self, chat, src: Path, mat: str,
+                           has_alpha: bool = False) -> None:
+        """Step two: does it cover the page, or let it show through?
+
+        Not asked of a picture with its own transparency: it has answered
+        already, and its alpha is used as drawn. Choosing "transparent" by
+        whites would be the wrong question for it anyway.
+        """
+        if has_alpha:
+            return self.submit(chat, lambda: self.queue_wallpaper(
+                chat, src, mat, True))
         job = {"src": str(src), "mat": mat}
         self.say(chat,
                  f"<code>{html.escape(src.name)}</code> — how should it sit "
@@ -812,12 +823,18 @@ class Bot:
         mat, and the report names them: any one can be opened and sent again
         to choose its mat by looking, which replaces the queued copy.
         """
-        done, matted, failed = 0, [], []
+        done, matted, own_alpha, failed = 0, [], [], []
         for src in map(Path, sources):
             try:
-                if not suite.probe_image(src)["fills"]:
+                report = suite.probe_image(src)
+                if not report["fills"]:
                     matted.append(src.name)
-                self.build_and_queue(src, "waves", clear)
+                # A picture with its own transparency keeps it, whatever the
+                # batch was asked — the same rule as sending it on its own.
+                if report.get("has_alpha"):
+                    own_alpha.append(src.name)
+                self.build_and_queue(src, "waves",
+                                     clear or bool(report.get("has_alpha")))
                 done += 1
             except Exception as exc:
                 # One unreadable picture must not cost the rest of the batch.
@@ -829,6 +846,9 @@ class Bot:
                          "≈ waves mat — open one in 🖼 Wallpapers to pick "
                          "another:\n" + "\n".join(
                              f"· {html.escape(n)}" for n in matted))
+        if own_alpha and not clear:
+            lines.append("\nKept their own transparency:\n" + "\n".join(
+                f"· {html.escape(n)}" for n in own_alpha))
         if failed:
             lines.append("\n❌ " + "\n❌ ".join(html.escape(f) for f in failed))
         self.say(chat, "\n".join(lines),

@@ -737,6 +737,9 @@ def probe(src: Path, *, fit: str = "cover") -> dict:
     scaled = scale_to_panel(img, fit)
     return {"file": str(src), "width": img.width, "height": img.height,
             "fills": scaled.size == (PANEL_W, PANEL_H),
+            # Its own transparency, so a caller need not ask opaque or
+            # transparent about a picture that has already answered.
+            "has_alpha": source_alpha(src) is not None,
             "panel": [PANEL_W, PANEL_H]}
 
 
