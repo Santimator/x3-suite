@@ -43,8 +43,9 @@ you never have to switch modes on the device.
 # 1. drop images in workspace/wallpapers/, then:
 .venv/bin/python tools/wallpaper-maker/scripts/make_wallpaper.py
 #    -> workspace/wallpapers/build/*.png        (add --transparent for a cut-out)
-#    (workspace/wallpapers/finally-some-peace.png ships with the repo, so this
-#     produces something on a fresh clone with nothing dropped in yet)
+#    (two samples ship with the repo, so this produces something on a fresh
+#     clone: finally-some-peace.png, a photo for opaque, and plane-text.png,
+#     whose own alpha is clear only inside its banner — try it --transparent)
 
 # 2. on the device: Home -> File Transfer -> Join a Network, then:
 python3 tools/wallpaper-maker/scripts/push_wallpaper.py
