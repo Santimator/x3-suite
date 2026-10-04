@@ -191,7 +191,9 @@ chain into chapters with a length budget and a **scene list** per chapter. Seed 
 into the book's own `workspace/<slug>/vocab.tsv`.
 Aim for a **substantial book**: follow the source story's events across enough
 chapters (roughly 8–12 for a short tale, more for a longer source) and make each
-a meaty episode (~450+ chars), not a summary — see planner.md's "Make the book
+a meaty episode (at the plan's `target_chars`, gated by `min_chars`), not a
+summary; when the user asks for a long book, set `min_book_chars` so the
+validator holds the whole book to it — see planner.md's "Make the book
 substantial".
 
 **Then, for each chapter `N`:**
@@ -235,6 +237,11 @@ substantial".
    fill any blank gloss. This is the model's judgement call, not a human's — the
    `run_book.py` driver does it automatically; Claude Code writes the decisions
    and applies them with `curate_glossary.py BOOK --chapter N --decisions -`.
+   **Editing an accepted chapter later** (to fix continuity, or to reach the
+   book-length gate): do not re-run `update_state.py` for it — it would rewrite
+   that chapter's glossary with only the words not yet introduced, losing the
+   curated rows. Re-validate, then add any genuinely new word to the chapter's
+   glossary TSV and to `introduced.words` by hand.
 7. **Next chapter.** Repeat. Later chapters re-segment against the updated lists,
    so add-and-gloss words no longer flag and introduced words aren't re-glossed.
 8. **Annotate, then assemble** (after chapters are accepted). The builder is

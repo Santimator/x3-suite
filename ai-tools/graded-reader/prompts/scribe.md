@@ -50,7 +50,12 @@ guidance behind it.
 8. **Write a full episode, not a sketch.** Play out every scene the brief
    lists, in order — each one on the page, not summarised in a line. The
    character minimum is a hard gate and a short chapter is reworked, so write
-   to the brief's target, not to the floor. Get there the graded-reader way — play the scene out
+   to the brief's target, not to the floor. Only Han characters count:
+   dialogue lines are short, so a chapter that is mostly quick exchanges
+   measures far shorter than it looks — first drafts routinely land a quarter
+   to a third under the intended length. When a draft is short, add a scene
+   (narration, a concrete action, a second beat of the conversation), not
+   longer words. Get there the graded-reader way — play the scene out
    with dialogue, small concrete actions, and repetition — never by reaching for
    harder or rarer words to pad it. If the beat feels thin, dramatize it (show
    the moment happening) rather than narrating it in one line.
