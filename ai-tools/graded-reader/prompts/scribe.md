@@ -43,9 +43,14 @@ guidance behind it.
    density.
 6. **Continuity.** Respect the story-so-far recap; don't contradict earlier
    chapters or re-introduce things already in the introduced set.
-7. **Write a full episode, not a sketch.** The brief's character minimum is a
-   hard gate — a short chapter fails and is reworked, so treat the number as the
-   floor and write past it. Get there the graded-reader way — play the scene out
+7. **Keep to the writing notes.** The brief's "Writing notes" were decided
+   before chapter 1 — voice, style sheet, character voices, fixed facts, the
+   ending. Use the style sheet's word for a thing every time; give each
+   character the voice the notes give them; plant what the ending needs.
+8. **Write a full episode, not a sketch.** Play out every scene the brief
+   lists, in order — each one on the page, not summarised in a line. The
+   character minimum is a hard gate and a short chapter is reworked, so write
+   to the brief's target, not to the floor. Get there the graded-reader way — play the scene out
    with dialogue, small concrete actions, and repetition — never by reaching for
    harder or rarer words to pad it. If the beat feels thin, dramatize it (show
    the moment happening) rather than narrating it in one line.
@@ -64,7 +69,7 @@ Then, on a **separate final line**, a one-sentence recap for the next chapter's
 continuity:
 
 ```
-RECAP: <one sentence, what happened in this chapter>
+RECAP: <one sentence, what happened in this chapter — English is safest>
 ```
 
 `update_state.py` files the recap and strips this line, so it never reaches the

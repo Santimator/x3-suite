@@ -4,7 +4,8 @@
 Checks, in order:
   1. the classification cascade on canonical examples of every tier,
   2. every chapter of every workspace book still passes its gates,
-  3. an EPUB builds, is well-formed XML, and its glossary links resolve.
+  3. an EPUB builds, is well-formed XML, and its glossary links resolve,
+  4. glossary curation applies decisions and refuses the ones it can't.
 
 Exit 0 = all good. No test framework needed:  python scripts/selftest.py
 """
@@ -19,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # the EPUB builder is suite-shared infrastructure, not a graded-reader script
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "epub-builder" / "scripts"))
 import build_epub  # noqa: E402
+import curate_glossary  # noqa: E402
 import verify_epub  # noqa: E402
 import validate as validate_mod  # noqa: E402
 import vocab as vocab_mod  # noqa: E402
@@ -88,6 +90,14 @@ def main() -> int:
             # builder-level check, so this stays in lockstep with pdf2epub.
             report = verify_epub.verify_integrity(out)
             all_ok &= check(f"{book.name}: EPUB structurally sound", report["pass"], str(report["errors"]))
+
+    print("4. glossary curation")
+    rows = [["山上", "shān shàng", ""], ["码头", "mǎ tóu", ""], ["链子", "liànzi", "a chain"]]
+    kept, errs = curate_glossary.curate(rows, {"drop": ["山上"], "gloss": {"码头": "harbour"}})
+    all_ok &= check("drop + fill", not errs and [r[0] for r in kept] == ["码头", "链子"]
+                    and kept[0][2] == "harbour", str(errs))
+    _, errs = curate_glossary.curate(rows, {"drop": ["山下"]})
+    all_ok &= check("refuses unknown word / blank gloss", len(errs) == 3, str(errs))
 
     print("PASS" if all_ok else "FAIL")
     return 0 if all_ok else 1

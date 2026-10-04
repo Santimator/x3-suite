@@ -62,6 +62,10 @@ Python that has `jieba` and `pypinyin` installed (see Setup).
 - **`scripts/update_state.py`** — deterministic bookkeeping after a chapter is
   accepted: writes the gloss-once chapter glossary, appends newly-glossed words
   to `introduced`, files the recap, marks the outline entry, wires `book.json`.
+- **`scripts/curate_glossary.py`** — applies the glossary editor's decisions
+  (`{"drop": [...], "gloss": {...}}`) to the proposed glossary, so the model
+  states judgements instead of re-typing the TSV. Refuses on a word that isn't
+  in the glossary or a kept row without a gloss.
 - **`scripts/annotate.py`** — the hand-off to the builder: marks each glossary
   word's first occurrence as `{词|pīnyīn}` into `build/annotated/`. Pinyin is
   decided here because it needs the segmenter and the glossary.
@@ -151,7 +155,8 @@ Without it, ordinals and known-word compounds eat the stretch budget and the
 rate stops measuring genuine reach — a learner who knows 很 and 快 *recognizes*
 很快; only combinations like 山上 or 睡着 are real (gloss-worthy) stretches.
 
-**Five gates.** The rate gates are per segmented token (not per character);
+**Six gates.** Every gate measures the prose only — headings and the `RECAP:`
+line are stripped first. The rate gates are per segmented token (not per character);
 `out_of_list_rate = flagged / counted`, `stretch_rate = stretch / counted`:
 
 | gate | default | why |
@@ -161,20 +166,28 @@ rate stops measuring genuine reach — a learner who knows 很 and 快 *recogniz
 | `max_stretch` | 15% | compositional guesses shouldn't carry the text |
 | `min_chars` | 0 (books opt in, ~800) | a chapter must be a real episode |
 | `min_expressions` | 0 (books opt in, ~5) | distinct `expressions.tsv` constructions used |
+| `min_book_chars` | 0 (books opt in) | `validate.py BOOKDIR` only: the whole book's prose. Per-chapter floors each cleared by a few characters still add up to a short book. |
+
+`target_chars` (optional, no gate) is printed in the brief as the length to aim
+for — set it ~15–20% above `min_chars`, because a chapter written *to* the
+floor lands just under it.
 
 The floors default to 0 so older books keep passing; new books set them in
 `plan.json` → `validation`. They exist because **only what a script measures
 actually happens**: length and expression targets lived in the prompts for a
 long time and were quietly missed every single chapter, while the script-checked
 vocabulary gates were met 100% of the time. Gates default to the book's `plan.json` validation params; CLI flags
-override. `validate.py BOOKDIR` checks every chapter in `book.json` at once.
+override. `validate.py BOOKDIR` checks every chapter in `book.json` at once,
+then the book-length gate.
 
 ## The orchestration loop
 
 **Once per book — Planner.** Produce `plan.json` per `prompts/planner.md`:
 **research the source first** (don't plan from memory), write a **story bible**
-(cast, relationships, setting, motifs, and the full event chain), and only then
-divide that chain into chapters with a length budget. Seed obvious story names
+(cast, relationships, setting, motifs, and the full event chain), then the
+**writing notes** (`notes`: voice, style sheet, character voices, fixed facts,
+the ending — decided once, printed into every brief), and only then divide the
+chain into chapters with a length budget and a **scene list** per chapter. Seed obvious story names
 into the book's own `workspace/<slug>/vocab.tsv`.
 Aim for a **substantial book**: follow the source story's events across enough
 chapters (roughly 8–12 for a short tale, more for a longer source) and make each
@@ -220,7 +233,8 @@ substantial".
    over-inclusive on purpose. Per `prompts/glossary_editor.md`, prune
    compositionally-transparent rows (山上, 很多, 一天…), keep topic words, and
    fill any blank gloss. This is the model's judgement call, not a human's — the
-   `run_book.py` driver does it automatically; Claude Code does it inline.
+   `run_book.py` driver does it automatically; Claude Code writes the decisions
+   and applies them with `curate_glossary.py BOOK --chapter N --decisions -`.
 7. **Next chapter.** Repeat. Later chapters re-segment against the updated lists,
    so add-and-gloss words no longer flag and introduced words aren't re-glossed.
 8. **Annotate, then assemble** (after chapters are accepted). The builder is

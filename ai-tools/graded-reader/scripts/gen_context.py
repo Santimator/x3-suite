@@ -7,7 +7,10 @@ words while writing instead of being reworked afterwards.
 
 It assembles, from plan.json + the lists, a single markdown brief the scribe
 (an LLM, or you) fills in:
-  - the chapter's beat (what happens) from the outline,
+  - the chapter's beat (what happens) from the outline, and its scene list,
+  - the book's writing notes — voice, style sheet, character voices, the
+    decisions taken before the first chapter (plan.json `notes`) — plus any
+    chapter-level note,
   - the running "introduced" set (reuse freely, do NOT re-gloss),
   - story-specific names / topic words available (with glosses),
   - the permitted vocabulary, grouped by band so the scribe can lean simple,
@@ -38,6 +41,30 @@ BAND_LABEL = {
     "SUP": "Function/grammar words",
     "IDIOM": "Set expressions",
 }
+
+
+def render_notes(value, depth: int = 0) -> List[str]:
+    """Render free-form plan notes (str / list / dict, nested) as bullets.
+    The planner decides the keys; the brief only has to show them."""
+    pad = "  " * depth
+    if isinstance(value, dict):
+        out = []
+        for k, val in value.items():
+            if isinstance(val, (dict, list)):
+                out.append(f"{pad}- **{k}**")
+                out.extend(render_notes(val, depth + 1))
+            else:
+                out.append(f"{pad}- **{k}**: {val}")
+        return out
+    if isinstance(value, list):
+        out = []
+        for item in value:
+            if isinstance(item, (dict, list)):
+                out.extend(render_notes(item, depth))
+            else:
+                out.append(f"{pad}- {item}")
+        return out
+    return [f"{pad}- {value}"]
 
 
 def find_chapter(plan: Dict, n: int) -> Dict:
@@ -79,6 +106,19 @@ def render_brief(book_dir: Path, n: int, vocab_detail: str, length: int, v: voca
 
     out.append("## What happens in this chapter")
     out.append(ch.get("summary", "(no summary in plan — ask the planner to fill it)") + "\n")
+    if ch.get("scenes"):
+        out.append("### Scenes — play each one out on the page, in this order")
+        for i, scene in enumerate(ch["scenes"], 1):
+            out.append(f"{i}. {scene}")
+        out.append("")
+    if ch.get("notes"):
+        out.append("### Notes for this chapter")
+        out.extend(render_notes(ch["notes"]))
+        out.append("")
+    if plan.get("notes"):
+        out.append("## Writing notes (decided before chapter 1 — keep to them)")
+        out.extend(render_notes(plan["notes"]))
+        out.append("")
     prev = [c for c in plan.get("outline", []) if c.get("n", 0) < n]
     if prev:
         out.append("### Story so far (for continuity)")
@@ -88,6 +128,7 @@ def render_brief(book_dir: Path, n: int, vocab_detail: str, length: int, v: voca
         out.append("")
 
     min_chars = val.get("min_chars", length)
+    target_chars = val.get("target_chars")
     min_expr = val.get("min_expressions", 0)
     min_out = val.get("min_out_of_list", 0.0)
 
@@ -98,8 +139,10 @@ def render_brief(book_dir: Path, n: int, vocab_detail: str, length: int, v: voca
                f"from. Reach a little beyond the list on purpose (a few words the story needs); each "
                f"gets glossed once. Compositional combinations of known characters are allowed "
                f"sparingly (≤ {val.get('max_stretch',0.15):.0%}).")
+    aim = (f" Aim for **~{target_chars}**: the floor is a gate, not a target, and a chapter "
+           f"written to the floor lands under it." if target_chars else "")
     out.append(f"- Length: at least **{min_chars} characters** of prose — this is checked and will fail "
-               f"the chapter. Write a full, meaty episode, not a summary. Reach the length through "
+               f"the chapter.{aim} Write a full, meaty episode, not a summary. Reach the length through "
                f"more scenes, dialogue, and concrete detail, never through fancier words.")
     if min_expr:
         out.append(f"- Expressions: use **at least {min_expr} different constructions** from the list "

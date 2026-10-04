@@ -34,7 +34,7 @@ Exit code: 0 = pass, 1 = fail (either gate exceeded). Use --json for the loop.
 Usage:
   validate.py CHAPTER.md [--threshold 0.05] [--max-stretch 0.15]
               [--harvest-out PATH] [--json] [--lists DIR]
-  validate.py BOOKDIR                # validate every chapter in book.json
+  validate.py BOOKDIR                # every chapter in book.json + the book-length gate
 """
 from __future__ import annotations
 
@@ -55,9 +55,10 @@ def _has_han(token: str) -> bool:
 
 
 def _strip_headings(text: str) -> str:
-    """Drop markdown headings and the RECAP line, so the length gate measures
+    """Drop markdown headings and the RECAP line, so every gate measures the
     prose the reader actually reads — a chapter can't pad its way in with a
-    long title."""
+    long title, and a Chinese RECAP (which update_state.py strips before the
+    EPUB) can't move the rates or count as an expression."""
     import re
     text = re.sub(r"(?m)^#.*$", "", text)
     return re.sub(r"(?m)^RECAP:.*$", "", text)
@@ -90,6 +91,7 @@ def classify(token: str, v: vocab_mod.Vocab) -> str:
 
 
 def validate_text(text: str, v: vocab_mod.Vocab) -> Dict:
+    text = _strip_headings(text)
     tokens = vocab_mod.segment(text)
     counted = 0
     cats = Counter()
@@ -114,7 +116,7 @@ def validate_text(text: str, v: vocab_mod.Vocab) -> Dict:
 
     return {
         "counted_tokens": counted,
-        "han_chars": sum(1 for c in _strip_headings(text) if vocab_mod._is_han(c)),
+        "han_chars": sum(1 for c in text if vocab_mod._is_han(c)),
         "known": cats["known"],
         "chengyu": cats["chengyu"],
         "composed": cats["composed"],
@@ -193,6 +195,7 @@ class Gates:
     max_stretch: float = 0.15
     min_chars: int = 0               # min Han chars of prose per chapter
     min_expressions: int = 0         # min distinct expressions.tsv constructions
+    min_book_chars: int = 0          # min Han chars of prose over the whole book
 
 
 # Defaults applied when neither the CLI nor plan.json says otherwise. The floors
@@ -218,6 +221,7 @@ def resolve_gates(args, book_dir: Path = None) -> Gates:
         max_stretch=pick("max_stretch", "max_stretch", GATE_DEFAULTS.max_stretch),
         min_chars=pick("min_chars", "min_chars", GATE_DEFAULTS.min_chars),
         min_expressions=pick("min_expressions", "min_expressions", GATE_DEFAULTS.min_expressions),
+        min_book_chars=pick("min_book_chars", "min_book_chars", GATE_DEFAULTS.min_book_chars),
     )
 
 
@@ -242,7 +246,13 @@ def resolve_max_level(args, book_dir: Path):
 
 
 def validate_book(book_dir: Path, args, v: vocab_mod.Vocab) -> int:
-    """Validate every chapter listed in BOOKDIR/book.json. Exit 0 iff all pass."""
+    """Validate every chapter listed in BOOKDIR/book.json, then the book as a
+    whole. Exit 0 iff every chapter passes and the book reaches min_book_chars.
+
+    The book gate exists for the same reason the chapter floors do: "make it a
+    substantial book" lived in the planner prompt, chapters each cleared their
+    own floor by a few characters, and the book still came out short. Only
+    what a script measures actually happens."""
     book = json.loads((book_dir / "book.json").read_text(encoding="utf-8"))
     gates = resolve_gates(args, book_dir)
     reports, all_passed = [], True
@@ -255,9 +265,17 @@ def validate_book(book_dir: Path, args, v: vocab_mod.Vocab) -> int:
         report["chapter"] = ch.get("source_md") or ch["source"]
         reports.append(report)
         all_passed &= report["passed"]
+    book_chars = sum(r["han_chars"] for r in reports)
+    book_reasons = []
+    if book_chars < gates.min_book_chars:
+        book_reasons.append(f"book too short ({book_chars}<{gates.min_book_chars} chars)")
+    all_passed &= not book_reasons
     if args.json:
         public = [{k: v_ for k, v_ in r.items() if not k.startswith("_")} for r in reports]
-        print(json.dumps(public, ensure_ascii=False, indent=2))
+        print(json.dumps({"chapters": public, "book_chars": book_chars,
+                          "min_book_chars": gates.min_book_chars,
+                          "book_fail_reasons": book_reasons, "passed": all_passed},
+                         ensure_ascii=False, indent=2))
     else:
         print(f"{book_dir}  (gates: out-of-list {gates.min_out_of_list:.0%}-{gates.threshold:.0%}, "
               f"stretch ≤ {gates.max_stretch:.0%}, ≥{gates.min_chars} chars, "
@@ -269,6 +287,8 @@ def validate_book(book_dir: Path, args, v: vocab_mod.Vocab) -> int:
                   f"out {r['out_of_list_rate']:.1%}  stretch {r['stretch_rate']:.1%}  "
                   f"expr {r['expression_count']:2d}  "
                   f"{'PASS' if r['passed'] else 'FAIL'}{why}{flagged}")
+        print(f"book: {book_chars} chars of prose over {len(reports)} chapters "
+              f"(≥{gates.min_book_chars}){'  <- ' + '; '.join(book_reasons) if book_reasons else ''}")
         print(f"RESULT: {'ALL PASS' if all_passed else 'FAIL'} ({len(reports)} chapters)")
     return 0 if all_passed else 1
 
@@ -287,6 +307,9 @@ def main(argv=None) -> int:
                     help="min Han characters of prose per chapter (default: plan.json or 0)")
     ap.add_argument("--min-expressions", type=int, default=None, dest="min_expressions",
                     help="min distinct expressions.tsv constructions (default: plan.json or 0)")
+    ap.add_argument("--min-book-chars", type=int, default=None, dest="min_book_chars",
+                    help="BOOKDIR only: min Han characters of prose over the whole book "
+                         "(default: plan.json or 0)")
     ap.add_argument("--max-level", default=None,
                     help="cap the known HSK list at this band, e.g. HSK3 "
                          "(default: plan.json `max_level`, else uncapped)")

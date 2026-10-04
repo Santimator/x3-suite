@@ -26,12 +26,17 @@ prose — you do not write chapters.
     "threshold": 0.05,
     "min_out_of_list": 0.015,
     "max_stretch": 0.15,
-    "min_chars": 800,
+    "min_chars": 1200,
+    "target_chars": 1400,
+    "min_book_chars": 30000,
     "min_expressions": 5,
     "rework_cap": 3
   },
+  "notes": { "voice": "...", "style_sheet": {}, "character_voices": {}, "...": "..." },
   "outline": [
-    { "n": 1, "title": "...", "summary": "<2-4 sentences: what happens, concretely>", "status": "planned" }
+    { "n": 1, "title": "...", "summary": "<2-4 sentences: what happens, concretely>",
+      "scenes": ["<scene 1>", "<scene 2>", "..."], "notes": "<optional, this chapter only>",
+      "status": "planned" }
   ],
   "introduced": {
     "comment": "Running set of glossed words. Scripts append after each accepted chapter.",
@@ -45,7 +50,7 @@ prose — you do not write chapters.
 
 Jumping straight to a chapter list is how books come out thin: the plot gets
 squeezed into however many beats you happened to think of, and whole stretches
-of the original vanish. Work in three passes instead, and write the first two
+of the original vanish. Work in four passes instead, and write the first three
 into `plan.json` *before* the outline exists.
 
 **Pass 1 — research the source.** Do not plan from memory. Look the work up
@@ -73,16 +78,46 @@ small events that would have made good chapters.
 List **every real event**, in order, before dividing anything. Aim for more
 events than you expect to need — merging is easy later, inventing is not.
 
-**Pass 3 — divide into episodes.** Now cut the event chain into chapters:
+**Pass 3 — notes & decisions** (`plan.json` → `notes`). Decide, once, the
+things the scribe would otherwise re-decide (differently) in every chapter.
+`gen_context.py` prints `notes` into every brief, so whatever is written here
+holds for the whole book. Free-form keys; the useful ones:
+
+```json
+"notes": {
+  "voice": "first person (我), past tense; frame chapters in the present",
+  "register": "short sentences; dialogue carries emotion, narration stays plain",
+  "style_sheet": { "chain": "链子 (never 锁链)", "the gate": "门 / 海门" },
+  "character_voices": { "阿夜": "few words, never says 我爱你, answers questions with questions" },
+  "fixed_facts": ["she is 18 in the first dream, 28 at the end", "the bell came from 奶奶"],
+  "throughline": "the tension every chapter must touch (e.g. 我 vs 他)",
+  "ambiguity": "if the story hinges on an open question, the rule for keeping it open, and the clue each chapter adds to each side",
+  "ending": "decided now, before chapter 1 — a scribe who doesn't know the ending can't plant it",
+  "avoid": ["above-level words the topic tempts you toward, with the in-list way round"]
+}
+```
+
+Settle the ending here even when the user leaves it open: foreshadowing,
+recurring motifs and the last chapter's echo of the first all depend on it.
+
+**Pass 4 — divide into episodes.** Now cut the event chain into chapters:
 
 - Give each event (or tight pair) its own chapter. When an event is big — a
   confrontation, a reveal — split it into before / during / after.
-- Budget the length: **total book ≈ chapters × min_chars**. A real graded reader
-  runs ~8,000–12,000 characters (Mandarin Companion Level 1 is ~10,000), so a
-  10-chapter book wants ~800–1,000 characters per chapter. If your event chain
-  can't fill that, you have too few events — go back to pass 1, not to padding.
-- Set `validation.min_chars` and `validation.min_expressions` accordingly. These
-  are enforced by `validate.py`; a chapter under budget fails and is reworked.
+- Budget the length: **total book ≈ chapters × target_chars**. A real graded
+  reader runs ~8,000–12,000 characters (Mandarin Companion Level 1 is ~10,000);
+  when the user asks for a *long* book, aim at 2–3× that. If your event chain
+  can't fill the budget, you have too few events — go back to pass 1, not to
+  padding.
+- Set the length gates. `min_chars` is the per-chapter floor, `min_book_chars`
+  the floor for the whole book (checked by `validate.py BOOKDIR`), both enforced.
+  Also set `target_chars` ~15–20% above `min_chars`: the brief tells the scribe
+  to aim there, because a chapter written *to* the floor lands a few characters
+  under it.
+- Give every chapter a **`scenes` list** (3–6 entries): the concrete moments
+  that happen on the page, in order. The brief prints them as a numbered list.
+  A beat with one scene becomes a summary; a beat with five becomes a chapter —
+  this is the lever that actually produces length, not the character gate.
 
 ## How to write the outline
 
@@ -111,7 +146,7 @@ use both:
   **8–12 chapters**; a longer source (a 西游记 episode, a full fairy tale) more.
   When in doubt, split a beat into its before/during/after rather than merging.
 - **Meaty episodes.** Each chapter is a full scene, not a paragraph: aim for
-  **the plan's `min_chars` (typically ~800)**. Reach that length the graded-reader way — more scenes,
+  **the plan's `target_chars`**, above the `min_chars` gate. Reach that length the graded-reader way — more scenes,
   dialogue, small concrete actions, and honest repetition — never by reaching for
   harder words. A beat that can only fill 150 characters is half a chapter; give
   it more to actually happen, or fold it into its neighbour.

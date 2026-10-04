@@ -42,3 +42,17 @@ word	pinyin	gloss
 
 No commentary, no code fence, no blank trailing rows. If every proposed row is
 transparent and nothing is worth glossing, return just the header line.
+
+## When Claude Code is the driver
+
+Rather than re-typing the TSV, write only the decisions and let the script apply
+them (the pinyin `update_state.py` filled in stays untouched):
+
+```
+python scripts/curate_glossary.py BOOK --chapter N --decisions - <<'EOF'
+{"drop": ["山上", "很多"], "gloss": {"码头": "harbour, dock"}}
+EOF
+```
+
+It refuses — file untouched — if a decision names a word that isn't in the
+proposed glossary, or if a kept row would still have no gloss.
