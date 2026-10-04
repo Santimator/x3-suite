@@ -60,6 +60,9 @@ tools/opds-server/secrets/*
 workspace/*
 # graded-reader
 !workspace/being-earnest/
+# graded-reader, long-form test: 25 chapters / 32k chars, built with plan
+# notes + scene lists + min_book_chars (the first book to exercise them)
+!workspace/beyond-the-gate/
 # pdf2epub
 !workspace/alcaldes-encontrados/
 # wallpaper-maker — the two samples, not the folder. workspace/wallpapers/ is
