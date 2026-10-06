@@ -84,8 +84,12 @@ every chunk), then:
    .venv/bin/python ai-tools/pdf2epub/scripts/check_chunk.py workspace/<slug> cNN
    ```
 
-   On FAIL, the report says what: format errors by line, or the missing /
-   invented passages. Fix *those* against the page image and re-run. Do not
+   It fails on a run of ≥12 source words missing or ≥8 words not in the
+   source, or recall < 0.95 / precision < 0.97 (shares of words covered).
+   Short runs are expected and harmless: a dropped running header, a word
+   you corrected (text-layer ligature leaks like `signififica` show up as a
+   one-word "missing" + "invented" pair). On FAIL, the report says what:
+   format errors by line, or the missing / invented passages. Fix *those* against the page image and re-run. Do not
    edit around the gate (re-wording until it passes is the failure it exists
    to catch); if you believe the gate is wrong about a passage, look at the
    page again, and say so to the user if it still is.

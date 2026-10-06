@@ -33,7 +33,9 @@ fail it. Transcribe the page.
   printed with it goes in the same heading after a colon. A byline (the
   author's name next to the title) is left out: the book's metadata carries it.
 - **Section headings** printed inside the text are `## ` headings, in
-  sentence case. Start a new chapter (`# `) only where the printed work starts
+  sentence case, without a final period. A bold sentence that opens a
+  paragraph (a run-in lead) is not a heading: it stays in its paragraph, as
+  `*emphasis*`. Start a new chapter (`# `) only where the printed work starts
   one: a new chapter, act, or article.
 - **Emphasis**: `*italic*` for italic or bold words in running text. Not for
   headings, not `**bold**`.
@@ -55,10 +57,13 @@ tables, regions someone added), each with an id and a preview. For each one:
   caption if there is one, else a few words saying what it shows. The text
   inside the figure (table cells, labels) stays in the image: do not
   transcribe it.
-- **Decoration** (an author's thumbnail, ornaments, logos, a mood photo
-  nobody refers to): either leave it out, or keep it small with a third field,
-  `[[fig:p045-1 | Two empty chairs | inline]]`. `inline` shows it at page
-  width, never rotated or split.
+- **Decoration** (an author's thumbnail, ornaments, logos): leave it out. An
+  illustration the text never refers to (a mood photo) may stay if it adds to
+  the page, with a third field: `[[fig:p045-1 | Dos sillas vacías | inline]]`.
+  `inline` keeps it at most page width with its caption below — never turned,
+  split or blown up to a page of its own.
+- **Captions** are in the book's language. Use the printed caption if there
+  is one; otherwise write a few plain words saying what the image shows.
 - **Tables are never markdown tables.** No construct for them exists: a table
   is a figure, or, if it is really just a list, paragraphs.
 
