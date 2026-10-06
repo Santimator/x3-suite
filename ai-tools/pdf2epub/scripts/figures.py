@@ -27,7 +27,9 @@ rendered from the PDF at the scale that fills the panel, and:
           tables, mostly.
   double  as single, unless cutting it in two halves (with OVERLAP shared
           between them, so nothing is lost on the cut) and giving each half a
-          page makes it at least SPLIT_GAIN larger than single would. The two
+          page makes it at least SPLIT_GAIN larger than single would — or,
+          when single would have to turn it and the halves would not, merely
+          as large: flipping a page is cheaper than turning the reader. The two
           halves sit on consecutive pages: page back and forth to read it.
 
   inline  (per figure only, `| inline`) the panel's width at most, never
@@ -184,16 +186,23 @@ def plan_figure(bbox, box, mode: str) -> dict:
         return {"layout": "inline", "scale": fit_scale(w, h, box), "rotated": False,
                 "parts": [list(bbox)]}
     s1, rot1 = best_single(w, h, box)
+    note = ""
     if mode == "double":
         s2, axis, rot2 = best_split(w, h, box)
-        if s2 >= SPLIT_GAIN * s1:
+        # Turning the reader costs more than flipping a page: a split that
+        # needs no turn beats a turned single image as soon as it is as big.
+        needed = 1.0 if rot1 and not rot2 else SPLIT_GAIN
+        note = f"split would gain {s2 / s1:.2f}x, needs {needed:.2f}x"
+        if s2 >= needed * s1:
             keep = 0.5 + OVERLAP / 2
             if axis == "x":
                 parts = [[x0, top, x0 + w * keep, bottom], [x1 - w * keep, top, x1, bottom]]
             else:
                 parts = [[x0, top, x1, top + h * keep], [x0, bottom - h * keep, x1, bottom]]
-            return {"layout": f"split-{axis}", "scale": s2, "rotated": rot2, "parts": parts}
-    return {"layout": "single", "scale": s1, "rotated": rot1, "parts": [list(bbox)]}
+            return {"layout": f"split-{axis}", "scale": s2, "rotated": rot2, "parts": parts,
+                    "note": note}
+    return {"layout": "single", "scale": s1, "rotated": rot1, "parts": [list(bbox)],
+            "note": note}
 
 
 def render_part(doc, page_num, bbox, scale, rotated, box) -> Image.Image:
@@ -260,6 +269,7 @@ def prepare(workdir: Path) -> dict:
             "mode": mode,
             "layout": plan["layout"],
             "rotated": plan["rotated"],
+            "note": plan.get("note", ""),
             "files": files,
             "caption": caption,
             "markdown": snippet([f["file"] for f in files], caption, plan["layout"]),
@@ -306,7 +316,8 @@ def main():
             for fid, p in data["prepared"].items():
                 sizes = ", ".join(f"{f['size'][0]}x{f['size'][1]}" for f in p["files"])
                 turn = ", turned 90°" if p["rotated"] else ""
-                print(f"{fid}: {p['layout']}{turn} -> {sizes}")
+                why = f"  ({p['note']})" if p.get("note") else ""
+                print(f"{fid}: {p['layout']}{turn} -> {sizes}{why}")
             print(f"{len(data['prepared'])} figure(s) for {data['device']} "
                   f"({data['panel'][0]}x{data['panel'][1]}), mode {data['figures']}")
     except HarnessError as e:

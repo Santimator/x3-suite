@@ -44,7 +44,8 @@ refuses to run without them):
 2. **Tables and figures: single or double?** `single` — each on one page,
    turned 90° when that makes it ≥1.25× bigger. `double` — additionally split
    in two halves on consecutive pages when that makes it ≥1.25× bigger than
-   single (dense tables, detailed diagrams).
+   single, or when it spares turning it at no loss of size (dense tables,
+   wide diagrams). `figures.py prepare` prints the gain behind each choice.
 
 Also confirm title/author if the PDF's metadata looks wrong.
 

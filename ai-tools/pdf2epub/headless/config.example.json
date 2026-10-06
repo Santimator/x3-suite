@@ -14,7 +14,7 @@
   "_device_note": "x3 (528x792) or x4pro (480x800). The runner cannot ask, so a job it plans takes this. An existing job.json keeps its own.",
 
   "figures": "single",
-  "_figures_note": "single: each figure/table on one page, turned 90 degrees when that makes it bigger. double: split over two consecutive pages when that makes it at least 1.25x bigger.",
+  "_figures_note": "single: each figure/table on one page, turned 90 degrees when that makes it bigger. double: split over two consecutive pages when that makes it at least 1.25x bigger, or when it avoids turning the figure at no loss of size.",
 
   "pages_per_chunk": 2,
   "max_attempts": 3,

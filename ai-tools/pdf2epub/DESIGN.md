@@ -89,7 +89,10 @@ figure is rendered to fill the panel. The panel is portrait; most tables are
 landscape — turning one 90° often makes it 1.5× larger. And a dense figure can
 be split in two with a small overlap, each half a page: back-and-forth between
 two pages beats squinting at one. Gains under 1.25× are not worth the
-reader's effort, so they are not taken. Captions go before page-sized images:
+reader's effort, so they are not taken — except that a split needing no turn
+beats a turned single image as soon as it is as large: turning the reader
+costs more than flipping a page (found on the X4 Pro, whose narrower panel
+left a landscape photo turned instead of split at a 1.15× gain). Captions go before page-sized images:
 after one, a caption would sit alone on the next page.
 
 The mode is the user's choice (`single` / `double`), per figure overridable
