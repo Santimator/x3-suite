@@ -134,25 +134,28 @@ Docs: [`ai-tools/graded-reader/SKILL.md`](ai-tools/graded-reader/SKILL.md)
 ## 4. Converting a PDF
 
 **Tested:** by worked conversion rather than self-test — whether it works is
-whether a real PDF becomes an EPUB a human finds sound. The committed proof is
-`workspace/alcaldes-encontrados`, a 1793 Spanish entremés, written up with the
-gaps it surfaced in
-[`CONVERSIONS.md`](ai-tools/pdf2epub/CONVERSIONS.md).
+whether a real PDF becomes an EPUB a human finds sound. The conversions and
+what they surfaced are in [`CONVERSIONS.md`](ai-tools/pdf2epub/CONVERSIONS.md).
 
-A PDF says where ink goes; an EPUB says what the text is. The pipeline recovers
-the second from the first: triage characterises the source, scripts extract and
-restore on the happy path, and the agent confirms routes, diagnoses failures and
-emits decisions that scripts apply. The model never bulk-generates — every byte
-traces back to the extraction, residual OCR noise included.
+A PDF says where ink goes; an EPUB says what the text is. A vision model reads
+the rendered pages a couple at a time and writes each chunk; a deterministic
+gate checks every chunk before the next — markdown the builder can render, and,
+where the PDF has a text layer, nothing dropped and nothing invented against it
+(a scan without one gets an AI review instead). Figures and tables become
+images sized for the reader's screen — **X3 or X4 Pro**, on one page or split
+across two — because a 6" panel cannot show them at print size.
 
 ```bash
 .venv/bin/pip install -r ai-tools/pdf2epub/requirements.txt
-# the OCR route also needs the system binary:
-#   apt install tesseract-ocr tesseract-ocr-spa   (or your source language)
 ```
 
-Docs: [`ai-tools/pdf2epub/SKILL.md`](ai-tools/pdf2epub/SKILL.md) · design and
-open questions: [`DESIGN.md`](ai-tools/pdf2epub/DESIGN.md)
+Drive it with Claude Code (it asks which device and how to lay out figures,
+then follows the skill), or unattended with
+`ai-tools/pdf2epub/headless/run_conversion.py` and any OpenAI-compatible vision
+model.
+
+Docs: [`ai-tools/pdf2epub/SKILL.md`](ai-tools/pdf2epub/SKILL.md) · design:
+[`DESIGN.md`](ai-tools/pdf2epub/DESIGN.md)
 
 ---
 
@@ -401,8 +404,9 @@ you never want a bot, you never need a token.
 
 Two things it will tell you rather than pretend about: Telegram refuses to let
 any bot download a file over 20 MB (drop those in `workspace/inbox/` and tap
-📥 Inbox), and PDFs are *staged*, not converted — that job still wants a driver,
-which today is Claude Code reading the pdf2epub skill.
+📥 Inbox), and a PDF is only converted when pdf2epub's headless runner is
+configured — otherwise it is staged for a driver (Claude Code reading the
+pdf2epub skill).
 
 Full documentation, including what each button does and how it talks to the
 rest of the suite: [`tools/tgbot/SKILL.md`](tools/tgbot/SKILL.md).

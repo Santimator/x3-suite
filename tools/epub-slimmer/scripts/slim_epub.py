@@ -43,10 +43,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "epub-builder" / "s
 
 from verify_epub import verify_integrity  # noqa: E402
 
-# The panel, and the width figures already used for content images elsewhere in
-# the suite (epub-builder's prepare.py). Not invented here.
+# The X3 panel. A content image is capped at its width: anything wider is bytes
+# the reader shrinks away. Not narrower — pdf2epub renders figures and tables
+# to exactly the panel, and shaving them here would undo that.
 PANEL = (528, 792)
-CONTENT_WIDTH = 480
+CONTENT_WIDTH = PANEL[0]
 JPEG_QUALITY = 72
 
 FONT_TYPES = ("font/", "application/font", "application/vnd.ms-opentype",

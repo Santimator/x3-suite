@@ -60,5 +60,6 @@ add a *declared* option to FORMAT.md instead.
 
 - graded-reader: `run_book.py` shells out to it; `selftest.py` imports
   `build_epub` for in-memory assembly.
-- pdf2epub: stage 5 of its pipeline (its `prepare.py` emits FORMAT.md-shaped
-  input).
+- pdf2epub: after `assemble.py` (which turns its gated chunks into
+  FORMAT.md-shaped input); `prepare_cover.py` and `devices.py` size its cover
+  and figures for the X3 or the X4 Pro.

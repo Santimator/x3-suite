@@ -32,7 +32,7 @@ where it is.
 | `tools/epub-slimmer/` | Pillow | `.venv/bin/python tools/epub-slimmer/scripts/selftest.py` **and** tgbot selftest (the bot slims every book it queues) |
 | `tools/tgbot/` | none, stdlib | `python3 tools/tgbot/scripts/selftest.py` |
 | `ai-tools/graded-reader/` | jieba, pypinyin | `.venv/bin/python ai-tools/graded-reader/scripts/selftest.py` |
-| `ai-tools/pdf2epub/` | pdfplumber, pypdf, pypdfium2, Pillow, pytesseract + system `tesseract-ocr` | no selftest, by design — re-run a `workspace/` sample by hand, read the EPUB ([`CONVERSIONS.md`](ai-tools/pdf2epub/CONVERSIONS.md)) |
+| `ai-tools/pdf2epub/` | pdfplumber, pypdf, pypdfium2, Pillow | no selftest, by design — re-run a `workspace/` sample by hand, read the EPUB ([`CONVERSIONS.md`](ai-tools/pdf2epub/CONVERSIONS.md)) |
 
 ```bash
 python3 -m venv .venv
@@ -46,6 +46,10 @@ python3 -m venv .venv
 - Device-facing change (EPUB output, fonts, feed) → read `extras/readers.md` first. It marks device-confirmed vs inferred; keep that distinction when you edit it.
 - Feed markup → the opds-server selftest's oracle is a port of the device's own OPDS client. Valid OPDS ≠ readable by this device. Same pattern for wallpapers: the oracle is a port of the firmware's BMP reader, and valid BMP ≠ drawn as computed.
 - Delivery to the device: OPDS is a **book-only pull** (`application/epub+zip`, SD root). Anything else — wallpapers, fonts, settings — is a push to the file-transfer web server. A book *can* also be pushed there (`tools/tgbot/` offers it); if you do, name it exactly as the OPDS client would (`crosspoint_client.opds_book_filename`) or the card ends up with two copies. `extras/readers.md` has the API.
+- Device target is the X3 everywhere, with one deliberate exception: pdf2epub
+  (and the cover it prepares) can aim a book at the **X4 Pro** instead. Panel
+  sizes live in one table, `epub-builder/scripts/devices.py`; size pixels from
+  it, never from a literal.
 - `tools/tgbot/` is **optional by construction**: it may import from any unit, and no
   unit may import it. Someone who only builds EPUBs must never need a token.
 - `workspace/` is gitignored except allowlisted samples (proof + fixtures). Never assume a book there is tracked. New sample → add to `.gitignore` allowlist deliberately.

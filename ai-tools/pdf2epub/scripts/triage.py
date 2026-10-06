@@ -8,11 +8,14 @@ this one is. This script measures — it never guesses about content:
   - font inventory
   - pathology heuristics: doubled lines (fake-bold double draw), broken
     intra-word spacing, repeated page furniture (headers/footers/page numbers)
-  - crude stopword-based language guess (feeds the OCR lang parameter)
+  - crude stopword-based language guess (the book's dc:language default)
 
-It emits triage.json (machine) and a summary (human/LLM). The route it
-recommends — TEXT / OCR / HYBRID — is advisory: the orchestrating model reads
-the summary plus a couple of sample pages and makes the final call.
+It emits triage.json (machine) and a summary (human/LLM). plan.py runs it. The
+route it names decides one thing only — which chunks have a text layer to gate
+against: TEXT (every page has one), SCAN (none), HYBRID (some), TRANSCRIPT (a
+user-supplied transcript sits next to the PDF). The model writes every chunk
+either way. A text layer that exists but is garbage (bad embedded OCR) still
+reads as TEXT here: the driver looks at a page and plans with --untrusted-text.
 
 Usage:
   triage.py SOURCE.pdf [--out triage.json] [--samples 3]
@@ -43,9 +46,9 @@ STOPWORDS = {
 # Real one-letter words; anything else of length 1 suggests broken spacing.
 OK_SINGLE = set("aeoyiu")
 
-# A user may drop a better transcription next to the PDF to bypass our OCR
-# entirely: <stem>-transcript.<ext> (e.g. source-transcript.md). Priority
-# order when several exist — the first wins, the rest are reported as extras.
+# A user may drop a better transcription next to the PDF (their own OCR, a
+# hand transcription): <stem>-transcript.<ext> (e.g. source-transcript.md).
+# Priority order when several exist — the first wins, the rest are reported.
 TRANSCRIPT_EXTS = ("md", "markdown", "txt", "text")
 
 
@@ -53,8 +56,8 @@ def find_transcripts(pdf_path: Path):
     """Sibling transcript files `<stem>-transcript.<ext>`, priority-ordered.
 
     Lets the user bring their own OCR / hand transcription; when present the
-    whole triage→extract→OCR front end is skipped and the agent works from
-    this text. Returns a list (may be empty)."""
+    agent writes the chunks from this text, checking it against the page
+    images. Returns a list (may be empty)."""
     stem = pdf_path.stem
     return [
         cand
@@ -213,15 +216,14 @@ def triage(pdf_path: Path, samples: int):
     transcripts = find_transcripts(pdf_path)
     cover_sidecar = find_cover(pdf_path)
     if transcripts:
-        # A user-supplied transcript overrides our own OCR. We still analyse
-        # the PDF (page count, language, images remain useful context and the
-        # visual ground truth), but the text comes from the sidecar and the
-        # agent, not from extract/OCR.
+        # A user-supplied transcript is a better reference than a scan's text
+        # layer. We still analyse the PDF (page count, language, images remain
+        # useful context and the visual ground truth).
         route = "TRANSCRIPT"
     elif len(text_pages) >= 0.9 * len(pages):
         route = "TEXT"
     elif len(text_pages) <= 0.1 * len(pages):
-        route = "OCR"
+        route = "SCAN"
     else:
         route = "HYBRID"
 
@@ -275,8 +277,8 @@ def summarize(r):
                     if t["looks_structured"] else "looks like raw text")
             note = (f"TRANSCRIPT provided: {t['path']} "
                     f"({t['chars']} chars, .{t['format']}, {hint}). "
-                    "OCR/extract skipped — read it and decide how to turn it "
-                    "into chapters (see SKILL.md § sidecar).")
+                    "Write the chunks from it, checking against the pages "
+                    "(see SKILL.md § Bring your own transcript).")
             if t["extras"]:
                 note += f"  [ignoring extra transcripts: {', '.join(t['extras'])}]"
         lines.insert(0, note)

@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 """pdf2epub toolbox: render PDF pages to grayscale PNGs.
 
-This exists so the agent can *look* at a page (Read tool on the PNG) when
-text extraction makes no sense, and as the rendering step OCR builds on.
-No text is produced here -- render_page() is imported by extract_ocr.py
-rather than shelled out to, so the two stay in lockstep on how a page
-becomes pixels.
+The page images are what the model reads when it writes a chunk — the
+printed page is the ground truth, the text layer only a spelling reference.
+plan.py runs this; no text is produced here.
 
 Usage:
   render_pages.py SOURCE.pdf --out DIR [--pages A-B] [--dpi 150]

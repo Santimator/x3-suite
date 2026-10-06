@@ -1,0 +1,30 @@
+{
+  "_comment": "Copy this file to config.json (gitignored) and adjust. run_conversion.py reads it; Claude Code driving SKILL.md by hand does not need it.",
+
+  "base_url": "https://integrate.api.nvidia.com/v1",
+  "_base_url_note": "Any OpenAI-compatible root whose model accepts image_url parts: NVIDIA NIM, a local llama.cpp/vLLM/Ollama server, or a provider's OpenAI-compatible endpoint.",
+
+  "model": "",
+  "_model_note": "Must be a vision model: it reads the page images. Quality is model-bound — a small local VLM will fail the gate on hard pages, and the runner then stops and says where. Confirm the exact id with your provider.",
+
+  "api_key_file": "secrets/api.key",
+  "api_key_env": "PDF2EPUB_API_KEY",
+
+  "device": "x3",
+  "_device_note": "x3 (528x792) or x4pro (480x800). The runner cannot ask, so a job it plans takes this. An existing job.json keeps its own.",
+
+  "figures": "single",
+  "_figures_note": "single: each figure/table on one page, turned 90 degrees when that makes it bigger. double: split over two consecutive pages when that makes it at least 1.25x bigger.",
+
+  "pages_per_chunk": 2,
+  "max_attempts": 3,
+  "_max_attempts_note": "Writes per chunk before the runner stops on it: the first, plus reworks fed the gate's report.",
+
+  "review_text_chunks": false,
+  "_review_note": "Chunks without a text layer are always reviewed (no other gate exists for them). true also reviews chunks the fidelity gate already passed.",
+
+  "temperature": 0.2,
+  "max_tokens": 8192,
+  "timeout": 300,
+  "max_image_dim": 1600
+}

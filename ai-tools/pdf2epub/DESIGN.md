@@ -1,253 +1,130 @@
-# pdf2epub — design notes & open questions
+# pdf2epub — design notes
 
-Working document for the brainstorm. SKILL.md holds the settled parts; this
-file holds the reasoning and the decisions still open.
+SKILL.md holds how to run it; this file holds why it is shaped this way, and
+what is still open.
 
-## The problem, precisely
+## The problem
 
-PDF is a *page description*: it says where ink goes, not what the text is.
-EPUB is a *document*: ordered XHTML chapters, a nav, metadata. Conversion is
-therefore **recovery of intent from ink** — and the amount of recovery needed
-varies wildly by source. A taxonomy worth designing against:
+PDF is a *page description*: where ink goes. EPUB is a *document*: ordered
+chapters, paragraphs, headings, a nav. Conversion is recovery of intent from
+ink, and the sources vary wildly:
 
 | class | source | text layer | main difficulty |
 |---|---|---|---|
-| A | born-digital, clean | good | structure only (chapters, TOC) |
-| B | born-digital, pathological | dirty | doubled glyphs, broken spacing, scrambled fonts |
-| C | scan, no text layer | none | OCR everything |
-| D | scan + embedded OCR | unknown quality | trust it or redo it? |
-| E | complex layout | varies | columns, footnotes, tables, figures, verse |
+| A | born-digital, clean | good | structure (chapters, columns, figures) |
+| B | born-digital, pathological | dirty | doubled glyphs, no space glyphs, ligature leaks |
+| C | scan, no text layer | none | read everything from pixels |
+| D | scan + embedded OCR | unknown, often garbage | trust it or not? |
+| E | complex layout | any | columns, footnotes, tables, figures, verse |
 
-Our fixture (`workspace/alcaldes-encontrados`) is class D with a class E twist
-(a verse entremés — the OCR text layer is trusted but noisy, and line breaks
-are metrical and must survive).
+## History: two routes, then one (2026-10)
 
-## Mindset: two routes, chosen by whether the text layer is trustworthy
+The first design was "deterministic first, generation never": extract the text
+layer, restore it with a rule file (`policy.json`: furniture regexes, reflow
+modes, normalizations), cut chapters from verbatim anchors (`draft.json`),
+model only as orchestrator. It was faithful and it was fragile: a policy is
+hand-authored per book, its own fidelity gate rejected ordinary
+de-hyphenation, and on a class D scan it faithfully carried garbage OCR onto
+the device. So a second route was added (2026-07) in which the agent read the
+page images and transcribed scans directly — and it was the one that produced
+readable books.
 
-> **Revised 2026-07 after on-device evidence.** The "deterministic-first,
-> generation-never" mindset below is correct — but *only for sources whose
-> text layer is trustworthy* (class A/B). It quietly assumed the extraction is
-> ground truth. For a scan whose OCR is garbage (class C/D, the common hard
-> case), that assumption is false, and holding to "every byte traces back to
-> the extraction" faithfully carries garbage onto the device
-> (`qdueejaáqmuiepfouir`). The resolution is **two routes** (see SKILL.md):
-> the **cheap route** below for good sources, and a **vision route** for bad
-> ones where the agent reads the *rendered page* — the real ground truth — and
-> writes the clean chapters directly. On the vision route the escalation ladder
-> is inverted: vision transcription is the *primary* engine, not the last rung.
-> The principle that unifies both: **the ground truth is the printed page, and
-> the agent uses whatever gets closest to it cheaply** — the text layer when
-> it's clean, its own eyes when it isn't, and a **user-supplied transcript**
-> (`source-transcript.{md,txt}` sidecar, route `TRANSCRIPT`) when the user has
-> a better OCR than ours. On the sidecar route the agent reads the given text
-> and decides how much shaping it still needs — no fixed rule.
+The 2026-10 redesign drops the first route and generalizes the second:
 
-The rest of this section describes the **cheap route** (good text layer). The
-suite's split (LLM judgment / deterministic mechanics) gets a sharper
-formulation here, because conversion — unlike graded-reader — starts from
-text that already exists. The model is excellent at *reading* — verifying
-that text is complete and correct, recognizing what kind of problem a page
-has — and unrigorous at *bulk generation*. So on this route generation is
-never its job:
+- **The model writes every chunk, for every class.** It reads the page image
+  (ground truth) with the text layer beside it as a spelling reference. Rule
+  files, tesseract, the restorer, the anchor cutter are gone: ~1,000 lines a
+  model does better and more cheaply in tokens than a human does in
+  rule-writing time.
+- **Small chunks** (2 pages by default) bound what one mistake can cost and
+  what one context must hold, and make the work resumable and parallelizable
+  across drivers.
+- **A deterministic gate after every chunk** keeps the old principle — trust
+  comes from checks, not from the model — but applies it to the model's output
+  instead of to a rule engine's.
 
-- **The happy path is fully deterministic.** Extract → restore → build, no
-  model in the loop. Scripts transform; they never invent.
-- **The agent is the orchestrator and verifier, not the generator.** It
-  reads triage output and text samples, confirms the route, checks the
-  extraction is complete and faithful, and *diagnoses* failures ("this is
-  char-doubling", "these pages need OCR", "this block is verse").
-- **On error, the agent reaches for tools, not for prose.** Its output is
-  small structured *decisions* — a route, a per-block reflow policy, a
-  normalization-table entry, chapter anchors — which the deterministic
-  scripts then apply to the whole text. **The agent writes decisions, not
-  text**; every byte in the EPUB traces back to the extraction.
-- **Where generation is unavoidable** (vision transcription of a page
-  tesseract mangled; patching a span no tool can fix), it is last on the
-  escalation ladder, span-scoped, and sits behind a deterministic fidelity
-  gate that catches omission and invention. Trust comes from the gate.
-- **File-based seams between stages**, so any slot can be filled by a
-  script, Claude Code interactively, or a headless runner later.
+## The gate, and why it is shaped like this
 
-### The escalation ladder
+*Format* is easy and catches the cheap failures (unclosed fence, HTML, a
+markdown table the builder cannot render, a word left split at a line end, a
+page number left in, a blank line inside a verse fence — which the builder
+would split).
 
-1. Deterministic extraction + deterministic fixes (char dedupe, furniture
-   removal, wordlist dehyphenation, heuristic reflow).
-2. Agent verification pass: read samples + coverage stats; pass → build.
-3. On failure: agent diagnoses, adjusts a decision (re-route pages to OCR,
-   flip a block to verse policy, add a normalization entry), re-runs step 1.
-4. Last resort, span-scoped: model transcribes or patches the specific
-   broken text, gated by the fidelity check, logged as a patch — never a
-   silent rewrite.
+*Fidelity* is the interesting part. Where a text layer exists it is a
+near-perfect word list of the page, even when its order is wrong. So both
+sides are reduced to lowercase words (line-break hyphens joined, NFKC) and a
+word counts as covered when a word 5-gram containing it occurs on the other
+side. That makes the comparison:
 
-## What the fixture already proved
+- **order-tolerant between blocks** (a heading the text layer put elsewhere,
+  columns) but **order-sensitive inside them** (a shuffled sentence fails);
+- **proportionate**: one fixed typo uncovers one word; a dropped sentence
+  uncovers a run as long as the sentence. The gate fails on the *longest
+  run* (≥12 missing, ≥8 invented words) and on overall recall/precision
+  (0.95/0.97), and prints the runs — the report is the rework instruction.
 
-- The same PDF extracts differently per library: pypdf showed *line-level*
-  doubling, pdfplumber *char-level* ("PPrreeffiieerroo"). The cause is fake
-  bold: every glyph drawn twice, slightly offset.
-- `pdfplumber.dedupe_chars()` fixes it **deterministically** — the recovered
-  text is near-perfect (accents intact, spacing correct). A pathology we
-  feared would need LLM cleanup costs zero tokens. Triage detects it
-  (dedupe drop > 30%) and stage 1 applies it.
-- Subset font names are scrambled (`HXCFJR+font1`) — font *names* carry no
-  semantics; font *size/style metrics* still do, and stage 3 should use them
-  as structure signals.
+A first version measured n-gram *sets*; one fixed word then cost five n-grams
+and harmless fixes dragged precision under the bar. Word coverage fixed that.
 
-## Pipeline stages and the LLM/deterministic split
+Text layers interleave columns line by line ("left line 1 + right line 1"),
+which would break every 5-gram crossing a line. `extract_text.py` finds a
+vertical gutter no body line crosses and emits left column, then right,
+between full-width lines (titles). Word gaps are judged relative to font size
+(`x_tolerance_ratio`): pdfplumber's fixed 3pt glued words on tightly justified
+9pt text whose gaps measured 2.99pt.
 
-| stage | actor | in → out | agent's role |
-|---|---|---|---|
-| 0 triage | script (`triage.py`) ✅ | source.pdf → triage.json + route | confirm route from samples; re-route on evidence |
-| 1 extract | **toolbox** (agent-picked tool + params) | source.pdf → extract/pages (blocks w/ bbox, font, size) | pick the tool and its parameters; verify output; on failure reconsider tool or re-parameterize and re-run |
-| 2 restore | script (`restore.py`, policy-driven) | raw pages + policy.json → clean text | **verify** completeness/faithfulness on samples; on failure edit policy.json and re-run; span-scoped patches only as last resort (gated) |
-| 3 draft | **agent** | clean text + triage signals → draft.json | author the structured draft: what text goes where, chapter anchors, nav entries, image placements |
-| 4 prepare | script | draft.json → book.json + chapters/*.md + images/ | none — the draft is validated (anchors must exist verbatim) and cut mechanically; images resized/converted to spec |
-| 5 build | script | the book-format contract → EPUB | none |
-| 6 verify | script | EPUB → coverage + integrity report | read the report; human spot-check |
+Where there is no text layer, no deterministic content check exists, so the
+gate is a **review**: a second model pass (or a fresh subagent) comparing the
+chunk with the pages, recorded in `review.json` against the chunk's hash;
+assembly refuses without it. A writer reviewing its own output in the same
+context catches little — keep them apart.
 
-### The toolbox (stage 1)
+## Figures and tables on a 6" panel
 
-"The agent verifies and reconsiders" only works if it has real alternatives
-to reach for. Extraction is therefore not one script but a small toolbox of
-parameterized, deterministic CLI tools, and the agent's moves are: pick →
-run → verify → reconsider (different tool) or re-parameterize (same tool,
-different flags):
+CrossPoint draws an image at its own pixel size, only shrinking it to the
+viewport, never enlarging it, and gives an image too tall for the rest of the
+page a page of its own (read from the firmware source: `extras/readers.md`).
+So size is decided at preparation, from the vector source: every placed
+figure is rendered to fill the panel. The panel is portrait; most tables are
+landscape — turning one 90° often makes it 1.5× larger. And a dense figure can
+be split in two with a small overlap, each half a page: back-and-forth between
+two pages beats squinting at one. Gains under 1.25× are not worth the
+reader's effort, so they are not taken. Captions go before page-sized images:
+after one, a caption would sit alone on the next page.
 
-- `extract_text.py` — text-layer route. Flags: `--dedupe` (char-doubling
-  fix), `--layout/--no-layout`, `--pages A-B`.
-- `extract_ocr.py` — scanned route: render + tesseract. Flags: `--lang`
-  (from triage's guess), `--dpi`, `--psm` (layout mode), `--pages`.
-- `render_pages.py` — pages → PNG, so the agent can *look* at what a page
-  actually shows when text output makes no sense, and for last-resort
-  vision transcription of a page tesseract mangled.
-- Tools are per-page composable: a HYBRID book can use the text layer for
-  the body and OCR for two image-only pages.
+The mode is the user's choice (`single` / `double`), per figure overridable
+(`inline` for decoration), and the device too (X3 528×792, X4 Pro 480×800 —
+`epub-builder/scripts/devices.py`). Changing either re-renders figures and
+cover, never the text.
 
-### The draft and the prepare step (stages 3–4)
+## Drivers
 
-Between "clean text" and "EPUB" the agent authors **draft.json** — the
-structured plan of the book: spine order, chapter boundaries as verbatim
-anchors, TOC labels, which images survive and where they land, front-matter
-handling. It is the agent's whole creative output, and it is *checkable*:
-`prepare.py` validates every anchor exists in the text, every image ref
-resolves, every paragraph lands in exactly one chapter — then cuts chapters,
-resizes/grayscales images to device spec, and emits the builder's input.
+The seams are files, so two drivers fill the same slots:
 
-`policy.json` (stage 2) is the same idea one level down: per-block
-`reflow: prose|verse|preserve`, furniture patterns to drop, a punctuation
-normalization table, dehyphenation exceptions — switches the restorer
-applies mechanically. The deterministic pre-passes (char dedupe,
-repetition-based furniture removal, wordlist dehyphenation) handle
-everything provable before the agent ever looks.
+- **Claude Code** following SKILL.md: the quality path, interactive (it asks
+  the device and figure mode), can add figure regions, judge a garbage OCR
+  layer, take a user transcript.
+- **`headless/run_conversion.py`**: unattended, any OpenAI-compatible vision
+  model, device/mode from config. Stops rather than guesses; resumes from
+  files. `tools/tgbot/` calls it.
 
-### The builder contract
-
-The builder is now its own skill — suite infrastructure at
-`epub-builder/` — and consumes exactly one thing: the common
-book format **documented in its [`FORMAT.md`](../../epub-builder/FORMAT.md)** —
-book.json + chapters/*.md + prepared images/. That document *is* the
-contract the agent must know when drafting and preparing; if a construct
-isn't in it, the builder doesn't support it. pdf2epub's needs (verse blocks,
-images, endnotes, cover) are specified there as extensions for the builder
-to implement.
-
-## The common bus
-
-Stage 3 emits the **same intermediate format graded-reader uses**:
-`chapters/*.md + book.json`. Consequences:
-
-- One EPUB builder for the whole suite (generalize `build_epub.py`: pinyin
-  becomes an optional feature, not the spine of the script).
-- Device fonts are shared too: `extras/fonts/WenKaiFull` covers full CJK,
-  so a converted *Chinese* PDF needs no per-book font work (charset-level
-  subsetting was retired — sparse-interval fonts fail on-device; readers.md).
-- Workspace conventions and device lore (`extras/readers.md`) are shared
-  instead of duplicated. (Verification isn't: graded-reader has objective gates
-  and a self-test; pdf2epub is proven by worked conversions — `CONVERSIONS.md`.)
+Chunk state is computed from files (`out.md` hash vs `check.json` and
+`review.json`), so either can pick up where the other stopped.
 
 ## Open questions
 
-1. **OCR engine** (route OCR/HYBRID). ~~Leaning hybrid.~~ **Settled 2026-07:
-   the agent's own vision is the OCR engine for bad sources.** Tesseract on odd
-   layouts (verse, columns, old type) produces exactly the garbage that started
-   this redesign; a vision-LLM reading the rendered page does not, and it is the
-   *same agent already driving the pipeline* — no extra service, no token
-   surprise beyond the pages it must read anyway. `extract_ocr.py` (tesseract)
-   stays in the toolbox as a cheap first look and for bulk clean scans, but the
-   primary scanned-book path is vision transcription (SKILL.md § "Vision
-   transcription"). The "fidelity gate" it was said to require is *not* a gate
-   against the OCR — it is completeness plus a human read.
-2. **Images/figures.** Keep (grayscale, downscaled to device width) or drop?
-   E-ink + tiny screen argues for a size cap and dropping decorative images;
-   content figures should survive. **Leaning: keep with cap, restorer flags
-   decorative.**
-3. **Footnotes.** EPUB3 noteref popups won't render on CrossPoint. Inline at
-   paragraph end vs. per-chapter endnotes. **Leaning: endnotes with
-   back-links** (the glossary link machinery in build_epub.py already does
-   exactly this dance).
-4. **Fidelity vs. readability.** ~~Open~~ **Settled by the mindset:** all
-   edits (the fixture's low-9 `‚` for `,`, OCR confusions) go through the
-   normalization table in `policy.json` — the agent proposes entries, the
-   restorer applies them mechanically and logs them. No silent edits.
-5. **Verse detection.** Reflow destroys drama/poetry. Triage could flag
-   "verse-like" pages (short ragged lines, no justification); the restorer
-   then defaults to preserving breaks. Needed for the fixture. **Leaning:
-   yes, add to triage.**
-6. **Headless runner.** ~~Interactive-first: prove the loop with Claude Code
-   driving before wiring the runner.~~ **The precondition is met (2026-08) —
-   this is now owed work, not a new feature.** `workspace/alcaldes-encontrados`
-   is a complete worked conversion on the vision route, and SKILL.md calls the
-   pipeline fully implemented. graded-reader has had `run_book.py` + `llm.py`
-   since the start; pdf2epub has no `headless/` at all, so the suite is
-   asymmetric for no reason anyone chose. See "The headless runner, in full"
-   below.
-
-## The headless runner, in full
-
-**The shape.** `ai-tools/pdf2epub/headless/` mirroring
-`ai-tools/graded-reader/headless/` exactly: a `run_conversion.py` entry point,
-`config.example.json` → gitignored `config.json`, gitignored `secrets/` +
-its README, and the same OpenAI-compatible seam. The seams between stages are
-already file-based (a decision this document made early, for this reason), so
-the runner fills the same slots Claude Code fills interactively — no stage
-changes shape to accommodate it.
-
-**Both routes are drivable. Neither is blocked by the protocol.**
-
-- *Cheap route* — the model's output is small structured decisions: route
-  confirmation, `policy.json`, `draft.json`. Text in, JSON out. This is exactly
-  the shape `run_book.py` already runs, and it needs nothing new.
-- *Vision route* — OpenAI chat completions carry images as `image_url` content
-  parts, base64 `data:` URLs included; llama.cpp's server and NIM both serve
-  vision models that accept them, and `render_pages.py` already emits the PNGs.
-  What stands between us and it is missing code, **not** a protocol limit: the
-  shared `llm.py` sends `content` as a plain string and needs the array form.
-  That file is the seam graded-reader also rides, so touching it means
-  re-running graded-reader's selftest (AGENTS.md units table).
-
-**Two constraints to design against, not discover.**
-
-- *Page budget.* A 200-dpi page PNG is ~1–3 MB, ~1.4× that in base64. A
-  200-page book will not fit anyone's context. The runner needs an explicit
-  downscale-and-batch policy — pages per request, a max dimension, and a
-  resume point — decided up front rather than tuned after the first failure.
-- *Quality is model-bound, and the bar here is high.* The fixture is 1793
-  Spanish in period type. A small local VLM will not transcribe it to the
-  standard `CONVERSIONS.md` sets. So the runner must be **willing to stop** —
-  the same discipline as `run_book.py` refusing to add-and-gloss silently:
-  report the route, report what it could not read, save everything up to that
-  point, and hand the job back. A bad transcription that completes is worse
-  than a run that stops, because the gate for this pipeline is a human reading
-  the result.
-
-**Therefore the CLI driver is not a fallback.** Pointing Claude Code or Codex
-at the folder is the *quality* path for hard scans, and the runner is the
-cheap-and-unattended path — two drivers over the same scripts, differing in
-competence, not in privilege. Nothing about the runner deprecates SKILL.md.
-
-**Verification is unchanged.** pdf2epub has no self-test by design; a runner
-does not earn it one. The gate stays completeness plus a human read, recorded
-in `CONVERSIONS.md`.
-7. **TOC without chapters.** The fixture is an unbroken monologue — no
-   chapter headings at all. Architect options: single-chapter EPUB, or
-   invented (clearly marked) navigation splits every ~N pages. **Leaning:
-   single chapter for fidelity, optional `--split` for navigability.**
+1. **Thresholds** (12/8 words, 0.95/0.97) are set from one born-digital
+   article. They need a few more conversions — a novel, a paper with
+   footnotes, a two-column scan — before they are trusted.
+2. **Footnotes** are written as endnotes per chunk and numbered on by the
+   writer; assembly only checks uniqueness per chapter. A renumbering pass in
+   assembly would remove a source of mistakes.
+3. **Vector figures** (diagrams drawn with lines, unruled tables) are not
+   detected; they are added by hand with `figures.py add`. Clustering
+   `page.rects/lines/curves` into regions would make that automatic.
+4. **Device rendering of large images** — the shrink-to-viewport quality on
+   dense tables, and whether a full-panel image leaves room for the status bar
+   without a second shrink — is inferred from source, not confirmed on the
+   panel.
+5. **Chunk size.** Two pages keeps a model's context and a mistake's cost
+   small; dense pages might want one, light ones three. Untested.

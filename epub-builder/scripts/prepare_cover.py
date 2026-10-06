@@ -12,9 +12,11 @@ Two jobs, in the suite's "bring your own, we make it work" spirit:
        - format PNG or baseline JPEG  (progressive JPEG and GIF fall back to an
          [Image] placeholder on-device — confirmed in the CrossPoint guide);
        - grayscale  (the panel is e-ink; colour is wasted bytes);
-       - fits within the 528x792 panel  (a ~2000px-tall cover costs ~10s of
-         on-device conversion for the sleep-screen/thumbnail — keep it small).
-     We emit grayscale PNG <= 528x792, which satisfies all of them by design.
+       - fits within the device panel  (X3 528x792 by default, X4 Pro 480x800
+         with --device x4pro; a ~2000px-tall cover costs ~10s of on-device
+         conversion for the sleep-screen/thumbnail — keep it small).
+     We emit a grayscale PNG within the panel, which satisfies all of them by
+     design.
 
   2. **Optionally draw the title onto it.** For a template cover that leaves a
      blank area (e.g. extras/default-covers/default.png's parchment panel), the book
@@ -26,6 +28,7 @@ Usage:
   prepare_cover.py INPUT --out images/cover.png --title "Los alcaldes encontrados"
   prepare_cover.py INPUT --title-config extras/default-covers/default.json --title "..." --out ...
   prepare_cover.py INPUT --check          # report validity only, write nothing
+  prepare_cover.py INPUT --device x4pro --out ...   # size for the X4 Pro panel
 """
 
 import argparse
@@ -35,8 +38,10 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
-# CrossPoint e-ink panel; a cover need never exceed it.
-PANEL_W, PANEL_H = 528, 792
+from devices import DEFAULT_DEVICE, DEVICES, panel
+
+# The default (X3) panel; a cover need never exceed its device's panel.
+PANEL_W, PANEL_H = panel(DEFAULT_DEVICE)
 
 # Repo root, so bundled fonts/assets resolve regardless of the caller's cwd.
 # This file lives at epub-builder/scripts/prepare_cover.py.
@@ -78,8 +83,9 @@ def is_grayscale(img: Image.Image) -> bool:
     return img.mode in ("L", "1")
 
 
-def validity(path: Path):
+def validity(path: Path, device: str = DEFAULT_DEVICE):
     """Return (ok, reasons). ok=True means usable as an EPUB cover as-is."""
+    panel_w, panel_h = panel(device)
     reasons = []
     try:
         with Image.open(path) as img:
@@ -92,14 +98,14 @@ def validity(path: Path):
             if not is_grayscale(img):
                 reasons.append(f"mode {img.mode} (need grayscale)")
             w, h = img.size
-            if w > PANEL_W or h > PANEL_H:
-                reasons.append(f"size {w}x{h} (exceeds {PANEL_W}x{PANEL_H} panel)")
+            if w > panel_w or h > panel_h:
+                reasons.append(f"size {w}x{h} (exceeds {panel_w}x{panel_h} panel)")
     except Exception as e:  # unreadable / truncated / unknown format
         return False, [f"cannot open: {e}"]
     return (not reasons), reasons
 
 
-def to_valid(img: Image.Image) -> Image.Image:
+def to_valid(img: Image.Image, device: str = DEFAULT_DEVICE) -> Image.Image:
     """Grayscale, fit within the panel (downscale only — never upscale a raster
     cover), flattening any alpha onto white first."""
     if img.mode in ("RGBA", "LA", "P"):
@@ -107,8 +113,9 @@ def to_valid(img: Image.Image) -> Image.Image:
         bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
         img = Image.alpha_composite(bg, img)
     img = img.convert("L")
+    panel_w, panel_h = panel(device)
     w, h = img.size
-    scale = min(PANEL_W / w, PANEL_H / h, 1.0)
+    scale = min(panel_w / w, panel_h / h, 1.0)
     if scale < 1.0:
         img = img.resize((max(1, round(w * scale)), max(1, round(h * scale))),
                          Image.LANCZOS)
@@ -223,7 +230,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("input", type=Path)
-    ap.add_argument("--out", type=Path, help="output PNG (grayscale, <=528x792)")
+    ap.add_argument("--out", type=Path, help="output PNG (grayscale, within the panel)")
+    ap.add_argument("--device", choices=sorted(DEVICES), default=DEFAULT_DEVICE,
+                    help=f"target reader, sizes the panel (default {DEFAULT_DEVICE})")
     ap.add_argument("--check", action="store_true",
                     help="report validity only; write nothing (exit 0 valid / 1 not)")
     ap.add_argument("--title", help="draw this title onto the cover")
@@ -231,7 +240,7 @@ def main():
     ap.add_argument("--font", help="path to a .ttf/.otf for the title")
     args = ap.parse_args()
 
-    ok, reasons = validity(args.input)
+    ok, reasons = validity(args.input, args.device)
 
     if args.check:
         print(f"{args.input}: {'VALID' if ok else 'INVALID'}"
@@ -253,7 +262,7 @@ def main():
     else:
         note = "transformed: " + "; ".join(reasons)
 
-    out_img = to_valid(img)
+    out_img = to_valid(img, args.device)
     args.out.parent.mkdir(parents=True, exist_ok=True)
     out_img.save(args.out, "PNG", optimize=True)
     print(f"wrote {args.out}  ({out_img.size[0]}x{out_img.size[1]} grayscale PNG; {note})")

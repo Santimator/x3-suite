@@ -9,6 +9,10 @@ workspace/*/verify-report.json
 ai-tools/graded-reader/headless/config.json
 ai-tools/graded-reader/headless/secrets/*
 !ai-tools/graded-reader/headless/secrets/README.md
+# pdf2epub headless runner: same deal
+ai-tools/pdf2epub/headless/config.json
+ai-tools/pdf2epub/headless/secrets/*
+!ai-tools/pdf2epub/headless/secrets/README.md
 
 # wallpaper-maker: the reader's address on your LAN, remembered between pushes
 tools/wallpaper-maker/last-device.json

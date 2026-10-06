@@ -385,8 +385,34 @@ those). For the cover:
   time. Panel-sized is instant.
 
 `epub-builder/scripts/prepare_cover.py` enforces all three (and can draw
-the title onto a template cover). Content figures follow the same grayscale
-rule at 480px width (`prepare.py`).
+the title onto a template cover); `--device x4pro` fits the X4 Pro's 480×800
+instead.
+
+## Content images (EPUB figures)
+
+*Read from source, not device-confirmed:* CrossPoint `lib/Epub/Epub/parsers/
+ChapterHtmlSlimParser.cpp` at commit `7394e40` (2026-10-05). Inferred
+behaviour, to confirm on the panel:
+
+- An `<img>` with no CSS width/height is drawn at its **own pixel size**,
+  shrunk (aspect kept) only if it exceeds the viewport — the panel minus the
+  reader's screen margin and status bar. It is **never upscaled**. So a figure
+  only gets big on the device if it is big in the file.
+- An image that does not fit in what is left of the current page **starts a
+  new page**; one as tall as the viewport always has a page to itself. A
+  caption after such an image lands alone on the next page.
+- HTML tables are laid out as equal-width text columns across the viewport
+  (too many columns for the width fall back to full-width flow), and an image
+  inside a cell is reduced to its alt text. On a 528 px panel a printed table
+  is better shipped as an image — and the builder has no table construct
+  anyway.
+
+pdf2epub's `figures.py` designs against exactly this: figures and tables
+are rendered from the PDF to fill the device panel (`epub-builder/scripts/
+devices.py`), turned 90° when that makes them much larger, optionally split
+over two consecutive pages, and their captions placed *before* the image.
+Grayscale, PNG. Whether the device's own shrink-to-viewport looks clean on
+dense tables is the first thing to check on the panel.
 
 ## The sleep screen (wallpaper)
 
