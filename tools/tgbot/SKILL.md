@@ -574,13 +574,14 @@ rebuilds it. The X3 and its current contents remain untouched.
 
 ### A PDF
 
-Staged, not converted. The bot creates `workspace/<slug>/source.pdf`, runs
-`triage.py`, and reports the class and route it found. Then it is honest about
-what happens next: `ai-tools/pdf2epub` has no headless runner yet
-([`DESIGN.md`](../../ai-tools/pdf2epub/DESIGN.md), open question 6), so the job
-waits for a driver — which today means pointing Claude Code at the folder and
-reading that skill. When the runner lands, the bot calls it and this paragraph
-gets shorter.
+The bot creates `workspace/<slug>/source.pdf`, runs `triage.py`, reports the
+route it found, and hands the folder to pdf2epub's headless runner
+(`ai-tools/pdf2epub/headless/run_conversion.py`). The runner takes the device
+and figure layout from its own `config.json`, since nobody is there to ask.
+Without that config (or a key) it exits at once saying so, and the bot shows
+that line: the job stays staged for a driver, Claude Code reading
+`ai-tools/pdf2epub/SKILL.md`. A run that stops on a chunk keeps its progress;
+the next run resumes.
 
 **The 20 MB wall.** Telegram refuses to let *any* bot download a file bigger
 than 20 MB, whatever your account managed to upload. Scanned PDFs live right

@@ -21,7 +21,7 @@ adding one is a change to *this file* first.
 workspace/<slug>/
   book.json           metadata + spine (below)
   chapters/chNN.md    one markdown file per spine item, in order
-  images/             prepared images (grayscale, ≤480px wide), referenced from chapters
+  images/             prepared images (grayscale, within the target device's panel), referenced from chapters
   build/              outputs — and any generated inputs the service prepares
 ```
 
@@ -63,9 +63,10 @@ The complete construct set. Everything else is literal text.
 | `# Title` | `<h1>` — the first one is the chapter title and TOC label |
 | `## Section` | `<h2>` |
 | blank-line-separated block | `<p>` |
-| `*emphasis*` | `<em>` |
-| ` ```verse ` … ` ``` ` | `<div class="verse">` with one `<p>` per line, hanging indent — line breaks preserved (poetry, drama) |
-| `![caption](../images/f1.png)` | `<figure><img><figcaption>` — the file must already exist, prepared |
+| `*emphasis*` | `<em>` (italic) |
+| `**strong**` | `<strong>` (bold) — no nesting with `*…*` |
+| ` ```verse ` … ` ``` ` | `<div class="verse">` with one `<p>` per line, hanging indent — line breaks preserved (poetry, drama). No blank line inside a fence: a new stanza is a new fence |
+| `![caption](../images/f1.png)` | `<figure><img><figcaption>` — the file must already exist, prepared. `![](…)` (empty caption) → no `<figcaption>`, for page-sized images whose caption sits in the paragraph before |
 | `text[^1]` + `[^1]: note` | numbered endnote link + an endnotes section at the chapter end |
 | `{word\|reading}` | the word with a pronunciation guide, presented per `reading_style` |
 

@@ -65,7 +65,8 @@ READING_STYLES = ("after", "ruby", "none")
 class BuildError(Exception):
     """An authoring error the builder catches instead of a raw traceback --
     a missing image or an undefined footnote ref should have been caught by
-    prepare.py, but the builder is the last line of defense."""
+    the service (pdf2epub's check_chunk.py / assemble.py), but the builder is
+    the last line of defense."""
 
 
 # --------------------------------------------------------------------------- #
@@ -74,6 +75,7 @@ class BuildError(Exception):
 # --- Inline and block constructs (all documented in FORMAT.md) ------------- #
 FOOTNOTE_REF_RE = re.compile(r"\[\^([^\]]+)\]")
 FOOTNOTE_DEF_RE = re.compile(r"^\[\^([^\]]+)\]:\s*(.*)$")
+STRONG_RE = re.compile(r"\*\*([^*]+)\*\*")
 EMPHASIS_RE = re.compile(r"\*([^*]+)\*")
 # {word|reading}: a word carrying a pronunciation guide (pinyin, furigana...).
 # The service decides which words get one; the builder only presents it.
@@ -83,15 +85,16 @@ IMAGE_RE = re.compile(r"^!\[([^\]]*)\]\(([^)]+)\)$")
 
 def split_blocks(md: str) -> List[str]:
     """Blank-line-separated blocks. A ```verse fenced block has no internal
-    blank lines (restore.py never inserts one), so it always survives as a
-    single block here -- no special-casing needed at this stage."""
+    blank lines (FORMAT.md; pdf2epub's gate rejects one), so it always survives
+    as a single block here -- no special-casing needed at this stage."""
     return [b for b in re.split(r"\n\s*\n", md.strip()) if b.strip()]
 
 
 def apply_emphasis(escaped_text: str) -> str:
-    """*em* -> <em>, single asterisk pairs only, no nesting. Must run on
+    """**strong** -> <strong>, then *em* -> <em>; no nesting. Must run on
     already-HTML-escaped text (the markup chars * are untouched by escape)."""
-    return EMPHASIS_RE.sub(lambda m: f"<em>{m.group(1)}</em>", escaped_text)
+    text = STRONG_RE.sub(lambda m: f"<strong>{m.group(1)}</strong>", escaped_text)
+    return EMPHASIS_RE.sub(lambda m: f"<em>{m.group(1)}</em>", text)
 
 
 def render_reading(word: str, reading: str, style: str) -> str:
@@ -159,8 +162,12 @@ def image_paragraph(caption: str, rel_path: str, prefix: str,
     epub_src = f"images/{basename}"
     if images_out is not None:
         images_out.append((rel_path, epub_src))
+    # An empty caption means "no caption": a page-sized image must not drag a
+    # blank caption block onto a page of its own (pdf2epub's split figures).
+    figcaption = (f"<figcaption>{html.escape(caption)}</figcaption>"
+                  if caption.strip() else "")
     return (f'<figure><img src="{epub_src}" alt="{html.escape(caption)}"/>'
-            f"<figcaption>{html.escape(caption)}</figcaption></figure>")
+            f"{figcaption}</figure>")
 
 
 def strip_footnote_defs(md: str) -> Tuple[str, Dict[str, str]]:

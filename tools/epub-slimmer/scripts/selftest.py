@@ -169,7 +169,7 @@ def main() -> int:
         print("\nthe pictures:")
         check("the cover fits the panel", cover.size <= (528, 792), str(cover.size))
         check("... in grayscale", cover.mode == "L", cover.mode)
-        check("a content image is capped at 480 wide", plate.width == 480,
+        check("a content image is capped at the panel's 528 wide", plate.width == 528,
               str(plate.size))
         check("... and is grayscale", plate.mode == "L", plate.mode)
         check("a progressive JPEG comes back baseline",

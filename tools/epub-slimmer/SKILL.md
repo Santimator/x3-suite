@@ -41,7 +41,7 @@ images.
 
 | Kept exactly | Changed | Dropped |
 |---|---|---|
-| Text, spine, nav, metadata, filenames | Images → grayscale, capped at 480 px wide (cover: the 528×792 panel), re-encoded in the format they arrived in | Embedded fonts |
+| Text, spine, nav, metadata, filenames | Images → grayscale, capped at the panel's 528 px width (cover: the whole 528×792 panel), re-encoded in the format they arrived in | Embedded fonts |
 | Everything else in the CSS | Progressive JPEG → baseline | `@font-face` and `font-family` |
 | | | Scripts, audio, video |
 

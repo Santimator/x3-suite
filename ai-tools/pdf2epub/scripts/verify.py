@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
-"""Stage 6 of pdf2epub: verify a built EPUB is structurally sound and that
-its visible text still covers the restored source.
+"""pdf2epub, last step: verify a built EPUB is structurally sound and that
+its visible text still covers the book's chapters.
 
 Two independent checks, both deterministic:
   1. Integrity -- delegated to the builder's shared verify_epub.py
      (mimetype first/stored, manifest <-> zip parity, internal links and
      fragments resolve, XHTML/OPF well-formed). One implementation, used by
      both suite tasks.
-  2. Coverage -- strip tags from the spine's XHTML, normalize whitespace,
-     and run it through the same fidelity gate restore.py uses (char_ratio,
-     ngram_containment) against the book's own chapters/*.md (what actually
-     went into the EPUB). This catches a builder mangle/drop; prepare's
-     paragraph accounting separately guarantees the restored -> chapters step.
-     Conversion-specific (needs the book), so it stays here.
+  2. Coverage -- strip tags from the spine's XHTML and compare it with the
+     book's own chapters/*.md (what went into the EPUB, markup stripped the
+     same way check_chunk.py strips it): char_ratio and 5-gram containment.
+     This catches a builder mangle/drop. The chunk gates already answered
+     "is each chunk faithful to the page"; this answers "did the build keep it".
 
 Usage:
-  verify.py workspace/<slug> --epub PATH [--restored RESTOREDIR]
+  verify.py workspace/<slug> --epub PATH
 """
 import argparse
 import html
@@ -30,6 +29,8 @@ from pathlib import Path
 # shared with graded-reader; import them from the epub-builder skill.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "epub-builder" / "scripts"))
 from verify_epub import check_integrity, load_opf, parse_manifest, parse_spine  # noqa: E402
+
+from harness import markdown_to_text  # noqa: E402
 
 WHITESPACE = re.compile(r"\s+")
 TAG_RE = re.compile(r"<[^>]+>")
@@ -66,24 +67,17 @@ def spine_text(z: zipfile.ZipFile, opf_dir: str, manifest: dict, spine: list) ->
 
 def book_chapters_text(book_dir: Path) -> str:
     """The coverage baseline: the concatenated text of the chapters that went
-    into the book (book.json's spine). Structural markdown the builder renders
-    as structure — verse fences and heading markers — is stripped so only prose
-    content is compared. This reflects the guarded-correction path for free
-    (chapters are cut from corrected.md when present)."""
+    into the book (book.json's spine), with the markup the builder renders as
+    structure stripped, so only reading text is compared."""
     book = json.loads((book_dir / "book.json").read_text(encoding="utf-8"))
-    parts = []
-    for ch in book["chapters"]:
-        t = (book_dir / ch["source"]).read_text(encoding="utf-8")
-        t = re.sub(r"(?m)^```.*$", "", t)   # verse fences
-        t = re.sub(r"(?m)^#+\s*", "", t)     # heading markers (keep the text)
-        parts.append(t)
-    return "\n".join(parts)
+    return "\n".join(markdown_to_text((book_dir / ch["source"]).read_text(encoding="utf-8"))
+                     for ch in book["chapters"])
 
 
 # --------------------------------------------------------------------------- #
 # Driver
 # --------------------------------------------------------------------------- #
-def verify(epub_path: Path, restored_dir: Path) -> dict:
+def verify(epub_path: Path, book_dir: Path) -> dict:
     z = zipfile.ZipFile(epub_path)
     opf_path, opf_dir, opf_xml = load_opf(z)
     manifest = parse_manifest(opf_xml)
@@ -91,20 +85,14 @@ def verify(epub_path: Path, restored_dir: Path) -> dict:
 
     integrity_errors = check_integrity(z, opf_path, opf_dir, manifest, spine)
 
-    # Coverage compares the EPUB against *what actually went into the book* —
-    # the chapters/*.md prepare cut, not restored.md. Comparing against
-    # restored.md would penalise content prepare intentionally dropped (front
-    # matter). The restored -> chapters step loses nothing by construction and
-    # is separately guaranteed by prepare's paragraph accounting; this check
-    # catches the remaining hop, chapters -> EPUB (a builder mangle/drop).
-    restored_text = book_chapters_text(restored_dir.parent)
+    chapters_text = book_chapters_text(book_dir)
     out_text = spine_text(z, opf_dir, manifest, spine)
 
-    chars_in = nonwhitespace_chars(restored_text)
+    chars_in = nonwhitespace_chars(chapters_text)
     chars_out = nonwhitespace_chars(out_text)
     char_ratio = (chars_out / chars_in) if chars_in else 1.0
 
-    grams_in = word_ngrams(restored_text)
+    grams_in = word_ngrams(chapters_text)
     grams_out = word_ngrams(out_text)
     ngram_containment = (len(grams_in & grams_out) / len(grams_in)) if grams_in else 1.0
 
@@ -137,11 +125,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("book_dir", type=Path, help="workspace/<slug> directory")
     ap.add_argument("--epub", type=Path, required=True, help="built .epub to verify")
-    ap.add_argument("--restored", type=Path, default=None, help="restore.py output dir (default: BOOKDIR/restore)")
     args = ap.parse_args()
 
-    restored_dir = args.restored or (args.book_dir / "restore")
-    report = verify(args.epub, restored_dir)
+    report = verify(args.epub, args.book_dir)
 
     (args.book_dir / "verify-report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2))
     print(summarize(report))
