@@ -46,7 +46,18 @@ Findings while building the harness on it:
 - **A mood photo split in two** under `double` is silly: added the per-figure
   override (`| inline`, `| single`).
 
-The model-driven run's result is recorded below.
+Model-driven runs (Sonnet, as the CLI driver): X3/single and X4 Pro/double,
+every chunk passing its gate first time. Read on the X3, two defects, both
+since fixed in the tools:
+- **Bold came out as italic.** FORMAT.md had only `*emphasis*`, so the writer
+  mapped printed bold to `<em>`. Added `**strong**` (the firmware renders
+  `<b>`/`<strong>`).
+- **An invented caption under the photo.** writer.md asked for "a few words
+  saying what it shows" when nothing was printed. Captions are now printed
+  text only, and the gate checks every caption word is on the page.
+- On the X4 Pro, `double` left the landscape photo *turned* instead of split
+  (gain 1.15× < 1.25×). A split that spares turning the reader now wins at
+  equal size.
 
 ## Tool gaps (for review)
 
@@ -60,3 +71,6 @@ Ranked roughly by value. ✅ = fixed, 🔧 = proposed.
    hand). Cluster `rects/lines/curves` into candidate regions.
 5. 🔧 Footnote renumbering across chunks in `assemble.py`.
 6. 🔧 Gate thresholds need more books behind them (DESIGN.md, open question 1).
+7. 🔧 The text layer knows which words are bold or italic (font names:
+   `DINPro-Bold`); the gate could check the chunk marks the same runs,
+   instead of leaving it to the writer's eyes.

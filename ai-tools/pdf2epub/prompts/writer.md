@@ -34,11 +34,12 @@ fail it. Transcribe the page.
   author's name next to the title) is left out: the book's metadata carries it.
 - **Section headings** printed inside the text are `## ` headings, in
   sentence case, without a final period. A bold sentence that opens a
-  paragraph (a run-in lead) is not a heading: it stays in its paragraph, as
-  `*emphasis*`. Start a new chapter (`# `) only where the printed work starts
+  paragraph (a run-in lead) is not a heading: it stays in its paragraph, in
+  `**bold**`. Start a new chapter (`# `) only where the printed work starts
   one: a new chapter, act, or article.
-- **Emphasis**: `*italic*` for italic or bold words in running text. Not for
-  headings, not `**bold**`.
+- **Emphasis** as printed, in running text: `*italic*` for italic words,
+  `**bold**` for bold ones. Not for headings (they are styled already), and
+  never nested.
 - **Verse** (poetry, drama in verse): inside a ` ```verse ` fence, one printed
   metrical line per line, a column-wrapped line re-joined, no blank line
   inside a fence (a new stanza is a new fence). Speaker labels begin their
@@ -53,17 +54,19 @@ tables, regions someone added), each with an id and a preview. For each one:
 
 - **Content** (a chart, diagram, map, table, a photo the text talks about):
   place it where it belongs in the reading order, as a paragraph of its own:
-  `[[fig:p044-1 | Tabla 2. Ventas por año]]`. The caption is the printed
-  caption if there is one, else a few words saying what it shows. The text
+  `[[fig:p044-1 | Tabla 2. Ventas por año]]`. The text
   inside the figure (table cells, labels) stays in the image: do not
   transcribe it.
 - **Decoration** (an author's thumbnail, ornaments, logos): leave it out. An
   illustration the text never refers to (a mood photo) may stay if it adds to
-  the page, with a third field: `[[fig:p045-1 | Dos sillas vacías | inline]]`.
-  `inline` keeps it at most page width with its caption below — never turned,
-  split or blown up to a page of its own.
-- **Captions** are in the book's language. Use the printed caption if there
-  is one; otherwise write a few plain words saying what the image shows.
+  the page, with a third field: `[[fig:p045-1 | | inline]]`. `inline` keeps
+  it at most page width — never turned, split or blown up to a page of its
+  own.
+- **Captions are printed text only.** Copy the figure's printed caption
+  (`Tabla 2. Ventas por año`). A figure printed without one gets none:
+  `[[fig:p044-1]]`, or `[[fig:p045-1 | | inline]]` with a mode. Never write a
+  description of your own: the reader sees the image, and the gate rejects a
+  caption whose words are not on the page.
 - **Tables are never markdown tables.** No construct for them exists: a table
   is a figure, or, if it is really just a list, paragraphs.
 
@@ -79,9 +82,10 @@ it is done for you.
 
 ## Allowed markdown, complete
 
-`# ` and `## ` headings, paragraphs, `*italic*`, ` ```verse ` fences,
-footnotes `[^n]`, `[[fig:ID | caption]]` (optionally `| single`, `| double`,
-`| inline`), and a final `[[continues]]`. Anything else (HTML, lists, tables,
-bold, links, `###`) is not rendered and fails the gate.
+`# ` and `## ` headings, paragraphs, `*italic*`, `**bold**`, ` ```verse `
+fences, footnotes `[^n]`, `[[fig:ID]]` / `[[fig:ID | printed caption]]`
+(optionally `| single`, `| double`, `| inline`), and a final `[[continues]]`.
+Anything else (HTML, lists, tables, links, `###`) is not rendered and fails
+the gate.
 
 Return only the chunk markdown: no commentary, no code fence around it.

@@ -22,7 +22,8 @@ Workspace (one folder per conversion, `workspace/<slug>/`):
 Chunk markdown is the builder's FORMAT.md plus two constructs that assemble.py
 resolves, so the builder never sees them:
 
-  [[fig:ID | caption]]   own paragraph; a figure candidate placed here.
+  [[fig:ID | caption]]   own paragraph; a figure candidate placed here, with
+                         its printed caption (none: [[fig:ID]]).
                          A third field overrides the job's figure mode for
                          this one: `| single`, `| double`, or `| inline`
                          (page width, never turned or split — a photo that

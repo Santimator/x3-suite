@@ -63,7 +63,8 @@ The complete construct set. Everything else is literal text.
 | `# Title` | `<h1>` — the first one is the chapter title and TOC label |
 | `## Section` | `<h2>` |
 | blank-line-separated block | `<p>` |
-| `*emphasis*` | `<em>` |
+| `*emphasis*` | `<em>` (italic) |
+| `**strong**` | `<strong>` (bold) — no nesting with `*…*` |
 | ` ```verse ` … ` ``` ` | `<div class="verse">` with one `<p>` per line, hanging indent — line breaks preserved (poetry, drama). No blank line inside a fence: a new stanza is a new fence |
 | `![caption](../images/f1.png)` | `<figure><img><figcaption>` — the file must already exist, prepared. `![](…)` (empty caption) → no `<figcaption>`, for page-sized images whose caption sits in the paragraph before |
 | `text[^1]` + `[^1]: note` | numbered endnote link + an endnotes section at the chapter end |

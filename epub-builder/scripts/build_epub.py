@@ -75,6 +75,7 @@ class BuildError(Exception):
 # --- Inline and block constructs (all documented in FORMAT.md) ------------- #
 FOOTNOTE_REF_RE = re.compile(r"\[\^([^\]]+)\]")
 FOOTNOTE_DEF_RE = re.compile(r"^\[\^([^\]]+)\]:\s*(.*)$")
+STRONG_RE = re.compile(r"\*\*([^*]+)\*\*")
 EMPHASIS_RE = re.compile(r"\*([^*]+)\*")
 # {word|reading}: a word carrying a pronunciation guide (pinyin, furigana...).
 # The service decides which words get one; the builder only presents it.
@@ -90,9 +91,10 @@ def split_blocks(md: str) -> List[str]:
 
 
 def apply_emphasis(escaped_text: str) -> str:
-    """*em* -> <em>, single asterisk pairs only, no nesting. Must run on
+    """**strong** -> <strong>, then *em* -> <em>; no nesting. Must run on
     already-HTML-escaped text (the markup chars * are untouched by escape)."""
-    return EMPHASIS_RE.sub(lambda m: f"<em>{m.group(1)}</em>", escaped_text)
+    text = STRONG_RE.sub(lambda m: f"<strong>{m.group(1)}</strong>", escaped_text)
+    return EMPHASIS_RE.sub(lambda m: f"<em>{m.group(1)}</em>", text)
 
 
 def render_reading(word: str, reading: str, style: str) -> str:

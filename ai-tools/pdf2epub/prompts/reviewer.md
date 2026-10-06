@@ -17,7 +17,10 @@ Read the pages, then the chunk, and look for:
   are right, not errors.
 - **Wrong order**: columns or paragraphs out of reading order.
 - **Wrong structure**: a heading made body text or the reverse, verse turned
-  into prose, prose cut into short lines, page furniture left in.
+  into prose, prose cut into short lines, page furniture left in, bold or
+  italic words not marked (`**bold**`, `*italic*`) or marked the wrong way.
+- **Invented captions**: a `[[fig:ID | caption]]` whose caption is not
+  printed on the page.
 
 Do not report matters of taste. Report only what you can point to on the
 page.

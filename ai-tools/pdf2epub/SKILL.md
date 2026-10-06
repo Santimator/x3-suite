@@ -77,7 +77,7 @@ every chunk), then:
    text layer (`text`), look at its figure candidates' previews.
 2. Write `chunks/cNN/out.md`: the pages' body text in reading order, real
    paragraphs, furniture dropped, `#`/`##` headings, figures placed as
-   `[[fig:ID | caption]]`, `[[continues]]` as the last line if the last
+   `[[fig:ID | printed caption]]`, `[[continues]]` as the last line if the last
    paragraph runs on into the next chunk.
 3. Gate it:
 
@@ -113,7 +113,9 @@ and write `chunks/cNN/review.json`:
 ### Figures and tables
 
 A candidate is an embedded image or a ruled table pdfplumber found. Content
-(charts, diagrams, tables, photos the text refers to) goes in with a caption;
+(charts, diagrams, tables, photos the text refers to) goes in, with its printed
+caption if it has one — never an invented one (the gate checks every caption
+word is on the page);
 decoration (author thumbnails, ornaments) is left out or kept small with
 `| inline`. A third field overrides the job's mode for one figure:
 `| single`, `| double`, `| inline` (page width, never turned or split).

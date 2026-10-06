@@ -22,7 +22,9 @@ the sha256 of the out.md they judged (an edit makes the verdict stale):
    and, more telling, the longest *runs* of uncovered words: a dropped
    sentence is a long missing run, a paraphrase or invention a long invented
    run, while a fixed typo or a dropped running header is a short one.
-   Figure captions may cover source words but never count as invented.
+   Figure captions may cover source words but never count as invented; they
+   are checked on their own: every caption word must be printed on the
+   chunk's pages (an invented description fails).
    Fails on a missing run >= MAX_MISSING_RUN words, an invented run >=
    MAX_INVENTED_RUN, recall < MIN_RECALL or precision < MIN_PRECISION, and
    prints the offending passages so the writer knows what to fix.
@@ -122,8 +124,6 @@ def check_format(md: str, allowed_figures: set) -> tuple:
             errors.append(f"line {n}: images go in as [[fig:ID | caption]], not ![…](…)")
         if LIST_ITEM.match(line) and not fence_open:
             warnings.append(f"line {n}: lists render as plain paragraphs: {s[:50]!r}")
-        if "**" in s:
-            errors.append(f"line {n}: no bold — *emphasis* only")
     if fence_open:
         errors.append("a ```verse fence is never closed")
 
@@ -145,8 +145,8 @@ def check_format(md: str, allowed_figures: set) -> tuple:
             errors.append(f"a bare number paragraph ({s}) — a page number left in?")
         if verse:
             continue
-        if s.count("*") % 2:
-            errors.append(f"unbalanced *emphasis* in: {s[:60]!r}")
+        if s.count("**") % 2 or s.replace("**", "").count("*") % 2:
+            errors.append(f"unbalanced *italic* / **bold** in: {s[:60]!r}")
         if SPLIT_WORD.search(s):
             m = SPLIT_WORD.search(s)
             errors.append(f"a word still split across a line break: "
@@ -173,6 +173,20 @@ def inside(line: dict, bbox) -> bool:
     cx = (line["x0"] + line["x1"]) / 2
     cy = (line["top"] + line["bottom"]) / 2
     return bbox[0] <= cx <= bbox[2] and bbox[1] <= cy <= bbox[3]
+
+
+def check_captions(page_text: str, used: list) -> list:
+    """A caption must be printed text: every word of it on the chunk's pages.
+    (A figure printed without a caption gets none.)"""
+    printed = set(tokens(page_text))
+    errors = []
+    for fid, caption, _ in used:
+        stray = [w for w in tokens(caption) if w not in printed]
+        if stray:
+            errors.append(f"caption of {fid} has words not printed on the page "
+                          f"({' '.join(stray[:6])}) — copy the printed caption, or "
+                          f"leave it empty: [[fig:{fid}]]")
+    return errors
 
 
 def baseline_text(workdir: Path, pages: list, figure_boxes: dict) -> str:
@@ -258,6 +272,7 @@ def check_chunk(workdir: Path, chunk: dict, cands: dict) -> dict:
                 boxes.setdefault(cands[fid]["page"], []).append(cands[fid]["bbox"])
         fidelity = check_fidelity(baseline_text(workdir, chunk["pages"], boxes),
                                   markdown_to_text(md), "\n".join(c for _, c, _ in used))
+        errors += check_captions(baseline_text(workdir, chunk["pages"], {}), used)
 
     result = {
         "chunk": chunk["id"],
