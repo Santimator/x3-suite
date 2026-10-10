@@ -1220,7 +1220,8 @@ def check_wallpaper_collection(tmp: Path) -> None:
              suite.build_wallpaper, suite.mat_sheet, suite.contact_sheet)
     built = []
 
-    def fake_build(src, mat="waves", transparent=False, out_dir=None):
+    def fake_build(src, mat="waves", transparent=False, out_dir=None,
+                   fit="cover"):
         # What make_wallpaper does, minus Pillow: a PNG named after the
         # original, and its preview beside it in previews/.
         out = Path(out_dir or suite.WALLPAPER_OUT)
@@ -1229,7 +1230,7 @@ def check_wallpaper_collection(tmp: Path) -> None:
         png.write_bytes(b"PNG " + Path(src).name.encode() + b" " + mat.encode()
                         + (b" clear" if transparent else b""))
         (out / "previews" / png.name).write_bytes(b"x")
-        built.append((Path(src).name, mat, transparent))
+        built.append((Path(src).name, mat, transparent, fit))
         return png, out / "previews" / png.name
 
     def fake_sheet(files, dest, start=1):
@@ -1244,11 +1245,20 @@ def check_wallpaper_collection(tmp: Path) -> None:
         suite.contact_sheet = fake_sheet
         sizes = {"dawn.jpg": True, "icon.png": False}
         alpha_names = {"cutout.png"}
-        suite.probe_image = lambda src: {"fills": sizes.get(Path(src).name, True),
-                                         "has_alpha": Path(src).name in alpha_names,
-                                         "width": 100, "height": 140}
-        suite.mat_sheet = lambda src, cache, mats: (
-            [fake_build(src, m, out_dir=Path(cache) / m) for m in mats],
+        # square.png fills by cropping a third of itself, so the probe says
+        # to ask; kept whole ('contain') it no longer fills.
+        square = "square.png"
+        suite.probe_image = lambda src, fit="cover": {
+            "fills": (fit == "cover" if Path(src).name == square
+                      else sizes.get(Path(src).name, True)),
+            "ask_fit": Path(src).name == square and fit == "cover",
+            "crop": 0.333 if Path(src).name == square else 0.0,
+            "has_alpha": Path(src).name in alpha_names,
+            "width": 1080 if Path(src).name == square else 100,
+            "height": 1080 if Path(src).name == square else 140,
+            "panel": [528, 792]}
+        suite.mat_sheet = lambda src, cache, mats, fit="cover": (
+            [fake_build(src, m, out_dir=Path(cache) / m, fit=fit) for m in mats],
             fake_sheet(mats, Path(cache) / "sheet.png"))[-1]
 
         tg.sent.clear()
@@ -1281,7 +1291,8 @@ def check_wallpaper_collection(tmp: Path) -> None:
         check("choosing builds into build/ and queues it, with what was chosen",
               len(items) == 1 and Path(items[0]["path"]).parent == build
               and items[0]["meta"] == {"source": str(walls / "dawn.jpg"),
-                                       "mat": "waves", "transparent": True},
+                                       "mat": "waves", "transparent": True,
+                                       "fit": "cover"},
               str(items))
         check("... and the preview of the built file is what is shown",
               "photo" in tg.sent[-1] and "transparent" in tg.sent[-1]["text"],
@@ -1319,7 +1330,7 @@ def check_wallpaper_collection(tmp: Path) -> None:
         nums = [b for row in sheet["keyboard"] for b in row if b[0].isdigit()]
         check("a small picture gets one sheet with every mat, numbered",
               "photo" in sheet and len(nums) == 4
-              and sorted(m for _, m, _ in built) == sorted(
+              and sorted(m for _, m, _, _ in built) == sorted(
                   ["waves", "edges", "blur", "none"]),
               str(sheet)[:160])
         check("... built outside build/, so nothing half-chosen is queued",
@@ -1331,6 +1342,39 @@ def check_wallpaper_collection(tmp: Path) -> None:
         icon = [i for i in bot.queue.items() if "icon" in i["path"]]
         check("the number picked is the mat that gets queued",
               icon and icon[0]["meta"]["mat"] == "edges", str(icon))
+
+        # A square would lose a third to a fill: crop or keep whole is asked.
+        (walls / square).write_bytes(b"PNG")
+        tg.sent.clear()
+        built.clear()
+        bot.handle(cb(f"wq:{bot.tokens.put(str(walls / square))}"))
+        fits = [b for row in tg.sent[-1]["keyboard"] for b in row]
+        check("a picture a fill would crop hard asks fill or keep whole, "
+              "and says how much and where",
+              any("Fill" in t for t, _ in fits)
+              and any("whole" in t for t, _ in fits) and not built
+              and "33%" in tg.sent[-1]["text"]
+              and "top and bottom" not in tg.sent[-1]["text"],
+              tg.sent[-1]["text"][:160])
+        bot.handle(cb(next(d for t, d in fits if "whole" in t)))
+        nums = [b for row in tg.sent[-1]["keyboard"] for b in row if b[0].isdigit()]
+        check("... kept whole, it gets the mat sheet, built kept whole",
+              len(nums) == 4 and built and all(f == "contain" for *_, f in built),
+              str(built))
+        bot.handle(cb(nums[3][1]))                       # "4" — white
+        modes = [b for row in tg.sent[-1]["keyboard"] for b in row]
+        bot.handle(cb(next(d for t, d in modes if "Transparent" in t)))
+        sq = [i for i in bot.queue.items() if i["meta"]["source"].endswith(square)]
+        check("... and is queued kept whole, with the mat and mode chosen",
+              len(sq) == 1 and sq[0]["meta"]["fit"] == "contain"
+              and sq[0]["meta"]["mat"] == "none" and sq[0]["meta"]["transparent"],
+              str(sq))
+        bot.queue.remove(sq[0]["id"])
+        (walls / square).unlink()
+        bot.handle(cb(f"wq:{bot.tokens.put(str(walls / 'dawn.jpg'))}"))
+        check("a picture that fills with little crop is not asked about it",
+              not any("whole" in t for r in tg.sent[-1]["keyboard"] for t, _ in r),
+              tg.sent[-1]["text"][:80])
 
         # Unqueueing deletes the build; the original stays.
         tg.sent.clear()

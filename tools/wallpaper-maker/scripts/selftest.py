@@ -137,6 +137,22 @@ def make_cutout(directory: Path) -> Path:
     return path
 
 
+def make_lineart(directory: Path) -> Path:
+    """A square cartoon: a closed speech bubble with "text" in it, a figure, a
+    ground line edge to edge. What `--fit contain --transparent` is for — the
+    bubble's inside must stay white, the sky far from any line must clear."""
+    img = Image.new("RGB", (1080, 1080), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    draw.ellipse((560, 120, 1000, 420), outline=(0, 0, 0), width=6)
+    for y in (220, 270, 320):
+        draw.line((640, y, 920, y), fill=(0, 0, 0), width=5)
+    draw.ellipse((200, 400, 380, 760), fill=(0, 0, 0))
+    draw.line((0, 800, 1079, 800), fill=(0, 0, 0), width=5)
+    path = directory / "lineart.png"
+    img.save(path)
+    return path
+
+
 # ------------------------------------------------------- a pretend X3 ---------
 # Ported from src/network/CrossPointWebServer.cpp: not a mock of what we wish
 # the endpoints did, but of what they do — including the two behaviours that
@@ -300,16 +316,81 @@ def grade_transparent(src: Path, out_dir: Path, *, expect: str) -> None:
     want = [None if clear[i] else v for i, v in enumerate(levels)]
     check(f"{label}: clear exactly where meant, our levels everywhere else",
           got == want)
-    whites = sum(1 for v in levels if v == 3)
     cleared = sum(clear)
     if expect == "white":
-        check(f"{label}: no source alpha, so white is what clears",
-              cleared == whites and cleared > 0, f"{cleared} clear, {whites} white")
+        check_halo(levels, clear, label)
     else:
         kept = sum(1 for i, v in enumerate(levels) if v == 3 and not clear[i])
         check(f"{label}: the source's alpha decides — its white stays painted",
               kept > 0 and 0 < cleared < len(levels),
               f"{kept} white kept, {cleared} clear")
+
+
+def check_halo(levels, clear, label: str) -> None:
+    """No source alpha: only white clears, and none of it within HALO of
+    anything drawn. Checked on the clear region's rim, which is where the
+    nearest clear pixel to any drawn one has to be."""
+    W, H, r = cp.PANEL_W, cp.PANEL_H, mw.HALO
+    cleared = sum(clear)
+    check(f"{label}: no source alpha, so only white clears",
+          cleared > 0 and all(levels[i] == 3 for i in range(len(levels)) if clear[i]),
+          f"{cleared} clear")
+    disk = [(dx, dy) for dy in range(-r, r + 1) for dx in range(-r, r + 1)
+            if dx * dx + dy * dy <= r * r]
+    close = 0
+    for y in range(H):
+        for x in range(W):
+            i = y * W + x
+            if not clear[i] or all(
+                    clear[(y + dy) * W + x + dx] for dx, dy in
+                    ((1, 0), (-1, 0), (0, 1), (0, -1))
+                    if 0 <= x + dx < W and 0 <= y + dy < H):
+                continue
+            close += any(levels[(y + dy) * W + x + dx] != 3 for dx, dy in disk
+                         if 0 <= x + dx < W and 0 <= y + dy < H)
+    check(f"{label}: a white rim of {r}px kept round everything drawn",
+          close == 0, f"{close} clear pixels too close to the drawing")
+
+
+def check_lineart(src: Path, out_dir: Path) -> None:
+    """A square cartoon kept whole: rim, bubble, and the empty space clear."""
+    label = f"{src.name} --fit contain --mat none --transparent"
+    png = mw.convert(src, out_dir, fit="contain", mat_style="none",
+                     transparent=True)
+    levels = mw.render(src, fit="contain", mat_style="none")
+    clear = mw.transparency(src, levels, fit="contain")
+    got = co.panel_levels(co.decode(png.read_bytes()))
+    check(f"{label}: clear exactly where meant, our levels everywhere else",
+          got == [None if clear[i] else v for i, v in enumerate(levels)])
+    check_halo(levels, clear, label)
+    W = cp.PANEL_W
+    oy = (cp.PANEL_H - W) // 2                   # 1080 square -> 528, centred
+    at = lambda x, y: round(x * W / 1080) + (oy + round(y * W / 1080)) * W  # noqa: E731
+    check(f"{label}: inside the closed bubble stays painted white, away "
+          f"from its lines",
+          levels[at(780, 370)] == 3 and not clear[at(780, 370)])
+    check(f"{label}: open sky, and the empty band kept-whole leaves, clear",
+          clear[at(150, 150)] and clear[10 * W + 264]
+          and clear[(cp.PANEL_H - 10) * W + 264])
+
+
+def check_probe(sources) -> None:
+    """Crop is asked about only when a fill would cost a real part of it."""
+    by = {s.name: mw.probe(s) for s in sources}
+    wide, grad, tiny = by["wide.jpg"], by["gradient.png"], by["tiny.png"]
+    check("a 2.4:1 landscape fills by cropping most of itself, and says to ask",
+          wide["fills"] and wide["crop"] > 0.7 and wide["ask_fit"], str(wide))
+    check("a 3:4 portrait loses a sliver, and is not asked about",
+          grad["fills"] and 0 < grad["crop"] < mw.FIT_ASK_CROP
+          and not grad["ask_fit"], str(grad))
+    check("a picture too small to fill is matted whole: nothing cropped",
+          not tiny["fills"] and tiny["crop"] == 0 and not tiny["ask_fit"],
+          str(tiny))
+    kept = mw.probe(sources[[s.name for s in sources].index("wide.jpg")],
+                    fit="contain")
+    check("kept whole ('contain'), nothing is cropped and nothing asked",
+          not kept["fills"] and kept["crop"] == 0 and not kept["ask_fit"],
+          str(kept))
 
 
 def _block(levels: list, x: int, y: int, n: int = 16) -> set:
@@ -643,11 +724,15 @@ def main() -> int:
         grade_transparent(by_name["gradient.png"], build / "clear", expect="white")
         grade_transparent(by_name["split.png"], build / "clear", expect="white")
         grade_transparent(make_cutout(work), build / "clear", expect="alpha")
+        check_lineart(make_lineart(work), build / "lineart")
         preview = mw.convert(by_name["split.png"], build / "pv", transparent=True,
                              preview=True)
         check("--preview goes in previews/, where a push of the folder never looks",
               (build / "pv" / "previews" / preview.name).is_file()
               and [p.name for p in (build / "pv").glob("*.png")] == [preview.name])
+
+        print("\nfill or keep whole — when the probe says to ask:")
+        check_probe(sources)
 
         print("\nthe mat, on sources too small to fill the panel:")
         check_mat(sources)

@@ -214,15 +214,16 @@ def edit_book_metadata(path: Path, library_dir: Path, updates: dict,
 # -- wallpapers ------------------------------------------------------------
 
 
-def probe_image(src: Path) -> dict:
-    """Does this image fill the panel, or does it need a mat?
+def probe_image(src: Path, fit: str = "cover") -> dict:
+    """Does this image fill the panel, or does it need a mat? And would filling
+    it crop enough to be worth asking about (`ask_fit`)?
 
-    The threshold lives in make_wallpaper.py and is asked, never copied — see
+    The thresholds live in make_wallpaper.py and are asked, never copied — see
     its `probe()`. A 500x750 photo is smaller than the panel in both dimensions
     and still fills.
     """
     rc, out, err = run([PY_DEPS, "tools/wallpaper-maker/scripts/make_wallpaper.py",
-                        str(src), "--probe"], timeout=180)
+                        str(src), "--probe", "--fit", fit], timeout=180)
     reports = _json_out(rc, out, err, "probe")
     if not reports:
         raise SuiteError("that file did not read as an image")
@@ -236,7 +237,7 @@ ORIGINAL_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif",
 
 
 def build_wallpaper(src: Path, mat: str = "waves", transparent: bool = False,
-                    out_dir: Path | None = None) -> tuple:
+                    out_dir: Path | None = None, fit: str = "cover") -> tuple:
     """Convert one original. Returns (wallpaper_png, preview_png).
 
     Into `build/` by default, which is not a collection: a file there is one
@@ -246,7 +247,8 @@ def build_wallpaper(src: Path, mat: str = "waves", transparent: bool = False,
     """
     out_dir = Path(out_dir or WALLPAPER_OUT)
     cmd = [PY_DEPS, "tools/wallpaper-maker/scripts/make_wallpaper.py",
-           str(src), "--out", str(out_dir), "--mat", mat, "--preview"]
+           str(src), "--out", str(out_dir), "--mat", mat, "--fit", fit,
+           "--preview"]
     if transparent:
         cmd.append("--transparent")
     rc, out, err = run(cmd, timeout=300)
@@ -300,7 +302,7 @@ def drop_build(png: Path) -> None:
     (png.parent / "previews" / png.name).unlink(missing_ok=True)
 
 
-def mat_sheet(src: Path, cache: Path, mats: list) -> dict:
+def mat_sheet(src: Path, cache: Path, mats: list, fit: str = "cover") -> dict:
     """Every way of filling the panel around a small image, side by side.
 
     Built for real, one conversion per mat, into a scratch folder — what is on
@@ -308,7 +310,8 @@ def mat_sheet(src: Path, cache: Path, mats: list) -> dict:
     """
     previews = []
     for style in mats:
-        _, preview = build_wallpaper(src, style, out_dir=Path(cache) / style)
+        _, preview = build_wallpaper(src, style, out_dir=Path(cache) / style,
+                                     fit=fit)
         previews.append(preview)
     return contact_sheet(previews, Path(cache) / "sheet.png")
 
