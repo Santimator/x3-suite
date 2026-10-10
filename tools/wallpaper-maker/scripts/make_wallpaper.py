@@ -78,8 +78,8 @@ import sys
 import zlib
 from pathlib import Path
 
-from PIL import (Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont, ImageOps,
-                 ImageStat)
+from PIL import (Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter,
+                 ImageFont, ImageOps, ImageStat)
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import crosspoint_bmp as cp                                  # noqa: E402
@@ -117,6 +117,14 @@ NOISE_SIGMA = 1.6           # blur radius that sets which scales survive as "blu
 # in a mat beats a smeared one that fills the screen.
 MAX_UPSCALE = 1.5
 MIN_MAT_AREA = 0.06         # thinner than this reads as a mistake — fill instead
+# Above this fraction of the picture lost to a cover-crop, whether to crop is a
+# real question, and `probe` says so. A phone portrait (3:4) loses 11% and is
+# not asked; a square loses a third.
+FIT_ASK_CROP = 0.15
+# --transparent without source alpha: white this close to the drawing stays
+# painted, so line art sits on the page as a cut-out with a white rim instead of
+# tangling with the text behind it. In panel pixels.
+HALO = 14
 EDGE_BAND = 0.08            # fraction of the image each mat sector samples
 BLUR_DIVISOR = 12           # --mat blur: panel width / this = blur radius
 BLUR_CONTRAST = 0.55        # ... then flattened, so the sharp image stays foreground
@@ -577,6 +585,63 @@ def dither(img: Image.Image, algorithm: str = "floyd") -> bytearray:
     return out
 
 
+def _shift(img: Image.Image, dx: int, dy: int) -> Image.Image:
+    """`img` moved by (dx, dy), what slides in black (0)."""
+    out = Image.new("L", img.size, 0)
+    out.paste(img, (dx, dy))
+    return out
+
+
+def _dilate(mask: Image.Image, r: int) -> Image.Image:
+    """Grow a 0/255 mask by a disk of radius `r`.
+
+    A disk is a stack of horizontal segments, so: widen the mask sideways one
+    pixel at a time, keeping each width, then lay each row of the disk down at
+    its height with the width it has there. About 4r image operations rather
+    than one per pixel of the disk.
+    """
+    wide = [mask]
+    for _ in range(r):
+        w = wide[-1]
+        wide.append(ImageChops.lighter(w, ImageChops.lighter(_shift(w, 1, 0),
+                                                             _shift(w, -1, 0))))
+    out = mask
+    for dy in range(-r, r + 1):
+        out = ImageChops.lighter(out, _shift(wide[math.isqrt(r * r - dy * dy)], 0, dy))
+    return out
+
+
+def _halo_clear(levels: bytearray) -> bytearray:
+    """White that clears: farther than HALO from anything drawn, and reachable
+    from the panel's edge without crossing that rim. 1 = clear.
+
+    The second condition is what keeps a speech bubble white: its inside is
+    walled off by its own outline, so it stays painted however far the text in
+    it is from the line.
+    """
+    ink = Image.frombytes("L", (PANEL_W, PANEL_H),
+                          bytes(255 if v != 3 else 0 for v in levels))
+    near = _dilate(ink, HALO).tobytes()
+    clear = bytearray(len(levels))
+    stack = [i for i in range(PANEL_W)] + [(PANEL_H - 1) * PANEL_W + i for i in range(PANEL_W)]
+    stack += [y * PANEL_W for y in range(PANEL_H)] + [y * PANEL_W + PANEL_W - 1 for y in range(PANEL_H)]
+    while stack:
+        i = stack.pop()
+        if clear[i] or near[i]:
+            continue
+        clear[i] = 1
+        x = i % PANEL_W
+        if x > 0:
+            stack.append(i - 1)
+        if x < PANEL_W - 1:
+            stack.append(i + 1)
+        if i >= PANEL_W:
+            stack.append(i - PANEL_W)
+        if i < len(levels) - PANEL_W:
+            stack.append(i + PANEL_W)
+    return clear
+
+
 def transparency(src: Path, levels: bytearray, *, fit: str = "cover") -> bytearray:
     """Which panel pixels let the page through, for `--transparent`. 1 = clear.
 
@@ -585,15 +650,16 @@ def transparency(src: Path, levels: bytearray, *, fit: str = "cover") -> bytearr
 
       the source has alpha      inside the picture, *its* alpha decides (cut
                                 at half); white there stays white. The mat
-                                around a small one still clears where white.
-      it has none               every white pixel clears, mat included — line
-                                art on a white ground becomes line art on the
-                                page.
+                                around a small one follows the rule below.
+      it has none               white clears, but not within HALO of anything
+                                drawn, nor inside a shape it closes — line art
+                                becomes a cut-out with a white rim, its speech
+                                bubbles still white.
 
     Binary on purpose. The firmware would turn partial alpha into a Bayer
     stipple, which on four levels reads as dirt along every soft edge.
     """
-    mask = bytearray(1 if v == 3 else 0 for v in levels)
+    mask = _halo_clear(levels)
     alpha = source_alpha(src)
     if alpha is None:
         return mask
@@ -735,8 +801,19 @@ def probe(src: Path, *, fit: str = "cover") -> dict:
     """
     img = load_grayscale(src)
     scaled = scale_to_panel(img, fit)
+    fills = scaled.size == (PANEL_W, PANEL_H)
+    # What a cover-fill throws away. Only a fill crops: one that stops at
+    # MAX_UPSCALE is matted whole, and so is everything in 'contain'.
+    crop = 0.0
+    if fit == "cover" and fills:
+        a, p = img.width / img.height, PANEL_W / PANEL_H
+        crop = 1 - min(a / p, p / a)
     return {"file": str(src), "width": img.width, "height": img.height,
-            "fills": scaled.size == (PANEL_W, PANEL_H),
+            "fills": fills,
+            "crop": round(crop, 3),
+            # Whether keeping the whole frame is worth asking about — the
+            # threshold is a judgement call and lives here, with the others.
+            "ask_fit": crop > FIT_ASK_CROP,
             # Its own transparency, so a caller need not ask opaque or
             # transparent about a picture that has already answered.
             "has_alpha": source_alpha(src) is not None,
@@ -811,16 +888,17 @@ def main() -> int:
                          "it would have computed (default). floyd / atkinson / "
                          "none: our own error diffusion instead")
     ap.add_argument("--transparent", action="store_true",
-                    help="let the page show through: white clears, or the "
-                         "source's own alpha decides when it has one. Default "
-                         "is opaque — every pixel painted")
+                    help="let the page show through: white clears (keeping a "
+                         "white rim round the drawing and anything it encloses), "
+                         "or the source's own alpha decides when it has one. "
+                         "Default is opaque — every pixel painted")
     ap.add_argument("--preview", action="store_true",
                     help="also write previews/<name>.png: what the panel shows, "
                          "over a page of text when transparent")
     ap.add_argument("--probe", action="store_true",
                     help="write nothing; report as JSON whether each image "
-                         "fills the panel or needs a mat, so a caller can ask "
-                         "about the mat only when there is a choice")
+                         "fills the panel or needs a mat, and how much a fill "
+                         "would crop, so a caller asks only when there is a choice")
     args = ap.parse_args()
 
     inputs = args.inputs or [DEFAULT_IN]

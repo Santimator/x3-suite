@@ -75,7 +75,7 @@ on the device, `--replace` to clear it first.
 | **alpha 0 or 255, nothing between** | The firmware does not blend partial alpha, it stipples it against a 4x4 Bayer tile. On four levels that reads as dirt along every soft edge, so transparency is cut at half. |
 | **written by hand, filter 0** | Every byte ours, identical run to run whatever Pillow is installed; on packed 2-bit rows filter 0 compresses as well as the adaptive ones. |
 | **autocontrast → gamma 0.85 → sharpen** | A phone photo uses half the range; on four levels that half becomes two. Stretch, then lift midtones (e-ink reflects less than the screen you chose the image on), then restore the local contrast the downscale cost. All before dithering. |
-| **cover-crop, centred** | A wallpaper should reach all four edges. `--fit contain` if the whole frame matters. |
+| **cover-crop, centred** | A wallpaper should reach all four edges. `--fit contain` if the whole frame matters. `--probe` reports how much a fill would crop, and `ask_fit` when it is over 15% (`FIT_ASK_CROP`) — the point where `tools/tgbot/` asks rather than crops. |
 | **enlargement stops at 1.5x** | Past about half again, a photo is a smear even after dithering. What is left over gets a mat — a picture in a frame beats a blurred one that fills the screen. |
 | **EXIF rotation honoured first** | A phone portrait is stored landscape with a rotate flag; cropping before rotating crops the wrong axis. |
 
@@ -88,12 +88,23 @@ one of two rules, chosen by the source:
 | Source | What clears |
 |---|---|
 | **has its own alpha** (a PNG with a real cut-out) | inside the picture, exactly what the source made clear (cut at half). Its *white* stays painted: a white speech bubble in a cut-out is a white bubble |
-| **has none** | every pixel that lands on white — line art on a white ground becomes line art on the page |
+| **has none** | white, except within `HALO` (14px) of anything drawn and inside any shape the drawing closes — line art on a white ground becomes a cut-out with a white rim, its speech bubbles still white |
 
-Around an image too small to fill the panel, the mat follows the second rule
-either way: whatever it fills with white is clear. That is deliberate, not an
-accident to work around — a small drawing on white, matted with `--mat none`,
-floats on the page.
+The rim is the point of the second rule. Bare line art over a page of text is
+two drawings tangled into one, and neither reads; a white edge separates them
+the way a sticker's border does. "Inside a shape it closes" is white not
+reachable from the panel's edge without crossing that rim — a bubble's inside
+stays white however far its text sits from the outline. A drawing in a closed
+frame therefore comes out opaque, which is right: it is a rectangle.
+
+Around an image too small to fill the panel, or kept whole with `--fit
+contain`, the mat follows the second rule either way: whatever it fills with
+white, away from the picture, is clear. That is deliberate, not an accident to
+work around — a drawing on white, matted with `--mat none`, floats on the page.
+
+```bash
+make_wallpaper.py cartoon.jpg --fit contain --mat none --transparent
+```
 
 Getting a cut-out here intact means getting it here as a *file*: a messenger
 that recompresses photos to JPEG (Telegram does, for anything sent as a photo)
@@ -412,8 +423,12 @@ Fixtures cover the shapes that break a naive converter: a wide landscape (the
 crop must take the middle), an image far smaller than the panel (must be framed
 rather than blown up), a small light-over-dark one (each sector must follow its
 own edge), an alpha image (must flatten onto white, not multiply to black), a
-phone-style EXIF rotation (must rotate before cropping), and a flat gradient
-(where dithering either works or bands visibly).
+phone-style EXIF rotation (must rotate before cropping), a flat gradient
+(where dithering either works or bands visibly), and a square cartoon kept
+whole and transparent (a white rim of `HALO` round every line — checked on the
+clear region's edge, and shown to fail when the rim is thinner — the inside of
+its closed bubble painted, the empty bands clear). The probe is checked for
+when it says to ask about cropping: a 2.4:1 landscape yes, a 3:4 portrait no.
 
 **Status: device-confirmed (2026-10) for the overlay mode, on CrossPoint
 1.6.5.** In `/sleep-overlay/` with Transparent custom, an opaque indexed PNG of

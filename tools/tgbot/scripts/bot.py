@@ -537,18 +537,26 @@ class Bot:
             if not src:
                 return self.stale(chat)
             return self.submit(chat, lambda: self.start_wallpaper(chat, Path(src)))
+        if head == "wf":                       # fill-and-crop or keep it whole
+            job = self.tokens.get(rest)
+            if not job:
+                return self.stale(chat)
+            return self.submit(chat, lambda: self.start_wallpaper(
+                chat, Path(job["src"]), job["fit"]))
         if head == "wm":                       # the mat was chosen off the sheet
             job = self.tokens.get(rest)
             if not job:
                 return self.stale(chat)
             return self.ask_wallpaper_mode(chat, Path(job["src"]), job["mat"],
-                                           job.get("alpha", False))
+                                           job.get("alpha", False),
+                                           job.get("fit", "cover"))
         if head == "wo":                       # opaque or transparent: build, queue
             job = self.tokens.get(rest)
             if not job:
                 return self.stale(chat)
             return self.submit(chat, lambda: self.queue_wallpaper(
-                chat, Path(job["src"]), job["mat"], job["clear"]))
+                chat, Path(job["src"]), job["mat"], job["clear"],
+                job.get("fit", "cover")))
         if head == "wpx":
             return self.say(chat, "Kept on the server — it is in 🖼 Wallpapers.",
                             [[("🖼 Wallpapers", "m:wl"), ("🏠 Menu", "m:main")]])
@@ -726,33 +734,59 @@ class Bot:
                  [[("📤 Yes, put it on the reader", f"wq:{token}")],
                   [("Just keep it", "wpx:")]])
 
-    def start_wallpaper(self, chat, src: Path) -> None:
-        """Step one of putting an original on the reader: the mat, if any.
+    def start_wallpaper(self, chat, src: Path, fit: str | None = None) -> None:
+        """Step one of putting an original on the reader: crop or not, then the
+        mat, if any.
 
-        An image that fills the panel has no mat to choose. One that does not
-        gets every mat built for real and shown as one numbered sheet, so the
-        choice is made by looking rather than by remembering what "waves"
-        means.
+        Crop is asked only when filling the panel would cost a real part of the
+        picture — the probe says when, so a phone portrait goes straight
+        through and a square cartoon does not. An image that fills the panel
+        has no mat to choose. One that does not (too small, or kept whole) gets
+        every mat built for real and shown as one numbered sheet, so the choice
+        is made by looking rather than by remembering what "waves" means.
         """
         if not src.exists():
             return self.say(chat, "That picture is gone from the server.")
-        report = suite.probe_image(src)
+        report = suite.probe_image(src, fit or "cover")
+        if fit is None and report.get("ask_fit"):
+            return self.ask_fit(chat, src, report)
+        fit = fit or "cover"
         alpha = bool(report.get("has_alpha"))
         if report["fills"]:
-            return self.ask_wallpaper_mode(chat, src, "waves", alpha)
+            return self.ask_wallpaper_mode(chat, src, "waves", alpha, fit)
         self.say(chat, "Building the ways to fill it…")
         sheet = suite.mat_sheet(src, self.state_dir / "cache" / "mats",
-                                [style for _, style in MATS])
-        lines = [f"{report['width']}×{report['height']} — too small to fill "
-                 f"528×792. How should the rest be filled?"]
+                                [style for _, style in MATS], fit)
+        why = ("kept whole" if fit == "contain" else "too small to fill 528×792")
+        lines = [f"{report['width']}×{report['height']} — {why}. How should "
+                 f"the rest be filled?"]
         lines += [f"{n} {label}" for n, (label, _) in enumerate(MATS, 1)]
-        buttons = [(f"{n}", f"wm:{self.tokens.put({'src': str(src), 'mat': style, 'alpha': alpha})}")
+        job = {"src": str(src), "alpha": alpha, "fit": fit}
+        buttons = [(f"{n}", f"wm:{self.tokens.put({**job, 'mat': style})}")
                    for n, (_, style) in enumerate(MATS, 1)]
         self.send_preview(chat, Path(sheet["png"]), "\n".join(lines),
                           [buttons, [("✗ Cancel", "wpx:")]])
 
+    def ask_fit(self, chat, src: Path, report: dict) -> None:
+        """Filling the screen would crop a lot: crop, or keep it all?"""
+        pw, ph = report["panel"]
+        wide = report["width"] * ph > report["height"] * pw
+        side = "left and right" if wide else "top and bottom"
+        pct = round(report["crop"] * 100)
+        job = {"src": str(src)}
+        self.say(chat,
+                 f"<code>{html.escape(src.name)}</code> is "
+                 f"{report['width']}×{report['height']} — filling the screen "
+                 f"crops {pct}% of it, off the {side}.\n\n"
+                 f"✂ <b>Fill</b>: edge to edge, cropped. Right for photos.\n"
+                 f"▣ <b>Keep it whole</b>: all of it, the rest filled around "
+                 f"it. Right for cartoons and anything with text.",
+                 [[("✂ Fill", f"wf:{self.tokens.put({**job, 'fit': 'cover'})}"),
+                   ("▣ Keep it whole", f"wf:{self.tokens.put({**job, 'fit': 'contain'})}")],
+                  [("✗ Cancel", "wpx:")]])
+
     def ask_wallpaper_mode(self, chat, src: Path, mat: str,
-                           has_alpha: bool = False) -> None:
+                           has_alpha: bool = False, fit: str = "cover") -> None:
         """Step two: does it cover the page, or let it show through?
 
         Not asked of a picture with its own transparency: it has answered
@@ -761,28 +795,30 @@ class Bot:
         """
         if has_alpha:
             return self.submit(chat, lambda: self.queue_wallpaper(
-                chat, src, mat, True))
-        job = {"src": str(src), "mat": mat}
+                chat, src, mat, True, fit))
+        job = {"src": str(src), "mat": mat, "fit": fit}
         self.say(chat,
                  f"<code>{html.escape(src.name)}</code> — how should it sit "
                  f"over the page?\n\n"
                  f"◼ <b>Opaque</b>: covers the page completely. Right for "
                  f"photos.\n"
-                 f"◻ <b>Transparent</b>: white lets the page show through — or "
-                 f"the picture's own transparency, if it has one. Right for "
-                 f"drawings on a white ground.",
+                 f"◻ <b>Transparent</b>: white lets the page show through, "
+                 f"keeping a white rim round the drawing and the inside of its "
+                 f"shapes (speech bubbles stay white). Right for drawings on a "
+                 f"white ground.",
                  [[("◼ Opaque", f"wo:{self.tokens.put({**job, 'clear': False})}"),
                    ("◻ Transparent", f"wo:{self.tokens.put({**job, 'clear': True})}")],
                   [("✗ Cancel", "wpx:")]])
 
-    def queue_wallpaper(self, chat, src: Path, mat: str, clear: bool) -> None:
+    def queue_wallpaper(self, chat, src: Path, mat: str, clear: bool,
+                        fit: str = "cover") -> None:
         """Step three: build it into build/ and queue it.
 
         One queued copy per original: asking again with other choices replaces
         the waiting one rather than sending both, since they land under the
         same name on the card anyway.
         """
-        item, png, preview = self.build_and_queue(src, mat, clear)
+        item, png, preview = self.build_and_queue(src, mat, clear, fit)
         how = "transparent" if clear else "opaque"
         self.send_preview(
             chat, preview,
@@ -791,7 +827,8 @@ class Bot:
             [[("📲 Push now", "push:ask"), ("↩ Unqueue", f"qdel:{item['id']}")],
              [("🏠 Menu", "m:main")]])
 
-    def build_and_queue(self, src: Path, mat: str, clear: bool) -> tuple:
+    def build_and_queue(self, src: Path, mat: str, clear: bool,
+                        fit: str = "cover") -> tuple:
         """Build one original into build/ and queue it, replacing any copy of
         *it* already waiting. Returns (queue item, built png, preview)."""
         # Scratch space inside build/ itself, so the move into place stays on
@@ -800,7 +837,7 @@ class Bot:
         # with EXDEV even on a single disk.
         png, preview = suite.build_wallpaper(
             src, mat, transparent=clear,
-            out_dir=suite.WALLPAPER_OUT / ".building")
+            out_dir=suite.WALLPAPER_OUT / ".building", fit=fit)
         old = [item for item in self.queue.items()
                if item.get("kind") == "wallpaper"
                and (item.get("meta") or {}).get("source") == str(src)]
@@ -812,7 +849,7 @@ class Bot:
             self.queue.remove(item["id"])
         item = self.queue.add("wallpaper", str(png),
                               meta={"source": str(src), "mat": mat,
-                                    "transparent": clear})
+                                    "transparent": clear, "fit": fit})
         return item, png, preview
 
     def queue_wallpapers(self, chat, sources: list, clear: bool) -> None:

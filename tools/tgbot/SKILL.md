@@ -138,19 +138,31 @@ either works; for anything meant to be transparent, only the file does.
 
 Send one and it is **kept, and asked about**: *Put it on the reader?* "Just
 keep it" leaves it in 🖼 Wallpapers for later. "Yes" — here, or from the
-picture in 🖼 Wallpapers any time after — walks two short steps:
+picture in 🖼 Wallpapers any time after — walks up to three short steps:
 
-1. **The mat, only if there is one to choose.** The bot asks
+1. **Fill or keep whole, only if filling would crop a lot.** Filling the
+   panel edge to edge crops whatever does not match its 2:3 shape. When that
+   is more than 15% of the picture (`FIT_ASK_CROP` — a square loses a third, a
+   phone portrait 11% and is not asked), the bot says how much and from which
+   sides, and offers ✂ **Fill** (photos) or ▣ **Keep it whole** (cartoons,
+   anything with text). Kept whole, it goes on to the mat sheet below.
+   A question rather than a guess: whether the cut part matters is taste, and
+   telling a cartoon from a photo is not a call a script should make.
+2. **The mat, only if there is one to choose.** The bot asks
    `make_wallpaper.py --probe` whether the image fills the panel (528×792
    after at most 1.5× enlargement). If it does, there is nothing to ask. If it
    does not, all four mats are built for real and come back as **one numbered
    sheet** — **1 ≈ waves, 2 ▣ edges, 3 ◌ blur, 4 — white** — so you choose by
    looking.
-2. **Opaque or transparent.** All wallpapers share one folder,
+3. **Opaque or transparent.** All wallpapers share one folder,
    `/sleep-overlay`, under the reader's *Transparent custom* sleep mode, which
    draws each over the page you were reading. ◼ **Opaque** covers it — right
-   for photos. ◻ **Transparent** lets it through wherever the picture is white
-   — right for drawings. A mat that came out white is clear too, on purpose.
+   for photos. ◻ **Transparent** lets it through where the picture is white —
+   but keeps a white rim round everything drawn and the inside of any shape
+   it closes, so a cartoon sits on the page as a cut-out with its speech
+   bubbles still white. Right for drawings. A mat that came out white is
+   clear too, on purpose — kept whole with **4 — white**, a cartoon floats on
+   the page.
    **Not asked of a PNG with its own transparency:** it has answered already,
    so its alpha is used exactly as drawn and the white elsewhere stays painted.
    (A batch from the sheet follows the same rule per picture.)
@@ -161,9 +173,10 @@ picture replaces the waiting copy rather than queueing two.
 
 The threshold is asked, never copied. "Smaller than 528×792" is the wrong
 test and would misfire on real photos: a 500×750 image is smaller in both
-dimensions and still fills, because it only has to grow 1.06×. `MAX_UPSCALE`
-and `MIN_MAT_AREA` are judgement calls that live in `make_wallpaper.py`, and
-`probe()` exists so this bot can ask rather than re-derive them.
+dimensions and still fills, because it only has to grow 1.06×. `MAX_UPSCALE`,
+`MIN_MAT_AREA` and `FIT_ASK_CROP` are judgement calls that live in
+`make_wallpaper.py`, and `probe()` exists so this bot can ask rather than
+re-derive them.
 
 ### The wallpapers you have sent
 
