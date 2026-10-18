@@ -26,7 +26,7 @@ where it is.
 
 | unit | deps | verify after changing it |
 |---|---|---|
-| `epub-builder/` | stdlib; Pillow for `prepare_cover.py` only | graded-reader selftest, **output byte-identical** (canary `workspace/being-earnest`), **and** opds-server selftest |
+| `epub-builder/` | stdlib; Pillow for `prepare_cover.py` only | graded-reader selftest, **output byte-identical** (canary `workspace/being-earnest`), **and** opds-server selftest; touching `devices.py` also wallpaper-maker, epub-slimmer and tgbot selftests (they size panels and identify readers from it) |
 | `tools/opds-server/` | none, stdlib | `python3 tools/opds-server/scripts/selftest.py` |
 | `tools/wallpaper-maker/` | Pillow (decode + resample only) | `.venv/bin/python tools/wallpaper-maker/scripts/selftest.py` **and** tgbot selftest (both import `crosspoint_device`) |
 | `tools/epub-slimmer/` | Pillow | `.venv/bin/python tools/epub-slimmer/scripts/selftest.py` **and** tgbot selftest (the bot slims every book it queues) |
@@ -46,10 +46,15 @@ python3 -m venv .venv
 - Device-facing change (EPUB output, fonts, feed) → read `extras/readers.md` first. It marks device-confirmed vs inferred; keep that distinction when you edit it.
 - Feed markup → the opds-server selftest's oracle is a port of the device's own OPDS client. Valid OPDS ≠ readable by this device. Same pattern for wallpapers: the oracle is a port of the firmware's BMP reader, and valid BMP ≠ drawn as computed.
 - Delivery to the device: OPDS is a **book-only pull** (`application/epub+zip`, SD root). Anything else — wallpapers, fonts, settings — is a push to the file-transfer web server. A book *can* also be pushed there (`tools/tgbot/` offers it); if you do, name it exactly as the OPDS client would (`crosspoint_client.opds_book_filename`) or the card ends up with two copies. `extras/readers.md` has the API.
-- Device target is the X3 everywhere, with one deliberate exception: pdf2epub
-  (and the cover it prepares) can aim a book at the **X4 Pro** instead. Panel
-  sizes live in one table, `epub-builder/scripts/devices.py`; size pixels from
-  it, never from a literal.
+- Two device targets, the **X3** (default everywhere) and the **X4 Pro**, both
+  on CrossPoint. Anything that sizes pixels for a panel takes `--device
+  x3|x4pro`: the wallpaper maker, the slimmer, pdf2epub, the cover. The bot
+  gets it from the saved reader it is working for. Panel sizes, and the name
+  each reader reports for itself in `/api/status`, live in one table,
+  `epub-builder/scripts/devices.py`; size pixels from it, never from a literal.
+- A reader is identified by the reader (MAC from its discovery reply, else its
+  serial), never by its address: every CrossPoint reader answers to
+  `crosspoint.local`.
 - `tools/tgbot/` is **optional by construction**: it may import from any unit, and no
   unit may import it. Someone who only builds EPUBs must never need a token.
 - `workspace/` is gitignored except allowlisted samples (proof + fixtures). Never assume a book there is tracked. New sample → add to `.gitignore` allowlist deliberately.

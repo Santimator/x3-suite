@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""What the bot must not forget: the delivery queue, and a note or two.
+"""What the bot must not forget: the readers, their queues, a note or two.
 
 The queue is the seam between the two scopes. Building a wallpaper happens
 whenever you like; putting it on the reader happens only when you say so and
@@ -13,6 +13,13 @@ not a database problem. Every write goes to a temporary file in the same
 directory and is then `os.replace`d over the real one, which is atomic on POSIX
 — so a crash mid-write leaves the previous queue intact rather than half a
 file. That is the property the whole "never drain partially" promise rests on.
+
+**Readers are remembered by identity, not by type.** Two X3s are two readers.
+`Devices` holds the ones you chose to save, keyed by what `crosspoint_device.
+identify` reads off the reader itself (`mac:…`, or `serial:…` without one), and
+every queue item names the reader it is for. A reader that was never saved has
+no queue and no inventory: the bot still browses and sends to it live, and
+forgets it afterwards.
 """
 
 from __future__ import annotations
@@ -33,11 +40,16 @@ def _write_atomic(path: Path, payload) -> None:
 
 
 class Queue:
-    """Things waiting to be pushed to the device, in the order they arrived.
+    """Things waiting to be pushed to a reader, in the order they arrived.
 
     Only device-bound work belongs here. A book does only after the user asks
     for a card copy; its metadata makes that pushed copy use the same filename
     the OPDS client would, so the two delivery routes converge.
+
+    Each item carries `device`, the id of the saved reader it is for, and
+    `items(device)` is that reader's queue. An item with no `device` predates
+    readers being told apart; it is listed so it can be removed, and no push
+    takes it.
     """
 
     def __init__(self, path: Path):
@@ -50,16 +62,25 @@ class Queue:
             return []
         return data if isinstance(data, list) else []
 
-    def items(self) -> list:
-        return self._read()
+    def items(self, device: str | None = None) -> list:
+        """Everything, or with `device`, only what is queued for that reader."""
+        items = self._read()
+        if device is None:
+            return items
+        return [i for i in items if i.get("device") == device]
 
     def __len__(self) -> int:
         return len(self._read())
 
+    def count(self, device: str) -> int:
+        return len(self.items(device))
+
     def add(self, kind: str, path: str, label: str = "",
-            meta: dict | None = None) -> dict:
+            meta: dict | None = None, device: str | None = None) -> dict:
         item = {"id": uuid.uuid4().hex[:8], "kind": kind, "path": str(path),
                 "label": label or Path(path).name, "added": time.time()}
+        if device:
+            item["device"] = device
         if meta:
             # Books carry the author and title they were catalogued under, so
             # the name they land on the card with is decided when they are
@@ -78,10 +99,12 @@ class Queue:
         _write_atomic(self.path, kept)
         return True
 
-    def clear(self) -> int:
-        n = len(self._read())
-        _write_atomic(self.path, [])
-        return n
+    def clear(self, device: str | None = None) -> int:
+        """Empty the queue, or only one reader's part of it."""
+        items = self._read()
+        kept = [] if device is None else [i for i in items if i.get("device") != device]
+        _write_atomic(self.path, kept)
+        return len(items) - len(kept)
 
     def remove_many(self, ids) -> None:
         ids = set(ids)
@@ -114,6 +137,84 @@ class Queue:
         if changed:
             _write_atomic(self.path, items)
         return changed
+
+
+class Devices:
+    """The readers you saved: who they are, what they are, where they were.
+
+    One JSON object keyed by device id, each entry {"name", "model", "mac",
+    "serial", "host", "firmware", "saved", "seen"}. `host` is the address the
+    reader last answered at — both readers answer to `crosspoint.local`, so an
+    address per reader is the only kind worth remembering.
+
+    The inventory — names and sizes of what was on the card the last time the
+    bot looked — sits beside it, one file per reader under `inventory/`, so a
+    reader that is off can still be looked at.
+    """
+
+    def __init__(self, path: Path):
+        self.path = Path(path)
+        self.inventory_dir = self.path.parent / "inventory"
+
+    def all(self) -> dict:
+        try:
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def get(self, device_id: str | None) -> dict | None:
+        return self.all().get(device_id) if device_id else None
+
+    def __len__(self) -> int:
+        return len(self.all())
+
+    def save(self, device_id: str, ident: dict, name: str, host: str | None) -> dict:
+        data = self.all()
+        now = time.time()
+        entry = {"name": name, "model": ident.get("model"),
+                 "mac": ident.get("mac"), "serial": ident.get("serial"),
+                 "host": host, "firmware": ident.get("firmware"),
+                 "saved": now, "seen": now}
+        data[device_id] = entry
+        _write_atomic(self.path, data)
+        return entry
+
+    def update(self, device_id: str, **fields) -> None:
+        data = self.all()
+        if device_id not in data:
+            return
+        data[device_id].update({k: v for k, v in fields.items() if v is not None})
+        _write_atomic(self.path, data)
+
+    def forget(self, device_id: str) -> bool:
+        data = self.all()
+        if data.pop(device_id, None) is None:
+            return False
+        _write_atomic(self.path, data)
+        self._inventory_path(device_id).unlink(missing_ok=True)
+        return True
+
+    def name_taken(self, name: str, other_than: str | None = None) -> bool:
+        return any(e.get("name", "").casefold() == name.casefold()
+                   for k, e in self.all().items() if k != other_than)
+
+    def _inventory_path(self, device_id: str) -> Path:
+        # `mac:aabb…` -> `mac-aabb…`: a colon is a bad idea in a file name.
+        safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in device_id)
+        return self.inventory_dir / f"{safe}.json"
+
+    def save_inventory(self, device_id: str, entries: list, fonts: list | None = None) -> dict:
+        snapshot = {"taken": time.time(), "entries": entries, "fonts": fonts or []}
+        _write_atomic(self._inventory_path(device_id), snapshot)
+        return snapshot
+
+    def inventory(self, device_id: str) -> dict | None:
+        try:
+            data = json.loads(self._inventory_path(device_id).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        return data if isinstance(data, dict) else None
 
 
 class Notes:

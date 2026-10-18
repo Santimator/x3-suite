@@ -41,6 +41,16 @@ from state import Queue, Tokens                         # noqa: E402
 OWNER = 424242
 STRANGER = 999999
 
+# Every bot in this file starts with one saved reader, the X3 most cases
+# talk to, and "identifying" any address returns it — unless a case says
+# otherwise. Without a saved reader nothing can be queued at all, which is
+# right for the bot and useless for testing everything that comes after.
+TEST_DEV = "mac:a1b2c3d4e5f6"
+TEST_IDENT = {"id": TEST_DEV, "mac": "a1b2c3d4e5f6", "serial": None,
+              "model": "x3", "reported": "X3", "firmware": "1.6.5",
+              "hostname": "CrossPoint-Reader-A1B2C3D4E5F6"}
+suite.device.identify = lambda host, info=None, hostname=None: dict(TEST_IDENT)
+
 failures = []
 
 
@@ -138,7 +148,9 @@ def make_bot(tmp: Path):
     }
     (tmp / "workspace").mkdir(parents=True, exist_ok=True)
     tg = FakeTelegram()
-    return Bot(cfg, tg, sync=True), tg
+    bot = Bot(cfg, tg, sync=True)
+    bot.devices.save(TEST_DEV, TEST_IDENT, "Test X3", "10.0.0.5")
+    return bot, tg
 
 
 def msg(text, user=OWNER, chat=None):
@@ -301,7 +313,7 @@ def check_queue(tmp: Path) -> None:
     fat.write_bytes(b"PK\x03\x04" + b"x" * 50_000)
     slim_out = bot.state_dir / "cache" / "slim" / "pretend.epub"
 
-    def fake_slim(src, cache_dir):
+    def fake_slim(src, cache_dir, model="x3"):
         cache_dir.mkdir(parents=True, exist_ok=True)
         slim_out.write_bytes(b"PK\x03\x04" + b"x" * 5_000)
         return {"path": slim_out, "before": 50_000, "after": 5_000,
@@ -340,7 +352,7 @@ def check_queue(tmp: Path) -> None:
         # push without a usable copy is slimmed there, never sent fat.
         uploaded.clear()
         bot.queue.add("book", str(fat), label="Fat",
-                      meta={"title": "Fat", "author": "A", "slim": str(slim_out)})
+                      meta={"title": "Fat", "author": "A", "slim": str(slim_out)}, device=TEST_DEV)
         bot.do_push(bot.user_id)
         check("a cache cleared before the push is rebuilt, not given up on",
               uploaded == [slim_out], str(uploaded))
@@ -349,7 +361,7 @@ def check_queue(tmp: Path) -> None:
         # Queued by something that never slimmed at all — the same guarantee.
         uploaded.clear()
         bot.queue.add("book", str(fat), label="Fat",
-                      meta={"title": "Fat", "author": "A"})
+                      meta={"title": "Fat", "author": "A"}, device=TEST_DEV)
         bot.do_push(bot.user_id)
         check("a book queued with no slim copy at all is slimmed at push time",
               uploaded == [slim_out], str(uploaded))
@@ -357,11 +369,11 @@ def check_queue(tmp: Path) -> None:
         # Slimming that saves nothing hands back the original, and that must
         # never be mistaken for a cache entry and deleted.
         uploaded.clear()
-        suite.slim_book = lambda src, cache: {"path": src, "before": 10,
+        suite.slim_book = lambda src, cache, model="x3": {"path": src, "before": 10,
                                               "after": 10, "saved": 0,
                                               "used": False}
         bot.queue.add("book", str(fat), label="Fat",
-                      meta={"title": "Fat", "author": "A"})
+                      meta={"title": "Fat", "author": "A"}, device=TEST_DEV)
         bot.do_push(bot.user_id)
         check("a book not worth slimming is pushed as it is", uploaded == [fat],
               str(uploaded))
@@ -387,11 +399,11 @@ def check_push_is_all_or_nothing(tmp: Path) -> None:
     bot, tg = make_bot(tmp)
     bmp = bot.workspace / "wall.bmp"
     bmp.write_bytes(b"BM fake")
-    bot.queue.add("wallpaper", str(bmp), "wall.bmp")
+    bot.queue.add("wallpaper", str(bmp), "wall.bmp", device=TEST_DEV)
     book = bot.workspace / "b.epub"
     book.write_bytes(b"PK\x03\x04")
     bot.queue.add("book", str(book), "A Book",
-                  meta={"author": "Someone", "title": "A Book"})
+                  meta={"author": "Someone", "title": "A Book"}, device=TEST_DEV)
 
     bot.device_host = no_reader
     tg.sent.clear()
@@ -439,7 +451,7 @@ def check_push_is_all_or_nothing(tmp: Path) -> None:
         p = build / name
         p.write_bytes(b"PNG fake")
         (build / "previews" / name).write_bytes(b"x")
-        bot.queue.add("wallpaper", str(p), name)
+        bot.queue.add("wallpaper", str(p), name, device=TEST_DEV)
 
     original = suite.push, suite.WALLPAPER_OUT
     try:
@@ -470,7 +482,7 @@ def check_push_is_all_or_nothing(tmp: Path) -> None:
         path = bot.workspace / f"{title}.epub"
         path.write_bytes(b"PK\x03\x04")
         bot.queue.add("book", str(path), title,
-                      meta={"author": "A", "title": title})
+                      meta={"author": "A", "title": title}, device=TEST_DEV)
 
     original_slim = suite.slim_book
     original_upload = suite.upload_book
@@ -478,7 +490,7 @@ def check_push_is_all_or_nothing(tmp: Path) -> None:
     during_upload = []
     try:
         bot.device_host = lambda: ("10.0.0.5", {})
-        suite.slim_book = lambda src, cache: {
+        suite.slim_book = lambda src, cache, model="x3": {
             "path": Path(src), "before": 4, "after": 4,
             "saved": 0, "used": False,
         }
@@ -499,7 +511,7 @@ def check_push_is_all_or_nothing(tmp: Path) -> None:
               "✅ Alpha.epub" in during_upload[1][1]
               and "📤 Beta.epub" in during_upload[1][1]
               and len(edit_ids) == 1, str(during_upload))
-        expected = ("📲 10.0.0.5\n📕 SD root\n✅ Alpha.epub\n✅ Beta.epub"
+        expected = ("📲 <b>Test X3</b> · 10.0.0.5\n📕 SD root\n✅ Alpha.epub\n✅ Beta.epub"
                     "\n\nQueue empty. Leave the File Transfer screen and let it sleep.")
         check("its last edit is exactly the existing final summary",
               tg.sent[-1]["text"] == expected, tg.sent[-1]["text"])
@@ -513,7 +525,7 @@ def check_push_is_all_or_nothing(tmp: Path) -> None:
 
     print("\na queued file that vanished from disk:")
     bot, tg = make_bot(tmp)
-    bot.queue.add("wallpaper", str(bot.workspace / "never-existed.bmp"), "ghost")
+    bot.queue.add("wallpaper", str(bot.workspace / "never-existed.bmp"), "ghost", device=TEST_DEV)
     original = suite.push
     try:
         bot.device_host = lambda: ("10.0.0.5", {})
@@ -736,7 +748,7 @@ def check_series_workflow(tmp: Path) -> None:
     removed = []
     try:
         suite.library = local_library
-        suite.slim_book = lambda src, cache: {
+        suite.slim_book = lambda src, cache, model="x3": {
             "path": src, "before": src.stat().st_size, "after": src.stat().st_size,
             "saved": 0, "used": False,
         }
@@ -1097,7 +1109,7 @@ def check_metadata_editor(tmp: Path) -> None:
         slim.write_bytes(b"old slim metadata")
         bot.queue.add("book", str(source), label="Bad title", meta={
             **book, "slim": str(slim),
-        })
+        }, device=TEST_DEV)
         bot.handle(cb(apply))
         edited = catalog / "CHRON - Bad title - Bad Author.epub"
         values = suite.book_metadata(edited, catalog).get("metadata", {})
@@ -1221,7 +1233,7 @@ def check_wallpaper_collection(tmp: Path) -> None:
     built = []
 
     def fake_build(src, mat="waves", transparent=False, out_dir=None,
-                   fit="cover"):
+                   fit="cover", model="x3"):
         # What make_wallpaper does, minus Pillow: a PNG named after the
         # original, and its preview beside it in previews/.
         out = Path(out_dir or suite.WALLPAPER_OUT)
@@ -1248,7 +1260,7 @@ def check_wallpaper_collection(tmp: Path) -> None:
         # square.png fills by cropping a third of itself, so the probe says
         # to ask; kept whole ('contain') it no longer fills.
         square = "square.png"
-        suite.probe_image = lambda src, fit="cover": {
+        suite.probe_image = lambda src, fit="cover", model="x3": {
             "fills": (fit == "cover" if Path(src).name == square
                       else sizes.get(Path(src).name, True)),
             "ask_fit": Path(src).name == square and fit == "cover",
@@ -1257,7 +1269,7 @@ def check_wallpaper_collection(tmp: Path) -> None:
             "width": 1080 if Path(src).name == square else 100,
             "height": 1080 if Path(src).name == square else 140,
             "panel": [528, 792]}
-        suite.mat_sheet = lambda src, cache, mats, fit="cover": (
+        suite.mat_sheet = lambda src, cache, mats, fit="cover", model="x3": (
             [fake_build(src, m, out_dir=Path(cache) / m, fit=fit) for m in mats],
             fake_sheet(mats, Path(cache) / "sheet.png"))[-1]
 
@@ -1288,11 +1300,14 @@ def check_wallpaper_collection(tmp: Path) -> None:
               and any("Transparent" in t for t, _ in modes), str(modes))
         bot.handle(cb(next(d for t, d in modes if "Transparent" in t)))
         items = bot.queue.items()
-        check("choosing builds into build/ and queues it, with what was chosen",
-              len(items) == 1 and Path(items[0]["path"]).parent == build
+        check("choosing builds into build/<reader>/ and queues it for that "
+              "reader, with what was chosen",
+              len(items) == 1
+              and Path(items[0]["path"]).parent == suite.build_dir(TEST_DEV)
+              and items[0]["device"] == TEST_DEV
               and items[0]["meta"] == {"source": str(walls / "dawn.jpg"),
                                        "mat": "waves", "transparent": True,
-                                       "fit": "cover"},
+                                       "fit": "cover", "model": "x3"},
               str(items))
         check("... and the preview of the built file is what is shown",
               "photo" in tg.sent[-1] and "transparent" in tg.sent[-1]["text"],
@@ -1544,7 +1559,7 @@ def check_wallpaper_collection(tmp: Path) -> None:
         try:
             tg.sent.clear()
             tok = bot.tokens.put({"src": str(walls / "logo.png"), "mat": "edges",
-                                  "clear": True})
+                                  "clear": True, "dev": TEST_DEV})
             bot.handle(cb(f"wo:{tok}"))
         finally:
             os.rename, os.replace = real_rename, real_replace
@@ -1772,7 +1787,7 @@ def check_font_queue(tmp: Path) -> None:
         bot, tg = make_bot(tmp)
         bot.device_host = lambda: ("10.0.0.5", {})
         bot.queue.add("font", str(fonts_dir / "Gone"), label="Gone",
-                      meta={"family": "Gone"})
+                      meta={"family": "Gone"}, device=TEST_DEV)
         bot.do_push(bot.user_id)
         check("is reported, not pushed as a wallpaper",
               any("Gone" in s["text"] for s in tg.sent), str(tg.sent[-1]))
@@ -2483,6 +2498,356 @@ def check_secrets_outside(tmp: Path) -> None:
               "not a number" in str(exc))
 
 
+# -- readers, told apart ---------------------------------------------------
+
+
+PRO_DEV = "mac:0011223344aa"
+PRO_IDENT = {"id": PRO_DEV, "mac": "0011223344aa", "serial": None,
+             "model": "x4pro", "reported": "xteink_x4_pro",
+             "firmware": "1.6.5-x4pro", "hostname": "CrossPoint-Reader-0011223344AA"}
+
+
+def buttons(sent: dict) -> list:
+    return [(t, d) for row in (sent.get("keyboard") or []) for t, d in row]
+
+
+def check_readers(tmp: Path) -> None:
+    print("\nreaders are told apart, and each has its own queue:")
+    bot, tg = make_bot(tmp)
+    idents = {"10.0.0.5": TEST_IDENT, "10.0.0.7": PRO_IDENT,
+              "10.0.0.9": {"id": "mac:99aa99aa99aa", "mac": "99aa99aa99aa",
+                           "serial": None, "model": "x4pro",
+                           "reported": "xteink_x4_pro", "firmware": "1.6.5-x4pro",
+                           "hostname": "CrossPoint-Reader-99AA99AA99AA"},
+              "10.0.0.11": {"id": None, "mac": None, "serial": None,
+                            "model": None, "reported": "X4", "firmware": "1.6.5",
+                            "hostname": "crosspoint"}}
+    answering = []
+    walked = {}
+    saved_fns = (suite.device.status, suite.device.identify, suite.device.find_devices,
+                 suite.device.walk,
+                 suite.device.fonts, suite.device.list_dir, suite.build_wallpaper,
+                 suite.probe_image, suite.slim_book, suite.push, suite.upload_book,
+                 suite.device_book_name, suite.WALLPAPER_OUT)
+    built, slimmed, pushed, uploaded = [], [], [], []
+
+    def fake_build(src, mat="waves", transparent=False, out_dir=None, fit="cover",
+                   model="x3"):
+        out = Path(out_dir)
+        (out / "previews").mkdir(parents=True, exist_ok=True)
+        png = out / (Path(src).stem + ".png")
+        png.write_bytes(f"PNG {model}".encode())
+        (out / "previews" / png.name).write_bytes(b"x")
+        built.append((Path(src).name, model))
+        return png, out / "previews" / png.name
+
+    def fake_slim(src, cache, model="x3"):
+        slimmed.append((Path(src).name, model))
+        return {"path": Path(src), "before": 1, "after": 1, "saved": 0, "used": False}
+
+    try:
+        suite.WALLPAPER_OUT = bot.workspace / "wallpapers" / "build"
+        suite.device.identify = lambda host, info=None, hostname=None: dict(idents[host])
+
+        def status(host, timeout=None):
+            if host not in answering:
+                raise suite.DeviceError(f"cannot reach {host}")
+            return {"ip": host, "version": idents[host]["firmware"],
+                    "device": idents[host]["reported"]}
+        suite.device.status = status
+        suite.device.find_devices = lambda candidates=(): [
+            (h, {"ip": h, "version": idents[h]["firmware"],
+                 "device": idents[h]["reported"]}, None) for h in answering]
+        suite.device.walk = lambda host, root="/", max_dirs=200: walked.get(host, [])
+        suite.device.fonts = lambda host: {"families": [{"name": "WenZilla", "sizes": [8, 12]}]}
+        suite.device.list_dir = lambda host, path: []
+        suite.build_wallpaper = fake_build
+        suite.probe_image = lambda src, fit="cover", model="x3": {
+            "fills": True, "ask_fit": False, "crop": 0.0, "has_alpha": False,
+            "width": 1200, "height": 1800, "device": model,
+            "panel": [480, 800] if model == "x4pro" else [528, 792]}
+        suite.slim_book = fake_slim
+        suite.push = lambda files, host=None: (pushed.append((host, [Path(f).name for f in files]))
+                                               or {"ok": True, "target": "/sleep-overlay",
+                                                   "items": [{"name": Path(f).name, "ok": True}
+                                                             for f in files]})
+        suite.upload_book = lambda host, path, name: uploaded.append((host, name))
+        suite.device_book_name = lambda a, t, host=None: f"{t}.epub"
+
+        # A new reader answers: announced once, with a way to save it.
+        answering[:] = ["10.0.0.7"]
+        tg.sent.clear()
+        bot.handle(cb("dev:st:"))
+        offers = [m for m in tg.sent if "New reader" in m["text"]]
+        check("a reader the bot does not know is announced as new, with its model",
+              len(offers) == 1 and "X4 Pro" in offers[0]["text"]
+              and any(d.startswith("dev:save:") for _, d in buttons(offers[0])),
+              str(tg.sent)[:300])
+        check("... and the usual things still work for it (it is found and shown)",
+              any("unsaved X4 Pro" in m["text"] for m in tg.sent), str(tg.sent[-1]))
+        tg.sent.clear()
+        bot.handle(cb("dev:ls0:"))
+        check("... and it is not announced again on the next tap",
+              not any("New reader" in m["text"] for m in tg.sent), str(tg.sent))
+
+        # Not saved, so nothing can be queued for it — and a push says why.
+        bot.queue.add("book", str(bot.workspace / "x.epub"), "x", device=TEST_DEV)
+        (bot.workspace / "x.epub").write_bytes(b"PK")
+        tg.sent.clear()
+        bot.do_push(bot.user_id)
+        check("pushing to a reader that is not saved sends nothing and says so",
+              not pushed and not uploaded and bot.queue.count(TEST_DEV) == 1
+              and "not saved" in tg.sent[-1]["text"]
+              and any(d.startswith("dev:save:") for _, d in buttons(tg.sent[-1])),
+              tg.sent[-1]["text"])
+
+        # Save it: a name, refused when taken or too long.
+        save = next(d for _, d in buttons(offers[0]) if d.startswith("dev:save:"))
+        bot.handle(cb(save))
+        bot.handle(msg("Test X3"))
+        check("a name another reader has is refused, and the question stays open",
+              "already called" in tg.sent[-1]["text"] and bot.pending
+              and bot.pending["kind"] == "devname", tg.sent[-1]["text"])
+        bot.handle(msg("x" * 40))
+        check("... and so is one too long for a button",
+              "Shorter" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+        walked["10.0.0.7"] = [{"path": "/Books", "size": 0, "dir": True},
+                              {"path": "/Books/Dune.epub", "size": 400_000, "dir": False},
+                              {"path": "/sleep-overlay", "size": 0, "dir": True},
+                              {"path": "/sleep-overlay/moon.png", "size": 9_000, "dir": False}]
+        bot.handle(msg("Night Pro"))
+        entry = bot.devices.get(PRO_DEV)
+        check("saved under its name, with its model and address",
+              entry and entry["name"] == "Night Pro" and entry["model"] == "x4pro"
+              and entry["host"] == "10.0.0.7", str(entry))
+        check("... and its card is looked at straight away",
+              (bot.devices.inventory(PRO_DEV) or {}).get("entries") == walked["10.0.0.7"]
+              and "2 files" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+
+        # Two saved readers: queueing asks which one, and the panel follows.
+        walls = bot.workspace / "wallpapers"
+        walls.mkdir(parents=True, exist_ok=True)
+        (walls / "moon.jpg").write_bytes(b"JPEG")
+        tg.sent.clear()
+        bot.handle(cb(f"wq:{bot.tokens.put(str(walls / 'moon.jpg'))}"))
+        choice = buttons(tg.sent[-1])
+        check("with two readers saved, a wallpaper asks which one it is for",
+              "Which reader" in tg.sent[-1]["text"]
+              and any("Night Pro" in t for t, _ in choice)
+              and any("Test X3" in t for t, _ in choice), str(choice))
+        bot.handle(cb(next(d for t, d in choice if "Night Pro" in t)))
+        opaque = next(d for t, d in buttons(tg.sent[-1]) if "Opaque" in t)
+        bot.handle(cb(opaque))
+        pro_items = bot.queue.items(PRO_DEV)
+        check("... and it is built for that reader's panel, into its own folder",
+              built == [("moon.jpg", "x4pro")] and len(pro_items) == 1
+              and Path(pro_items[0]["path"]).parent == suite.build_dir(PRO_DEV)
+              and pro_items[0]["meta"]["model"] == "x4pro", str((built, pro_items)))
+
+        # The same picture for the X3 too: a second file, neither replacing the other.
+        bot.handle(cb(f"wq:{bot.tokens.put(str(walls / 'moon.jpg'))}"))
+        bot.handle(cb(next(d for t, d in buttons(tg.sent[-1]) if "Test X3" in t)))
+        bot.handle(cb(next(d for t, d in buttons(tg.sent[-1]) if "Opaque" in t)))
+        check("the same picture queued for both is two builds, one per panel",
+              built[-1] == ("moon.jpg", "x3") and bot.queue.count(PRO_DEV) == 1
+              and len([i for i in bot.queue.items(TEST_DEV) if i["kind"] == "wallpaper"]) == 1
+              and Path(bot.queue.items(PRO_DEV)[0]["path"]).exists()
+              and Path([i for i in bot.queue.items(TEST_DEV)
+                        if i["kind"] == "wallpaper"][0]["path"]).exists())
+
+        # A book for the Pro is slimmed for the Pro.
+        book = bot.workspace / "library" / "Dune2.epub"
+        book.parent.mkdir(parents=True, exist_ok=True)
+        book.write_bytes(b"PK")
+        tok = bot.tokens.put({"path": str(book), "title": "Dune2", "author": "FH"})
+        bot.handle(cb(f"bq:{tok}"))
+        bot.handle(cb(next(d for t, d in buttons(tg.sent[-1]) if "Night Pro" in t)))
+        check("a book queued for the X4 Pro is slimmed for its panel",
+              ("Dune2.epub", "x4pro") in slimmed
+              and any(i["kind"] == "book" for i in bot.queue.items(PRO_DEV))
+              and "dev" not in next(i for i in bot.queue.items(PRO_DEV)
+                                    if i["kind"] == "book")["meta"], str(slimmed))
+
+        # The queue view groups by reader.
+        tg.sent.clear()
+        bot.show_queue(bot.user_id)
+        text = tg.sent[-1]["text"]
+        check("the queue is shown reader by reader",
+              "Night Pro" in text and "Test X3" in text, text)
+
+        # A PDF: which screen, then single or double — both always asked.
+        ran = []
+        saved_pdf = (suite.triage_pdf, suite.pdf2epub_runner, suite.run)
+        try:
+            suite.triage_pdf = lambda pdf, out: {"route": "TEXT", "pages": 3}
+            suite.pdf2epub_runner = lambda: Path("run_conversion.py")
+            suite.run = lambda cmd, timeout=900: (ran.append([str(c) for c in cmd]) or (0, "done", ""))
+            pdf = bot.workspace / "inbox" / "Field Guide.pdf"
+            pdf.parent.mkdir(parents=True, exist_ok=True)
+            pdf.write_bytes(b"%PDF-1.4")
+            tg.sent.clear()
+            bot.take_pdf(bot.user_id, pdf)
+            panels = buttons(tg.sent[-1])
+            check("a PDF asks which reader's screen first, offering every model",
+                  not ran and "which reader" in tg.sent[-1]["text"]
+                  and any(t.startswith("X3 · 528×792") for t, _ in panels)
+                  and any(t.startswith("X4 Pro · 480×800") for t, _ in panels),
+                  str(tg.sent[-1]))
+            bot.handle(cb(next(d for t, d in panels if t.startswith("X4 Pro"))))
+            modes = buttons(tg.sent[-1])
+            check("... then single or double figures",
+                  not ran and "Single" in tg.sent[-1]["text"]
+                  and {t for t, _ in modes} >= {"▭ Single", "▭▭ Double"}, str(tg.sent[-1]))
+            bot.handle(cb(next(d for t, d in modes if t == "▭▭ Double")))
+            check("... and the converter is told both, in the job's own folder",
+                  ran and ran[-1][-4:] == ["--device", "x4pro", "--figures", "double"]
+                  and ran[-1][-5].endswith("field-guide"), str(ran))
+            job_dir = Path(ran[-1][-5])
+            (job_dir / "job.json").write_text('{"device": "x4pro", "figures": "double"}')
+            ran.clear()
+            tg.sent.clear()
+            bot.convert_pdf(bot.user_id, job_dir, ["📄 field-guide"])
+            check("a job already planned resumes as planned, without asking again",
+                  ran and "--device" not in ran[-1] and "--figures" not in ran[-1]
+                  and not any("which reader" in m["text"] for m in tg.sent)
+                  and any("planned earlier for the X4 Pro" in m["text"] for m in tg.sent),
+                  str((ran, tg.sent)))
+        finally:
+            suite.triage_pdf, suite.pdf2epub_runner, suite.run = saved_pdf
+
+        # Push with the Pro answering: only the Pro's queue goes.
+        bot.current = None
+        tg.sent.clear()
+        bot.do_push(bot.user_id)
+        check("a push sends only the queue of the reader that answered",
+              pushed and pushed[-1][0] == "10.0.0.7" and pushed[-1][1] == ["moon.png"]
+              and uploaded == [("10.0.0.7", "Dune2.epub")]
+              and bot.queue.count(PRO_DEV) == 0 and bot.queue.count(TEST_DEV) == 2,
+              str((pushed, uploaded, bot.queue.items())))
+        check("... and its report names it",
+              any("Night Pro" in m["text"] for m in tg.sent), str(tg.sent[-1]))
+
+        # Both on at once, and we were not talking to either: ask.
+        answering[:] = ["10.0.0.5", "10.0.0.7"]
+        bot.current = None
+        tg.sent.clear()
+        bot.handle(cb("dev:ls0:"))
+        picks = buttons(tg.sent[-1])
+        check("two readers answering at once is a question, not a guess",
+              "2 readers" in tg.sent[-1]["text"]
+              and any("Night Pro" in t for t, _ in picks)
+              and any("Test X3" in t for t, _ in picks), str(tg.sent[-1]))
+        bot.handle(cb(next(d for t, d in picks if "Test X3" in t)))
+        check("... and picking one makes it the reader we talk to",
+              bot.current_id() == TEST_DEV and "Test X3" in tg.sent[-1]["text"],
+              tg.sent[-1]["text"])
+        tg.sent.clear()
+        bot.handle(cb("dev:ls0:"))
+        check("... and it stays the one while both answer",
+              not any("readers are answering" in m["text"] for m in tg.sent)
+              and bot.current_id() == TEST_DEV, str(tg.sent))
+
+        # Off: its card and inventory are still there.
+        answering[:] = []
+        bot.current = None
+        tg.sent.clear()
+        bot.handle(cb("m:dev"))
+        card = tg.sent[-1]
+        check("the device card lists the saved readers while none is on",
+              "Night Pro" in card["text"] and "Test X3" in card["text"]
+              and any(d.startswith("dev:card:") for _, d in buttons(card)), card["text"])
+        pro_card = next(d for t, d in buttons(card) if "Night Pro" in t)
+        bot.handle(cb(pro_card))
+        inv_button = next(d for t, d in buttons(tg.sent[-1]) if "on it" in t)
+        bot.handle(cb(inv_button))
+        check("what is on a reader can be read while it is off",
+              "Dune.epub" in tg.sent[-1]["text"] and "moon.png" in tg.sent[-1]["text"],
+              tg.sent[-1]["text"])
+
+        # Listing a folder keeps the inventory current, at no extra cost.
+        answering[:] = ["10.0.0.7"]
+        bot.current = None
+        suite.device.list_dir = lambda host, path: (
+            [{"name": "Dune.epub", "size": 400_000, "isDirectory": False},
+             {"name": "Emma.epub", "size": 300_000, "isDirectory": False}]
+            if path == "/Books" else [])
+        bot.browse(bot.user_id, "/Books")
+        paths = {e["path"] for e in bot.devices.inventory(PRO_DEV)["entries"]}
+        check("listing a folder brings the saved inventory up to date for it",
+              "/Books/Emma.epub" in paths and "/sleep-overlay/moon.png" in paths, str(paths))
+        suite.device.list_dir = lambda host, path: (
+            [{"name": "Emma.epub", "size": 300_000, "isDirectory": False}]
+            if path == "/" else [])
+        bot.browse(bot.user_id, "/")
+        paths = {e["path"] for e in bot.devices.inventory(PRO_DEV)["entries"]}
+        check("... and a folder gone from a listing takes what was under it",
+              paths == {"/Emma.epub"}, str(paths))
+
+        # A long inventory comes as a file you can keep.
+        walked["10.0.0.7"] = [{"path": f"/Books/b{n:03}.epub", "size": 1000, "dir": False}
+                              for n in range(80)]
+        bot.refresh_inventory()
+        tg.sent.clear()
+        bot.show_inventory(bot.user_id, PRO_DEV)
+        docs = [m for m in tg.sent if m.get("doc")]
+        check("a long inventory is summarised, and the whole of it sent as a text file",
+              docs and Path(docs[0]["doc"]).read_text().count(".epub") == 80, str(tg.sent)[:200])
+
+        # A reader that cannot say who it is is never saved.
+        answering[:] = ["10.0.0.11"]
+        bot.current = None
+        tg.sent.clear()
+        bot.handle(cb("dev:st:"))
+        check("a reader with no MAC and no serial is said to be unsaveable",
+              any("will not save it" in m["text"] for m in tg.sent)
+              and not any(d.startswith("dev:save:") for m in tg.sent for _, d in buttons(m)),
+              str(tg.sent)[:300])
+
+        # Forgetting one takes its queue with it, and leaves the other alone.
+        tok = bot.tokens.put(PRO_DEV)
+        bot.queue.add("font", "/x", "WenZilla", device=PRO_DEV)
+        bot.handle(cb(f"dev:forget!:{tok}"))
+        check("forgetting a reader drops it, its queue and its inventory — only its",
+              bot.devices.get(PRO_DEV) is None and bot.queue.count(PRO_DEV) == 0
+              and bot.devices.inventory(PRO_DEV) is None
+              and bot.queue.count(TEST_DEV) == 2, str(bot.queue.items()))
+
+        # One saved reader: no question asked.
+        tg.sent.clear()
+        bot.handle(cb(f"bq:{bot.tokens.put({'path': str(book), 'title': 'Dune2', 'author': 'FH'})}"))
+        ran = []
+        saved_pdf = (suite.triage_pdf, suite.pdf2epub_runner, suite.run)
+        try:
+            suite.triage_pdf = lambda pdf, out: {"route": "TEXT", "pages": 3}
+            suite.pdf2epub_runner = lambda: Path("run_conversion.py")
+            suite.run = lambda cmd, timeout=900: (ran.append(cmd) or (0, "", ""))
+            pdf = bot.workspace / "inbox" / "Second.pdf"
+            pdf.write_bytes(b"%PDF-1.4")
+            tg.sent.clear()
+            bot.take_pdf(bot.user_id, pdf)
+            check("with one reader saved, a PDF still asks which screen",
+                  not ran and "which reader" in tg.sent[-1]["text"], str(tg.sent[-1]))
+        finally:
+            suite.triage_pdf, suite.pdf2epub_runner, suite.run = saved_pdf
+        check("with one reader saved, queueing does not ask",
+              not any("Which reader" in m["text"] for m in tg.sent)
+              and any(i["kind"] == "book" for i in bot.queue.items(TEST_DEV)),
+              str(tg.sent[-1]))
+
+        # None saved: queueing explains what to do instead.
+        bot2, tg2 = make_bot(tmp)
+        bot2.devices.forget(TEST_DEV)
+        bot2.handle(cb(f"bq:{bot2.tokens.put({'path': str(book), 'title': 'D', 'author': 'F'})}"))
+        check("with no reader saved, queueing says how to save one",
+              "no saved reader" in tg2.sent[-1]["text"] and not len(bot2.queue),
+              tg2.sent[-1]["text"])
+    finally:
+        (suite.device.status, suite.device.identify, suite.device.find_devices,
+         suite.device.walk, suite.device.fonts, suite.device.list_dir, suite.build_wallpaper,
+         suite.probe_image, suite.slim_book, suite.push, suite.upload_book,
+         suite.device_book_name, suite.WALLPAPER_OUT) = saved_fns
+
+
 def main() -> int:
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
@@ -2504,6 +2869,7 @@ def main() -> int:
         check_device_fonts(tmp)
         check_tokens(tmp)
         check_device_menu(tmp)
+        check_readers(tmp)
         check_never_silent(tmp)
         check_poll_timeout_is_transient()
         check_entry_point()

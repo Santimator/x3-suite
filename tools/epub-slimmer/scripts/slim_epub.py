@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Strip an EPUB down to what the X3 can actually use.
+"""Strip an EPUB down to what the reader can actually use.
 
 A book downloaded from anywhere carries a great deal this reader will never
 look at. The two big ones are settled facts rather than guesses, both recorded
@@ -8,9 +8,10 @@ in `extras/readers.md`:
   * **Embedded fonts are ignored.** The renderer only rasterizes pre-converted
     `.cpfont` bitmaps, so every byte of `@font-face` is dead weight. On a
     typical commercial EPUB that alone is most of the file.
-  * **Colour is dropped and detail is wasted.** The panel is 528x792, four
-    grey levels. A 2000px full-colour plate is decoded, converted and thrown
-    away every time it is drawn.
+  * **Colour is dropped and detail is wasted.** The panel is 528x792 on an
+    X3 and 480x800 on an X4 Pro, four grey levels either way. A 2000px
+    full-colour plate is decoded, converted and thrown away every time it is
+    drawn.
 
 So: drop the fonts, drop what the engine cannot run at all, and re-encode the
 pictures to something the panel can show. Nothing else. This does not touch a
@@ -22,8 +23,12 @@ byte-identical EPUB out, so a slimmed copy can be cached and reused rather than
 rebuilt. That holds for a given Pillow — image encoders are free to change
 their output between versions, and this tool has no way to notice if they do.
 
+The images are sized for one device (`--device`, X3 by default), so a copy
+slimmed for the X3 is not the copy for an X4 Pro: a cache keys on both.
+
 Usage:
   slim_epub.py BOOK.epub --out slim.epub
+  slim_epub.py BOOK.epub --out slim.epub --device x4pro
   slim_epub.py BOOK.epub --out slim.epub --json      # report, for a caller
   slim_epub.py BOOK.epub --probe                     # what it would save
 """
@@ -41,13 +46,13 @@ from xml.etree import ElementTree as ET
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "epub-builder" / "scripts"))
 
+from devices import DEFAULT_DEVICE, DEVICES, panel  # noqa: E402
 from verify_epub import verify_integrity  # noqa: E402
 
-# The X3 panel. A content image is capped at its width: anything wider is bytes
-# the reader shrinks away. Not narrower — pdf2epub renders figures and tables
-# to exactly the panel, and shaving them here would undo that.
-PANEL = (528, 792)
-CONTENT_WIDTH = PANEL[0]
+# A content image is capped at the panel's width: anything wider is bytes the
+# reader shrinks away. Not narrower — pdf2epub renders figures and tables to
+# exactly the panel, and shaving them here would undo that. A cover is fitted
+# to the whole panel. Both come from `devices.py`, never from a literal.
 JPEG_QUALITY = 72
 
 FONT_TYPES = ("font/", "application/font", "application/vnd.ms-opentype",
@@ -109,7 +114,8 @@ def join(directory: str, href: str) -> str:
     return f"{directory.rstrip('/')}/{href}"
 
 
-def shrink_image(data: bytes, name: str, is_cover: bool) -> tuple[bytes, dict]:
+def shrink_image(data: bytes, name: str, is_cover: bool,
+                 device: str = DEFAULT_DEVICE) -> tuple[bytes, dict]:
     """Grayscale, fit to the panel, re-encode in the format it arrived in.
 
     The format is kept deliberately: the filename stays the same, so every
@@ -134,7 +140,8 @@ def shrink_image(data: bytes, name: str, is_cover: bool) -> tuple[bytes, dict]:
         note.update(after=len(data), skipped=f"{fmt or 'unknown'} left alone")
         return data, note
 
-    box = PANEL if is_cover else (CONTENT_WIDTH, PANEL[1] * 4)
+    w, h = panel(device)
+    box = (w, h) if is_cover else (w, h * 4)
     if img.mode != "L":
         img = img.convert("L")
     if img.width > box[0] or img.height > box[1]:
@@ -177,9 +184,11 @@ def rewrite_opf(opf_bytes: bytes, dropped_hrefs: set) -> bytes:
     return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
 
-def slim(src: Path, dest: Path | None) -> dict:
-    """Slim `src` into `dest` (or measure only, when dest is None)."""
-    report = {"source": str(src), "before": src.stat().st_size,
+def slim(src: Path, dest: Path | None, device: str = DEFAULT_DEVICE) -> dict:
+    """Slim `src` into `dest` (or measure only, when dest is None), with its
+    pictures sized for `device`."""
+    panel(device)                                 # unknown device: fail first
+    report = {"source": str(src), "device": device, "before": src.stat().st_size,
               "dropped": [], "images": [], "css_stripped": [], "kept": 0}
 
     with zipfile.ZipFile(src) as z:
@@ -209,7 +218,7 @@ def slim(src: Path, dest: Path | None) -> dict:
                 dropped_hrefs.add(name[len(opf_dir) + 1:] if opf_dir else name)
                 continue
             if name.lower().endswith(IMAGE_SUFFIXES):
-                data, note = shrink_image(data, name, name == cover)
+                data, note = shrink_image(data, name, name == cover, device)
                 report["images"].append(note)
             elif name.lower().endswith(".css"):
                 text = data.decode("utf-8", "replace")
@@ -260,19 +269,21 @@ def write_epub(entries: list) -> bytes:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Strip an EPUB to what the X3 uses.")
+    ap = argparse.ArgumentParser(description="Strip an EPUB to what the reader uses.")
     ap.add_argument("epub", type=Path)
     ap.add_argument("--out", type=Path, help="where to write the slimmed book")
     ap.add_argument("--probe", action="store_true",
                     help="measure only, write nothing")
     ap.add_argument("--json", action="store_true", help="report as JSON")
+    ap.add_argument("--device", choices=sorted(DEVICES), default=DEFAULT_DEVICE,
+                    help=f"which panel the pictures are sized for (default: {DEFAULT_DEVICE})")
     args = ap.parse_args(argv)
 
     if not args.probe and not args.out:
         print("error: --out or --probe", file=sys.stderr)
         return 2
     try:
-        report = slim(args.epub, None if args.probe else args.out)
+        report = slim(args.epub, None if args.probe else args.out, args.device)
     except (ValueError, KeyError, zipfile.BadZipFile, ET.ParseError) as exc:
         print(f"error: {args.epub.name}: {exc}", file=sys.stderr)
         return 1

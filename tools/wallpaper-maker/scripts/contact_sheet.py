@@ -4,8 +4,9 @@
     contact_sheet.py OUT.png a.png b.jpg c.bmp
     contact_sheet.py OUT.png workspace/wallpapers --start 25
 
-Every cell is 2:3, the panel's shape. A built wallpaper fills it exactly; an
-original photo of any other shape is fitted inside it on the sheet's ground,
+Every cell is 2:3, the X3 panel's shape. An X3 wallpaper fills it exactly and
+an X4 Pro one (3:5) nearly; an original photo of any other shape is fitted
+inside it on the sheet's ground,
 so what you see is the picture, not a crop of it. Each cell carries its **index**, drawn on the
 image, because a contact sheet you cannot point at is only decoration: the
 caller puts numbered buttons underneath and the two line up.

@@ -239,6 +239,10 @@ dither lattice, then an over-bright render), so the current one is confirmed
 rather than reasoned. The part still unseen is the *mat*: every image
 photographed so far filled the screen and never got framed.
 
+**X4 Pro:** `make_wallpaper.py --device x4pro` builds for its 480×800 panel,
+with the same quantiser (CrossPoint 1.6.5 uses the same even ramp on that
+panel). Source-confirmed only — not yet seen on the glass.
+
 Drop pictures in `workspace/wallpapers/`, run one command, and they're files
 the reader can draw. Run the second and they're on it. One sample ships with
 the repo — `finally-some-peace.png` — so a fresh clone has something to convert
@@ -396,8 +400,17 @@ Transfer → Join a Network. If the reader isn't there, the queue is untouched �
 so you can send pictures all week and push once. A font family queues the same
 way, as one entry: it goes across, is verified against `CHECKSUMS.tsv` and
 selected, or it stays queued. Books normally arrive through the catalog; an
-explicit **Also send to device** (or **Add all to X3** on a series) puts a slimmed
+explicit **Also send to device** (or **Add all to the reader** on a series) puts a slimmed
 reader copy in the same queue while the catalog original remains untouched.
+
+**More than one reader.** The bot tells readers apart by what they say about
+themselves (the MAC in their discovery reply, else a serial), not by address —
+every CrossPoint reader is `crosspoint.local`. A new one is announced and can be
+saved under a name; a saved reader gets its own queue, wallpapers and slim
+copies made for *its* panel (X3 528×792, X4 Pro 480×800), and a list of what is
+on its card that you can read while it is off. A push only ever sends the queue
+of the reader that answered. One you don't save still works live — it is just
+not remembered.
 
 It is **optional by construction**. Nothing else in the repo imports it, and if
 you never want a bot, you never need a token.

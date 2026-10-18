@@ -43,12 +43,19 @@ make.)
 
 One firmware behaviour worth knowing, handled here: an upload onto an
 existing name is *rejected*, not overwritten, so we delete first and retry.
+
+**A wallpaper is built for one panel.** The reader says which one it is
+(`/api/status` -> `device`, looked up in `devices.py`), and a file whose size
+is not that panel's is refused rather than pushed: an X3 wallpaper on an X4
+Pro is shrunk and letterboxed by the firmware, an X4 Pro one on an X3 floats
+in a black frame. `--any-size` pushes it anyway.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import struct
 import sys
 from pathlib import Path
 
@@ -56,6 +63,8 @@ from crosspoint_device import (DeviceError, delete, find_device, list_dir, mkdir
                                remember, set_settings, upload)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "epub-builder" / "scripts"))
+from devices import DEVICES, from_status  # noqa: E402
 DEFAULT_DIR = REPO_ROOT / "workspace" / "wallpapers" / "build"
 
 SLEEP_DIR = "/sleep-overlay"
@@ -85,6 +94,40 @@ def set_overlay_mode(host: str) -> bool:
     return set_settings(host, {"sleepScreen": SLEEP_MODE_OVERLAY})
 
 
+def image_size(path: Path) -> tuple | None:
+    """(width, height) from the header alone, or None if it is neither a PNG
+    nor a BMP we can read. Twenty-odd bytes, so checking every file before a
+    push costs nothing."""
+    try:
+        with path.open("rb") as fh:
+            head = fh.read(26)
+    except OSError:
+        return None
+    if head[:8] == b"\x89PNG\r\n\x1a\n" and len(head) >= 24:
+        return struct.unpack(">II", head[16:24])
+    if head[:2] == b"BM" and len(head) >= 26:
+        w, h = struct.unpack("<ii", head[18:26])
+        return w, abs(h)
+    return None
+
+
+def wrong_panel(path: Path, model: str | None) -> str | None:
+    """Why `path` does not belong on this reader, or None when it does (or when
+    the reader is one `devices.py` does not describe, so there is nothing to
+    hold it against)."""
+    if model is None:
+        return None
+    size = image_size(path)
+    want = DEVICES[model]["panel"]
+    if size is None or tuple(size) == tuple(want):
+        return None
+    built_for = next((row["name"] for row in DEVICES.values()
+                      if tuple(row["panel"]) == tuple(size)), None)
+    return (f"{size[0]}x{size[1]} is " + (f"the {built_for} panel" if built_for
+                                          else "not this reader's panel")
+            + f"; this is an {DEVICES[model]['name']} ({want[0]}x{want[1]})")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -99,6 +142,9 @@ def main() -> int:
     ap.add_argument("--list", action="store_true", help="show what is there and stop")
     ap.add_argument("--replace", action="store_true",
                     help="delete the wallpapers already on the device first")
+    ap.add_argument("--any-size", action="store_true",
+                    help="push a file even when it was built for another "
+                         "panel than this reader's")
     ap.add_argument("--no-set-mode", action="store_true",
                     help="do not switch the sleep screen to Transparent custom")
     ap.add_argument("--json", action="store_true",
@@ -118,7 +164,10 @@ def main() -> int:
         remember(host)
         report["host"] = host
         report["firmware"] = info.get("version")
-        say(f"reader at {host}: {info.get('model', 'unknown model')}, "
+        model = from_status(info.get("device"))
+        report["device"] = model
+        say(f"reader at {host}: "
+            f"{DEVICES[model]['name'] if model else info.get('device', 'unknown model')}, "
             f"firmware {info.get('version', '?')}")
 
         # --list must not change the device.
@@ -171,6 +220,13 @@ def main() -> int:
             # The firmware refuses an upload onto an existing name rather than
             # overwriting it, so replacing means deleting first.
             item = {"name": src.name, "bytes": src.stat().st_size, "ok": False}
+            mismatch = None if args.any_size else wrong_panel(src, model)
+            if mismatch:
+                item["error"] = mismatch
+                failures += 1
+                say(f"  {src.name}  SKIPPED — {mismatch}", file=sys.stderr)
+                report["items"].append(item)
+                continue
             try:
                 if src.name in on_device:
                     delete(host, f"{target}/{src.name}")

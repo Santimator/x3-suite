@@ -178,7 +178,9 @@ judgement work.
 `headless/run_conversion.py workspace/<slug>` does sections 1–3 unattended with
 any OpenAI-compatible **vision** model (`headless/config.example.json` →
 `config.json`, key in `headless/secrets/`). It cannot ask, so device and figure
-mode come from its config. Per chunk: write → gate → on failure, rewrite with
+mode come from its config — unless the caller asked § 0's two questions and
+passes the answers as `--device x3|x4pro --figures single|double`, which
+`tools/tgbot/` always does. A job already planned keeps its own. Per chunk: write → gate → on failure, rewrite with
 the gate's report (up to `max_attempts`) → review where required. It **stops
 rather than guesses**: a chunk that keeps failing ends the run with the report,
 progress saved; re-running resumes. Exit 0 built and verified, 1 stopped, 2 not

@@ -31,9 +31,11 @@ on the X3 the greys ghost as well (device-observed 2026-10). An opaque PNG
 paints every pixel, white included.
 
     crosspoint_overlay.py wall.png --png preview.png [--page page.png | --sample-page]
+                          [--device x4pro]
 
 writes what the panel would show (over a white page, the given one, or a page
-of sample text) and prints a JSON report.
+of sample text) and prints a JSON report. The draw path is the same code on
+the X3 and the X4 Pro; only the panel it lands on differs (`devices.py`).
 """
 
 from __future__ import annotations
@@ -44,7 +46,10 @@ import sys
 import zlib
 from pathlib import Path
 
-PANEL_W, PANEL_H = 528, 792
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "epub-builder" / "scripts"))
+from devices import DEFAULT_DEVICE, DEVICES, panel  # noqa: E402
+
+PANEL_W, PANEL_H = panel(DEFAULT_DEVICE)
 OVERLAY_DIRS = ("/.sleep-overlay", "/sleep-overlay")
 ROOT_FILES = ("/sleep-overlay.bmp", "/sleep-overlay.png")
 
@@ -186,10 +191,11 @@ def decode(data: bytes) -> dict:
             "grey": grey, "alpha": alpha}
 
 
-def placement(w: int, h: int) -> tuple:
+def placement(w: int, h: int, size: tuple = (PANEL_W, PANEL_H)) -> tuple:
     """Where the panel puts it: centred, never scaled up (same rule as BMP)."""
-    scaled = w > PANEL_W or h > PANEL_H
-    return (max(0, (PANEL_W - w) // 2), max(0, (PANEL_H - h) // 2), scaled)
+    pw, ph = size
+    scaled = w > pw or h > ph
+    return (max(0, (pw - w) // 2), max(0, (ph - h) // 2), scaled)
 
 
 def panel_levels(img: dict) -> list:
@@ -211,15 +217,17 @@ def composite(levels: list, page: bytes | None = None) -> bytes:
                  for i, v in enumerate(levels))
 
 
-def report(path: Path) -> dict:
+def report(path: Path, device: str = DEFAULT_DEVICE) -> dict:
     data = path.read_bytes()
     img = decode(data)
-    x, y, scaled = placement(img["width"], img["height"])
+    x, y, scaled = placement(img["width"], img["height"], panel(device))
     a = img["alpha"]
     return {"file": str(path), "width": img["width"], "height": img["height"],
             "bits": img["bits"], "colour_type": img["colour_type"],
             "drawn_by_sleep_scan": scan_accepts(path.name),
             "transparent": any(v < 255 for v in a),
+            "device": device, "panel": list(panel(device)),
+            "fits_exactly": (img["width"], img["height"]) == panel(device),
             "x": x, "y": y, "scaled_down": scaled,
             "exact": all(v in (0, 85, 170, 255) for v in img["grey"])}
 
@@ -235,32 +243,34 @@ def main(argv=None) -> int:
                     help="a panel-sized image to show through the transparent parts")
     ap.add_argument("--sample-page", action="store_true",
                     help="show a page of sample text through them instead")
+    ap.add_argument("--device", choices=sorted(DEVICES), default=DEFAULT_DEVICE,
+                    help=f"whose panel it lands on (default: {DEFAULT_DEVICE})")
     args = ap.parse_args(argv)
+    pw, ph = panel(args.device)
     try:
-        rep = report(args.png)
+        rep = report(args.png, args.device)
     except (PngError, OSError, zlib.error) as exc:
         print(f"crosspoint_overlay: {exc}", file=sys.stderr)
         return 1
     if args.out:
         from PIL import Image                      # only for writing the picture
         img = decode(args.png.read_bytes())
-        if (img["width"], img["height"]) != (PANEL_W, PANEL_H):
-            canvas = Image.new("L", (PANEL_W, PANEL_H), 0)
+        if (img["width"], img["height"]) != (pw, ph):
+            canvas = Image.new("L", (pw, ph), 0)
             pic = Image.frombytes("L", (img["width"], img["height"]),
                                   bytes(img["grey"]))
-            canvas.paste(pic.resize((min(pic.width, PANEL_W), min(pic.height, PANEL_H))),
+            canvas.paste(pic.resize((min(pic.width, pw), min(pic.height, ph))),
                          (rep["x"], rep["y"]))
             canvas.save(args.out)
         else:
             page = None
             if args.sample_page:
                 from make_wallpaper import sample_page     # Pillow, same folder
-                page = sample_page()
+                page = sample_page((pw, ph))
             elif args.page:
-                page = Image.open(args.page).convert("L").resize(
-                    (PANEL_W, PANEL_H)).tobytes()
+                page = Image.open(args.page).convert("L").resize((pw, ph)).tobytes()
             shown = composite(panel_levels(img), page)
-            Image.frombytes("L", (PANEL_W, PANEL_H), shown).save(args.out)
+            Image.frombytes("L", (pw, ph), shown).save(args.out)
         rep["png"] = str(args.out)
     json.dump(rep, sys.stdout, ensure_ascii=False)
     return 0
