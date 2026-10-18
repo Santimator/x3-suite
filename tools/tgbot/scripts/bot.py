@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import json
 import queue as queuelib
 import re
 import sys
@@ -752,7 +753,8 @@ class Bot:
             if not inside(self.workspace, job_dir):
                 return self.stale(chat)
             return self.submit(chat, lambda: self.convert_pdf(
-                chat, job_dir, [f"📄 <b>{html.escape(job_dir.name)}</b>"], job["model"]))
+                chat, job_dir, [f"📄 <b>{html.escape(job_dir.name)}</b>"],
+                job["model"], job.get("figures")))
 
     def no_reader(self, chat, detail: str = "", retry: str | None = None) -> None:
         """The one failure that happens to everybody, answered usefully.
@@ -1306,30 +1308,58 @@ class Bot:
         self.say(chat, "\n".join(lines), [[("🏠 Menu", "m:main")]])
 
     def convert_pdf(self, chat, job_dir: Path, lines: list,
-                    model: str | None = None) -> None:
-        """Run the headless converter on a staged job.
+                    model: str | None = None, figures: str | None = None) -> None:
+        """Run the headless converter on a staged job — after asking.
 
-        Figures are rendered for one panel. With readers of two models saved,
-        which one is a question; with one model, it is that one; with none, the
-        converter's own config decides. A job already planned keeps its device.
+        Which reader's screen, and single or double figures, are the two
+        questions pdf2epub's SKILL.md says to ask before planning, and they are
+        yours whichever way the conversion is driven. So the bot always asks
+        both, one after the other, and passes the answers; the converter's
+        config is only the fallback for a run nobody is there to ask. Every
+        model `devices.py` knows is offered, saved or not: a converted book
+        goes to the catalog, which is not any one reader's.
+
+        A job already planned answered both when it was planned (`job.json`),
+        and resuming it with other answers would mix two layouts — so it is
+        resumed as it is.
         """
         runner = suite.pdf2epub_runner()
         if runner:
-            models = sorted({e["model"] for e in self.devices.all().values()
-                             if e.get("model")})
-            planned = (job_dir / "job.json").exists()
-            if model is None and len(models) > 1 and not planned:
-                self.say(chat, "\n".join(lines))
-                return self.say(chat, "Convert it for which reader's screen? "
-                                      "Figures and tables are drawn to fit it.",
-                                [[(model_name(m), "pdf:" + self.tokens.put(
-                                    {"job_dir": str(job_dir), "model": m}))
-                                  for m in models], [("✗ Cancel", "m:main")]])
-            model = model or (models[0] if len(models) == 1 else None)
+            planned = None
+            if (job_dir / "job.json").exists():
+                try:
+                    planned = json.loads((job_dir / "job.json").read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    planned = {}
             cmd = [suite.PY_DEPS, str(runner), str(job_dir)]
-            if model and not planned:
-                cmd += ["--device", model]
-                lines.append(f"for the {model_name(model)}")
+            if planned is not None:
+                lines.append(f"planned earlier for the {model_name(planned.get('device'))}, "
+                             f"{html.escape(str(planned.get('figures', '?')))} figures — resuming")
+            elif model is None:
+                self.say(chat, "\n".join(lines))
+                rows = [[(f"{model_name(m)} · {w}×{h}", "pdf:" + self.tokens.put(
+                            {"job_dir": str(job_dir), "model": m}))
+                         for m, (w, h) in ((m, row["panel"])
+                                           for m, row in suite.device.DEVICES.items())],
+                        [("✗ Cancel", "m:main")]]
+                return self.say(chat, "1/2 · Convert it for which reader's screen? "
+                                      "Pages, figures and tables are drawn to fit it.", rows)
+            elif figures is None:
+                job = {"job_dir": str(job_dir), "model": model}
+                return self.say(
+                    chat,
+                    f"2/2 · For the {model_name(model)}. Tables and figures:\n\n"
+                    "▭ <b>Single</b>: each on one page, turned 90° when that makes "
+                    "it at least 1.25× bigger.\n"
+                    "▭▭ <b>Double</b>: also split over two consecutive pages when "
+                    "that makes it at least 1.25× bigger, or spares turning it — "
+                    "for dense tables and wide diagrams.",
+                    [[("▭ Single", "pdf:" + self.tokens.put({**job, "figures": "single"})),
+                      ("▭▭ Double", "pdf:" + self.tokens.put({**job, "figures": "double"}))],
+                     [("✗ Cancel", "m:main")]])
+            else:
+                cmd += ["--device", model, "--figures", figures]
+                lines.append(f"for the {model_name(model)}, {figures} figures")
             lines.append("Running the headless converter…")
             self.say(chat, "\n".join(lines))
             rc, out, err = suite.run(cmd, timeout=3600)

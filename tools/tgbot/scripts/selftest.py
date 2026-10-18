@@ -2675,7 +2675,7 @@ def check_readers(tmp: Path) -> None:
         check("the queue is shown reader by reader",
               "Night Pro" in text and "Test X3" in text, text)
 
-        # A PDF is converted for one panel: with an X3 and an X4 Pro saved, asked.
+        # A PDF: which screen, then single or double — both always asked.
         ran = []
         saved_pdf = (suite.triage_pdf, suite.pdf2epub_runner, suite.run)
         try:
@@ -2688,13 +2688,30 @@ def check_readers(tmp: Path) -> None:
             tg.sent.clear()
             bot.take_pdf(bot.user_id, pdf)
             panels = buttons(tg.sent[-1])
-            check("a PDF asks which reader's screen it is converted for",
+            check("a PDF asks which reader's screen first, offering every model",
                   not ran and "which reader" in tg.sent[-1]["text"]
-                  and {t for t, _ in panels} >= {"X3", "X4 Pro"}, str(tg.sent[-1]))
-            bot.handle(cb(next(d for t, d in panels if t == "X4 Pro")))
-            check("... and the converter is told, in the job's own folder",
-                  ran and ran[-1][-2:] == ["--device", "x4pro"]
-                  and ran[-1][-3].endswith("field-guide"), str(ran))
+                  and any(t.startswith("X3 · 528×792") for t, _ in panels)
+                  and any(t.startswith("X4 Pro · 480×800") for t, _ in panels),
+                  str(tg.sent[-1]))
+            bot.handle(cb(next(d for t, d in panels if t.startswith("X4 Pro"))))
+            modes = buttons(tg.sent[-1])
+            check("... then single or double figures",
+                  not ran and "Single" in tg.sent[-1]["text"]
+                  and {t for t, _ in modes} >= {"▭ Single", "▭▭ Double"}, str(tg.sent[-1]))
+            bot.handle(cb(next(d for t, d in modes if t == "▭▭ Double")))
+            check("... and the converter is told both, in the job's own folder",
+                  ran and ran[-1][-4:] == ["--device", "x4pro", "--figures", "double"]
+                  and ran[-1][-5].endswith("field-guide"), str(ran))
+            job_dir = Path(ran[-1][-5])
+            (job_dir / "job.json").write_text('{"device": "x4pro", "figures": "double"}')
+            ran.clear()
+            tg.sent.clear()
+            bot.convert_pdf(bot.user_id, job_dir, ["📄 field-guide"])
+            check("a job already planned resumes as planned, without asking again",
+                  ran and "--device" not in ran[-1] and "--figures" not in ran[-1]
+                  and not any("which reader" in m["text"] for m in tg.sent)
+                  and any("planned earlier for the X4 Pro" in m["text"] for m in tg.sent),
+                  str((ran, tg.sent)))
         finally:
             suite.triage_pdf, suite.pdf2epub_runner, suite.run = saved_pdf
 
@@ -2798,6 +2815,20 @@ def check_readers(tmp: Path) -> None:
         # One saved reader: no question asked.
         tg.sent.clear()
         bot.handle(cb(f"bq:{bot.tokens.put({'path': str(book), 'title': 'Dune2', 'author': 'FH'})}"))
+        ran = []
+        saved_pdf = (suite.triage_pdf, suite.pdf2epub_runner, suite.run)
+        try:
+            suite.triage_pdf = lambda pdf, out: {"route": "TEXT", "pages": 3}
+            suite.pdf2epub_runner = lambda: Path("run_conversion.py")
+            suite.run = lambda cmd, timeout=900: (ran.append(cmd) or (0, "", ""))
+            pdf = bot.workspace / "inbox" / "Second.pdf"
+            pdf.write_bytes(b"%PDF-1.4")
+            tg.sent.clear()
+            bot.take_pdf(bot.user_id, pdf)
+            check("with one reader saved, a PDF still asks which screen",
+                  not ran and "which reader" in tg.sent[-1]["text"], str(tg.sent[-1]))
+        finally:
+            suite.triage_pdf, suite.pdf2epub_runner, suite.run = saved_pdf
         check("with one reader saved, queueing does not ask",
               not any("Which reader" in m["text"] for m in tg.sent)
               and any(i["kind"] == "book" for i in bot.queue.items(TEST_DEV)),

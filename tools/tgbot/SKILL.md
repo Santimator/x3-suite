@@ -264,8 +264,7 @@ name (short, unique) and from then on that reader has:
   and the build waits in `build/<reader>/`, so the same picture queued for an
   X3 and an X4 Pro is two files under one name, neither replacing the other.
   A book is slimmed for the panel of the reader it is queued for (the cache key
-  includes it). A PDF, when the readers saved are of two models, is converted
-  for the one you pick (`run_conversion.py --device`).
+  includes it).
 - **an inventory**: names and sizes of everything on its card, walked when it
   is saved, on 🔎 Find it, after every push, and patched for free each time a
   folder is listed — which is also how a rename, delete or move from the chat
@@ -285,6 +284,17 @@ starts the search afresh.
 
 State: `state/devices.json` (the readers) and `state/inventory/<reader>.json`
 (their cards), both gitignored, both readable with `cat`.
+
+### A PDF: two questions, always
+
+Before a conversion the bot asks the two questions pdf2epub's SKILL.md says
+belong to you: **which reader's screen** (every model `devices.py` knows,
+saved or not — the book goes to the catalog, which is no one reader's), then
+**single or double** tables and figures. The answers go to
+`run_conversion.py --device … --figures …`; the converter's own config is only
+the fallback for a run nobody is there to ask. A job already planned answered
+both in its `job.json` and is resumed as it is, so a resume never mixes two
+layouts.
 
 ### A push session
 
@@ -835,7 +845,7 @@ temporary workspace. It grades the four things that would actually hurt:
    once and still browsable; pushing to it sends nothing; saving refuses a taken
    or overlong name and walks its card; with two saved, a wallpaper and a book
    ask which reader and are built and slimmed for that panel, the same picture
-   queued for both is two files; a PDF asks which screen and the converter is
+   queued for both is two files; a PDF asks which screen, then single or double, and the converter is
    told; a push sends only the queue of the reader that answered; two answering
    at once is a question, and the pick sticks; the device card and the
    inventory read while every reader is off; a listing patches the inventory,

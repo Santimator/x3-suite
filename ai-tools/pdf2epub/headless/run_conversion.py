@@ -26,12 +26,15 @@ Not for the TRANSCRIPT route (a user transcript beside the PDF): matching its
 text to chunks is a judgement call for an interactive driver.
 
 Usage:
-  run_conversion.py WORKDIR [--config PATH] [--device x3|x4pro] [--plan-only] [--no-epub]
+  run_conversion.py WORKDIR [--config PATH] [--device x3|x4pro]
+                    [--figures single|double] [--plan-only] [--no-epub]
 
-`--device` picks the reader a *new* job is planned for, over the config's
-`device` — so a caller that knows (tools/tgbot/, asking which reader) need not
-edit the config. A job already planned keeps the device it was planned with:
-its figures were rendered for that panel, and resuming must not mix two.
+`--device` and `--figures` are the two questions SKILL.md § 0 says to ask
+before planning. A caller that asked them (tools/tgbot/ always does) passes the
+answers; the config's `device` / `figures` are only the fallback for a run
+nobody is there to ask. A job already planned keeps what it was planned with:
+its figures were rendered for that panel and mode, and a resume must not mix
+two.
 Exit: 0 EPUB built and verified · 1 stopped (progress saved) · 2 not configured
 """
 from __future__ import annotations
@@ -263,6 +266,8 @@ def main():
     ap.add_argument("--config", type=Path)
     ap.add_argument("--device", choices=("x3", "x4pro"),
                     help="the reader a new job is planned for (overrides the config)")
+    ap.add_argument("--figures", choices=("single", "double"),
+                    help="figure mode for a new job (overrides the config)")
     ap.add_argument("--plan-only", action="store_true")
     ap.add_argument("--no-epub", action="store_true")
     args = ap.parse_args()
@@ -271,6 +276,8 @@ def main():
         cfg.setdefault("max_attempts", 3)
         if args.device:
             cfg["device"] = args.device
+        if args.figures:
+            cfg["figures"] = args.figures
         if not args.plan_only:
             llm_mod.resolve_key(cfg)
     except llm_mod.LLMError as e:
