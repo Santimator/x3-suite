@@ -37,11 +37,17 @@ Quirks kept on purpose, because they are what we design against:
 from __future__ import annotations
 
 import struct
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 
-# The X3 panel, portrait: the sleep screen is always drawn portrait
-# (SleepActivity resets the renderer orientation before painting).
-PANEL_W, PANEL_H = 528, 792
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "epub-builder" / "scripts"))
+from devices import DEFAULT_DEVICE, panel  # noqa: E402
+
+# The default panel, portrait: the sleep screen is always drawn portrait
+# (SleepActivity resets the renderer orientation before painting). The size is
+# per device, from `devices.py`; everything here takes the screen as an argument.
+PANEL_W, PANEL_H = panel(DEFAULT_DEVICE)
 
 # The four physical states of the panel. `Bitmap::readNextRow` emits a 2-bit
 # index; these are the luminances that map onto them one-to-one.
@@ -320,7 +326,7 @@ def placement(hdr: ParsedBmp, screen_w: int = PANEL_W, screen_h: int = PANEL_H):
 # Looking at one — as the panel would
 
 
-def render_png(src, dest) -> dict:
+def render_png(src, dest, device: str = DEFAULT_DEVICE) -> dict:
     """Write what the *device* would draw for this BMP, and say how it read it.
 
     The point of rendering through this module rather than through Pillow is
@@ -339,17 +345,17 @@ def render_png(src, dest) -> dict:
     Pillow is imported here and nowhere else in this file: parsing stays
     stdlib, and only looking costs a dependency.
     """
-    from pathlib import Path
     from PIL import Image
 
+    pw, ph = panel(device)
     src, dest = Path(src), Path(dest)
     data = src.read_bytes()
     hdr = parse_headers(data)
-    x, y, scaled = placement(hdr)
+    x, y, scaled = placement(hdr, pw, ph)
     report = {"file": str(src), "width": hdr.width, "height": hdr.height,
               "bpp": hdr.bpp, "native_palette": hdr.native_palette,
               "greyscale": hdr.has_greyscale, "exact": False,
-              "panel": [PANEL_W, PANEL_H], "x": x, "y": y, "scaled_down": scaled,
+              "panel": [pw, ph], "x": x, "y": y, "scaled_down": scaled,
               "drawn_by_sleep_scan": sleep_scan_accepts(src.name)}
 
     try:
@@ -363,8 +369,8 @@ def render_png(src, dest) -> dict:
 
     # Show it where it lands: the panel's own field, so an under-size wallpaper
     # previews as the small picture in black that the device actually paints.
-    if not scaled and (hdr.width < PANEL_W or hdr.height < PANEL_H):
-        canvas = Image.new("L", (PANEL_W, PANEL_H), 0)
+    if not scaled and (hdr.width < pw or hdr.height < ph):
+        canvas = Image.new("L", (pw, ph), 0)
         canvas.paste(img, (x, y))
         img = canvas
     img.save(dest)
@@ -377,18 +383,21 @@ def main(argv=None) -> int:
     import json
     import sys
 
+    from devices import DEVICES
+
     ap = argparse.ArgumentParser(
-        description="What would the X3 draw for this BMP?")
+        description="What would the reader draw for this BMP?")
     ap.add_argument("bmp")
     ap.add_argument("--png", metavar="OUT",
                     help="write a PNG of what the panel would show")
+    ap.add_argument("--device", choices=sorted(DEVICES), default=DEFAULT_DEVICE)
     args = ap.parse_args(argv)
 
     if args.png:
-        json.dump(render_png(args.bmp, args.png), sys.stdout, ensure_ascii=False)
+        json.dump(render_png(args.bmp, args.png, args.device), sys.stdout,
+                  ensure_ascii=False)
         return 0
 
-    from pathlib import Path
     hdr = parse_headers(Path(args.bmp).read_bytes())
     json.dump({"width": hdr.width, "height": hdr.height, "bpp": hdr.bpp,
                "native_palette": hdr.native_palette},

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Turn any image into an X3 sleep-screen wallpaper. No questions asked.
+"""Turn any image into a sleep-screen wallpaper for an X3 or an X4 Pro.
 
 Drop pictures in `workspace/wallpapers/`, run this, collect
 `workspace/wallpapers/build/*.png`. That is the whole interface: every choice
@@ -9,11 +9,14 @@ head at 11pm.
 
 What comes out, and why each part of it:
 
-  528x792, exactly       The X3 panel, portrait. The firmware centres an image
-                         that fits and only ever scales *down*, so anything
-                         smaller lands as a postage stamp in a black field and
-                         anything larger is resampled by an ESP32. Hitting the
-                         panel exactly is the only size that is neither.
+  the panel, exactly     528x792 for the X3 (the default), 480x800 for the X4
+                         Pro with --device x4pro; both from `devices.py`. The
+                         firmware centres an image that fits and only ever
+                         scales *down*, so anything smaller lands as a postage
+                         stamp in a black field and anything larger is
+                         resampled by an ESP32. Hitting the panel exactly is
+                         the only size that is neither. One wallpaper is for
+                         one panel: an X3 file on an X4 Pro is shrunk to fit.
   a mat, when the        Filling the panel from a small source means enlarging
   source is small        it arbitrarily, and past about half again that is a
                          smear. So enlargement stops, and what is left over is
@@ -60,6 +63,7 @@ Usage:
   make_wallpaper.py photo.jpg --preview   # also previews/<name>.png, as the panel shows it
   make_wallpaper.py art.png --transparent # white (or the source's alpha) shows the page
   make_wallpaper.py small.png --waves     # ripple a small one out to the edges
+  make_wallpaper.py photo.jpg --device x4pro   # 480x800, for the X4 Pro
 
 Then get them onto the reader with `push_wallpaper.py`, which is the part OPDS
 cannot do for you (see SKILL.md).
@@ -86,10 +90,20 @@ import crosspoint_bmp as cp                                  # noqa: E402
 import crosspoint_overlay as co                              # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT / "epub-builder" / "scripts"))
+from devices import DEFAULT_DEVICE, DEVICES, panel           # noqa: E402
 
-# The X3 panel and its four physical states. Both are device facts, not knobs;
-# `extras/readers.md` is where they are written down and evidenced.
-PANEL_W, PANEL_H = 528, 792
+# The panel and its four physical states. Both are device facts, not knobs;
+# `extras/readers.md` is where they are written down and evidenced. The size
+# comes from `devices.py` per device; PANEL is the default one, and every
+# function that lays pixels out takes `size` rather than assuming it.
+#
+# The four states are the same on both devices: the overlay PNG path is one
+# piece of firmware code on both (grey >> 6), and the X4 Pro's SSD1677 panel is
+# the one CrossPoint 1.6.5 itself quantises against this even ramp. That is
+# source-confirmed for the X4 Pro, not yet device-confirmed — readers.md.
+PANEL = panel(DEFAULT_DEVICE)
+PANEL_W, PANEL_H = PANEL
 LEVELS = (0, 85, 170, 255)
 
 DEFAULT_IN = REPO_ROOT / "workspace" / "wallpapers"
@@ -182,7 +196,8 @@ def source_alpha(path: Path) -> Image.Image | None:
     return alpha if alpha.getextrema()[0] < 255 else None
 
 
-def scale_to_panel(img: Image.Image, mode: str = "cover") -> Image.Image:
+def scale_to_panel(img: Image.Image, mode: str = "cover",
+                   size: tuple = PANEL) -> Image.Image:
     """Scale as far as we are willing to, and no further.
 
     'cover' fills the panel and centre-crops the overflow — a wallpaper should
@@ -194,28 +209,29 @@ def scale_to_panel(img: Image.Image, mode: str = "cover") -> Image.Image:
 
     Returns a panel-sized image when it fills, a smaller one when it does not.
     """
+    W, H = size
     w, h = img.size
-    s_cover = max(PANEL_W / w, PANEL_H / h)
-    s_contain = min(PANEL_W / w, PANEL_H / h)
+    s_cover = max(W / w, H / h)
+    s_contain = min(W / w, H / h)
 
     def filled() -> Image.Image:
-        return ImageOps.fit(img, (PANEL_W, PANEL_H), method=Image.LANCZOS,
+        return ImageOps.fit(img, (W, H), method=Image.LANCZOS,
                             centering=(0.5, 0.5))
 
     if mode == "cover" and s_cover <= MAX_UPSCALE:
         return filled()
 
     scale = min(s_contain, MAX_UPSCALE)
-    size = (max(1, round(w * scale)), max(1, round(h * scale)))
+    fitted = (max(1, round(w * scale)), max(1, round(h * scale)))
 
     # A sliver of mat reads as a mistake rather than as framing. If the border
     # would be that thin, take the extra enlargement instead.
     if mode == "cover":
-        mat_area = 1 - (size[0] * size[1]) / (PANEL_W * PANEL_H)
+        mat_area = 1 - (fitted[0] * fitted[1]) / (W * H)
         if mat_area < MIN_MAT_AREA:
             return filled()
 
-    return img.resize(size, Image.LANCZOS)
+    return img.resize(fitted, Image.LANCZOS)
 
 
 def _band_level(img: Image.Image, box, flat) -> int:
@@ -236,19 +252,21 @@ def _band_level(img: Image.Image, box, flat) -> int:
     return min(flat, key=lambda v: abs(v - mean))
 
 
-def _mitres(ox: int, oy: int, iw: int, ih: int) -> dict:
+def _mitres(ox: int, oy: int, iw: int, ih: int, size: tuple = PANEL) -> dict:
     """The four mat sectors, split from each panel corner to the image corner
     it faces. Shared by every mat style, so they all frame the same way."""
+    W, H = size
     x1, y1 = ox + iw, oy + ih
     return {
-        "top": [(0, 0), (PANEL_W, 0), (x1, oy), (ox, oy)],
-        "bottom": [(0, PANEL_H), (PANEL_W, PANEL_H), (x1, y1), (ox, y1)],
-        "left": [(0, 0), (ox, oy), (ox, y1), (0, PANEL_H)],
-        "right": [(PANEL_W, 0), (x1, oy), (x1, y1), (PANEL_W, PANEL_H)],
+        "top": [(0, 0), (W, 0), (x1, oy), (ox, oy)],
+        "bottom": [(0, H), (W, H), (x1, y1), (ox, y1)],
+        "left": [(0, 0), (ox, oy), (ox, y1), (0, H)],
+        "right": [(W, 0), (x1, oy), (x1, y1), (W, H)],
     }
 
 
-def _edge_mat(img: Image.Image, ox: int, oy: int, flat) -> Image.Image:
+def _edge_mat(img: Image.Image, ox: int, oy: int, flat,
+              size: tuple = PANEL) -> Image.Image:
     """A passe-partout: four sectors, each continuing the edge it touches.
 
     Every side takes its level from a band of the image along that edge, so a
@@ -263,6 +281,7 @@ def _edge_mat(img: Image.Image, ox: int, oy: int, flat) -> Image.Image:
     mitre, which is correct — and if all four bands round to the same level the
     joins vanish and it degenerates into a plain mat, which is also correct.
     """
+    W, H = size
     iw, ih = img.size
     band_w = max(1, min(round(iw * EDGE_BAND), iw))
     band_h = max(1, min(round(ih * EDGE_BAND), ih))
@@ -274,15 +293,15 @@ def _edge_mat(img: Image.Image, ox: int, oy: int, flat) -> Image.Image:
         "right": _band_level(img, (iw - band_w, 0, iw, ih), flat),
     }
 
-    canvas = Image.new("L", (PANEL_W, PANEL_H), levels["top"])
+    canvas = Image.new("L", (W, H), levels["top"])
     draw = ImageDraw.Draw(canvas)
-    for side, poly in _mitres(ox, oy, iw, ih).items():
+    for side, poly in _mitres(ox, oy, iw, ih, size).items():
         draw.polygon(poly, fill=levels[side])
 
     return canvas
 
 
-def _blur_mat(img: Image.Image) -> Image.Image:
+def _blur_mat(img: Image.Image, size: tuple = PANEL) -> Image.Image:
     """The image itself, enlarged past all reason and blurred into a wash.
 
     The alternative to a flat mat, for when the picture should look like it
@@ -292,9 +311,10 @@ def _blur_mat(img: Image.Image) -> Image.Image:
     edge row outward instead — the obvious version of this idea — leaves long
     streaks that the dither turns into scan lines.
     """
-    cover = ImageOps.fit(img, (PANEL_W, PANEL_H), method=Image.LANCZOS,
+    W, H = size
+    cover = ImageOps.fit(img, (W, H), method=Image.LANCZOS,
                          centering=(0.5, 0.5))
-    washed = cover.filter(ImageFilter.GaussianBlur(PANEL_W / BLUR_DIVISOR))
+    washed = cover.filter(ImageFilter.GaussianBlur(W / BLUR_DIVISOR))
     return ImageEnhance.Contrast(washed).enhance(BLUR_CONTRAST)
 
 
@@ -363,7 +383,7 @@ def _flow(line: bytes, extent: int, count: int, origin: int, walk: list,
     return bytes(out)
 
 
-def _waves_mat(img: Image.Image, ox: int, oy: int) -> Image.Image:
+def _waves_mat(img: Image.Image, ox: int, oy: int, size: tuple = PANEL) -> Image.Image:
     """Each edge, distorted outward — rippled glass around the picture.
 
     Every side sends its own edge into its own sector, so the picture appears
@@ -378,6 +398,7 @@ def _waves_mat(img: Image.Image, ox: int, oy: int) -> Image.Image:
     The wave shape is seeded from the image itself, so each wallpaper ripples
     its own way and does so identically on every run.
     """
+    W, H = size
     iw, ih = img.size
     rng = random.Random(hashlib.sha1(img.tobytes()).digest())
     depth = max(1, min(WAVE_SOURCE_DEPTH, iw // 2, ih // 2))
@@ -386,29 +407,29 @@ def _waves_mat(img: Image.Image, ox: int, oy: int) -> Image.Image:
     sides = {
         # side: (edge line, line length, copies, where the line starts, how far out)
         "top": (_edge_line(img, (0, 0, iw, depth), (iw, 1)),
-                PANEL_W, PANEL_H, ox, lambda y: oy - y),
+                W, H, ox, lambda y: oy - y),
         "bottom": (_edge_line(img, (0, ih - depth, iw, ih), (iw, 1)),
-                   PANEL_W, PANEL_H, ox, lambda y: y - y1),
+                   W, H, ox, lambda y: y - y1),
         "left": (_edge_line(img, (0, 0, depth, ih), (1, ih)),
-                 PANEL_H, PANEL_W, oy, lambda x: ox - x),
+                 H, W, oy, lambda x: ox - x),
         "right": (_edge_line(img, (iw - depth, 0, iw, ih), (1, ih)),
-                  PANEL_H, PANEL_W, oy, lambda x: x - x1),
+                  H, W, oy, lambda x: x - x1),
     }
 
-    canvas = Image.new("L", (PANEL_W, PANEL_H))
-    mitres = _mitres(ox, oy, iw, ih)
+    canvas = Image.new("L", (W, H))
+    mitres = _mitres(ox, oy, iw, ih, size)
     for side, (line, extent, count, origin, distance) in sides.items():
-        walk = _wave_walk(max(PANEL_W, PANEL_H), rng)
+        walk = _wave_walk(max(W, H), rng)
         raw = _flow(line, extent, count, origin, walk, distance)
 
         if side in ("top", "bottom"):
-            field = Image.frombytes("L", (PANEL_W, PANEL_H), raw)
+            field = Image.frombytes("L", (W, H), raw)
         else:
             # Built column-major — one row per panel column — then stood upright.
-            field = Image.frombytes("L", (PANEL_H, PANEL_W), raw) \
+            field = Image.frombytes("L", (H, W), raw) \
                          .transpose(Image.TRANSPOSE)
 
-        mask = Image.new("L", (PANEL_W, PANEL_H), 0)
+        mask = Image.new("L", (W, H), 0)
         ImageDraw.Draw(mask).polygon(mitres[side], fill=255)
         canvas.paste(field, (0, 0), mask)
 
@@ -416,7 +437,7 @@ def _waves_mat(img: Image.Image, ox: int, oy: int) -> Image.Image:
 
 
 def mat(img: Image.Image, style: str = "waves",
-        flat=cp.FIRMWARE_RECONSTRUCT) -> Image.Image:
+        flat=cp.FIRMWARE_RECONSTRUCT, size: tuple = PANEL) -> Image.Image:
     """Centre a smaller image on the panel and fill what is left around it.
 
     Nothing is drawn between the picture and its border. Every style here works
@@ -424,20 +445,21 @@ def mat(img: Image.Image, style: str = "waves",
     the one join the mat exists to make — and at four levels a hairline is not
     a hairline, it is a hard black or white line against whatever it sits on.
     """
-    if img.size == (PANEL_W, PANEL_H):
+    W, H = size
+    if img.size == (W, H):
         return img
 
-    ox = (PANEL_W - img.width) // 2
-    oy = (PANEL_H - img.height) // 2
+    ox = (W - img.width) // 2
+    oy = (H - img.height) // 2
 
     if style == "none":
-        canvas = Image.new("L", (PANEL_W, PANEL_H), 255)
+        canvas = Image.new("L", (W, H), 255)
     elif style == "blur":
-        canvas = _blur_mat(img)
+        canvas = _blur_mat(img, size)
     elif style == "waves":
-        canvas = _waves_mat(img, ox, oy)
+        canvas = _waves_mat(img, ox, oy, size)
     else:
-        canvas = _edge_mat(img, ox, oy, flat)
+        canvas = _edge_mat(img, ox, oy, flat, size)
 
     canvas.paste(img, (ox, oy))
     return canvas
@@ -611,7 +633,7 @@ def _dilate(mask: Image.Image, r: int) -> Image.Image:
     return out
 
 
-def _halo_clear(levels: bytearray) -> bytearray:
+def _halo_clear(levels: bytearray, size: tuple = PANEL) -> bytearray:
     """White that clears: farther than HALO from anything drawn, and reachable
     from the panel's edge without crossing that rim. 1 = clear.
 
@@ -619,30 +641,32 @@ def _halo_clear(levels: bytearray) -> bytearray:
     walled off by its own outline, so it stays painted however far the text in
     it is from the line.
     """
-    ink = Image.frombytes("L", (PANEL_W, PANEL_H),
+    W, H = size
+    ink = Image.frombytes("L", (W, H),
                           bytes(255 if v != 3 else 0 for v in levels))
     near = _dilate(ink, HALO).tobytes()
     clear = bytearray(len(levels))
-    stack = [i for i in range(PANEL_W)] + [(PANEL_H - 1) * PANEL_W + i for i in range(PANEL_W)]
-    stack += [y * PANEL_W for y in range(PANEL_H)] + [y * PANEL_W + PANEL_W - 1 for y in range(PANEL_H)]
+    stack = [i for i in range(W)] + [(H - 1) * W + i for i in range(W)]
+    stack += [y * W for y in range(H)] + [y * W + W - 1 for y in range(H)]
     while stack:
         i = stack.pop()
         if clear[i] or near[i]:
             continue
         clear[i] = 1
-        x = i % PANEL_W
+        x = i % W
         if x > 0:
             stack.append(i - 1)
-        if x < PANEL_W - 1:
+        if x < W - 1:
             stack.append(i + 1)
-        if i >= PANEL_W:
-            stack.append(i - PANEL_W)
-        if i < len(levels) - PANEL_W:
-            stack.append(i + PANEL_W)
+        if i >= W:
+            stack.append(i - W)
+        if i < len(levels) - W:
+            stack.append(i + W)
     return clear
 
 
-def transparency(src: Path, levels: bytearray, *, fit: str = "cover") -> bytearray:
+def transparency(src: Path, levels: bytearray, *, fit: str = "cover",
+                 size: tuple = PANEL) -> bytearray:
     """Which panel pixels let the page through, for `--transparent`. 1 = clear.
 
     Two sources of transparency, and the rule is the one that keeps a
@@ -659,15 +683,16 @@ def transparency(src: Path, levels: bytearray, *, fit: str = "cover") -> bytearr
     Binary on purpose. The firmware would turn partial alpha into a Bayer
     stipple, which on four levels reads as dirt along every soft edge.
     """
-    mask = _halo_clear(levels)
+    W, H = size
+    mask = _halo_clear(levels, size)
     alpha = source_alpha(src)
     if alpha is None:
         return mask
-    alpha = scale_to_panel(alpha, fit)              # same geometry as the picture
-    ox, oy = (PANEL_W - alpha.width) // 2, (PANEL_H - alpha.height) // 2
+    alpha = scale_to_panel(alpha, fit, size)        # same geometry as the picture
+    ox, oy = (W - alpha.width) // 2, (H - alpha.height) // 2
     data = alpha.tobytes()
     for y in range(alpha.height):
-        row, src_row = (oy + y) * PANEL_W + ox, y * alpha.width
+        row, src_row = (oy + y) * W + ox, y * alpha.width
         for x in range(alpha.width):
             mask[row + x] = 1 if data[src_row + x] < 128 else 0
     return mask
@@ -734,9 +759,10 @@ SAMPLE_TEXT = (
     "direct to Heaven, we were all going direct the other way. ") * 4
 
 
-def sample_page() -> bytes:
+def sample_page(size: tuple = PANEL) -> bytes:
     """A panel of plain text, for previews of a transparent wallpaper."""
-    page = Image.new("L", (PANEL_W, PANEL_H), 255)
+    W, H = size
+    page = Image.new("L", (W, H), 255)
     draw = ImageDraw.Draw(page)
     try:
         font = ImageFont.load_default(size=19)
@@ -745,10 +771,10 @@ def sample_page() -> bytes:
     line, y = "", 36
     for word in SAMPLE_TEXT.split():
         trial = f"{line} {word}".strip()
-        if draw.textlength(trial, font=font) > PANEL_W - 72:
+        if draw.textlength(trial, font=font) > W - 72:
             draw.text((36, y), line, font=font, fill=0)
             line, y = word, y + 30
-            if y > PANEL_H - 60:
+            if y > H - 60:
                 break
         else:
             line = trial
@@ -756,15 +782,16 @@ def sample_page() -> bytes:
 
 
 def compose(src: Path, *, fit: str = "cover", mat_style: str = "waves",
-            flat=cp.FIRMWARE_RECONSTRUCT) -> Image.Image:
-    """Source file -> the finished 528x792 greyscale panel, before any dithering.
+            flat=cp.FIRMWARE_RECONSTRUCT, size: tuple = PANEL) -> Image.Image:
+    """Source file -> the finished greyscale panel, before any dithering.
 
     Tone comes *before* the mat on purpose: autocontrast measures the picture,
     and a large flat border in the histogram would skew the stretch it chooses.
     The mat is then computed from the toned image, so its levels match the
     pixels it is about to sit against.
     """
-    return mat(tone(scale_to_panel(load_grayscale(src), fit)), mat_style, flat)
+    return mat(tone(scale_to_panel(load_grayscale(src), fit, size)),
+               mat_style, flat, size)
 
 
 def quantise(img: Image.Image, algorithm: str = "device") -> bytearray:
@@ -776,37 +803,39 @@ def quantise(img: Image.Image, algorithm: str = "device") -> bytearray:
     error diffusion; see `dither`.
     """
     if algorithm == "device":
-        return cp.firmware_quantise(img.tobytes(), PANEL_W, PANEL_H)
+        return cp.firmware_quantise(img.tobytes(), img.width, img.height)
     return dither(img, algorithm)
 
 
 def render(src: Path, *, fit: str = "cover", mat_style: str = "waves",
-           algorithm: str = "device") -> bytearray:
+           algorithm: str = "device", device: str = DEFAULT_DEVICE) -> bytearray:
     """Source file -> one 2-bit level per panel pixel. The whole pipeline in one
     place, so the self-test grades exactly what the converter writes."""
     flat = cp.FIRMWARE_RECONSTRUCT if algorithm == "device" else LEVELS
-    return quantise(compose(src, fit=fit, mat_style=mat_style, flat=flat), algorithm)
+    return quantise(compose(src, fit=fit, mat_style=mat_style, flat=flat,
+                            size=panel(device)), algorithm)
 
 
-def probe(src: Path, *, fit: str = "cover") -> dict:
+def probe(src: Path, *, fit: str = "cover", device: str = DEFAULT_DEVICE) -> dict:
     """Will this image fill the panel, or does it need a mat?
 
     Asked by callers that want to offer the mat choice only when there is one
     to make — `tools/tgbot/` puts it to you as a button. The answer is not "is the
-    image smaller than 528x792": a 500x750 photo is smaller in both dimensions
+    image smaller than the panel": a 500x750 photo is smaller than 528x792
     and still fills, because it only has to grow 1.06x and MAX_UPSCALE allows
     1.5x. Nor is a small overflow matted, since MIN_MAT_AREA rules a sliver out.
     Both thresholds are judgement calls that live here, so the question is
     answered by running the real thing rather than by re-deriving it elsewhere.
     """
+    size = panel(device)
     img = load_grayscale(src)
-    scaled = scale_to_panel(img, fit)
-    fills = scaled.size == (PANEL_W, PANEL_H)
+    scaled = scale_to_panel(img, fit, size)
+    fills = scaled.size == size
     # What a cover-fill throws away. Only a fill crops: one that stops at
     # MAX_UPSCALE is matted whole, and so is everything in 'contain'.
     crop = 0.0
     if fit == "cover" and fills:
-        a, p = img.width / img.height, PANEL_W / PANEL_H
+        a, p = img.width / img.height, size[0] / size[1]
         crop = 1 - min(a / p, p / a)
     return {"file": str(src), "width": img.width, "height": img.height,
             "fills": fills,
@@ -817,12 +846,13 @@ def probe(src: Path, *, fit: str = "cover") -> dict:
             # Its own transparency, so a caller need not ask opaque or
             # transparent about a picture that has already answered.
             "has_alpha": source_alpha(src) is not None,
-            "panel": [PANEL_W, PANEL_H]}
+            "device": device, "panel": list(size)}
 
 
 def convert(src: Path, out_dir: Path, *, fit: str = "cover",
             mat_style: str = "waves", algorithm: str = "device",
-            transparent: bool = False, preview: bool = False) -> Path:
+            transparent: bool = False, preview: bool = False,
+            device: str = DEFAULT_DEVICE) -> Path:
     """Write the wallpaper: an indexed PNG the panel maps straight through.
 
     Opaque by default — every pixel painted, the page hidden. `transparent`
@@ -831,18 +861,20 @@ def convert(src: Path, out_dir: Path, *, fit: str = "cover",
     page of text when there is anything to see through. It goes in a
     subfolder so a push of this folder never mistakes it for a wallpaper.
     """
-    levels = render(src, fit=fit, mat_style=mat_style, algorithm=algorithm)
-    clear = transparency(src, levels, fit=fit) if transparent else None
+    size = panel(device)
+    levels = render(src, fit=fit, mat_style=mat_style, algorithm=algorithm,
+                    device=device)
+    clear = transparency(src, levels, fit=fit, size=size) if transparent else None
 
     out_dir.mkdir(parents=True, exist_ok=True)
     dest = out_dir / (sanitize_stem(src.stem) + ".png")
-    dest.write_bytes(encode_png(levels, PANEL_W, PANEL_H, clear))
+    dest.write_bytes(encode_png(levels, *size, clear))
     if preview:
         shown = co.composite(
             [None if clear and clear[i] else v for i, v in enumerate(levels)],
-            sample_page() if clear else None)
+            sample_page(size) if clear else None)
         (out_dir / "previews").mkdir(exist_ok=True)
-        Image.frombytes("L", (PANEL_W, PANEL_H), shown).save(
+        Image.frombytes("L", size, shown).save(
             out_dir / "previews" / dest.name)
     return dest
 
@@ -892,6 +924,9 @@ def main() -> int:
                          "white rim round the drawing and anything it encloses), "
                          "or the source's own alpha decides when it has one. "
                          "Default is opaque — every pixel painted")
+    ap.add_argument("--device", choices=sorted(DEVICES), default=DEFAULT_DEVICE,
+                    help="which reader it is for: x3 (528x792, the default) "
+                         "or x4pro (480x800)")
     ap.add_argument("--preview", action="store_true",
                     help="also write previews/<name>.png: what the panel shows, "
                          "over a page of text when transparent")
@@ -915,7 +950,7 @@ def main() -> int:
         return 1
 
     if args.probe:
-        json.dump([probe(s, fit=args.fit) for s in sources],
+        json.dump([probe(s, fit=args.fit, device=args.device) for s in sources],
                   sys.stdout, ensure_ascii=False)
         return 0
 
@@ -932,14 +967,15 @@ def main() -> int:
         try:
             dest = convert(src, out_dir, fit=args.fit, mat_style=args.mat_style,
                            algorithm=args.dither, transparent=args.transparent,
-                           preview=args.preview)
+                           preview=args.preview, device=args.device)
         except Exception as exc:                      # unreadable / truncated / odd
             print(f"  {src.name}: FAILED — {exc}", file=sys.stderr)
             continue
         how = ("4 levels, the reader's own quantiser" if args.dither == "device"
                else f"4 levels, our {args.dither}")
         how += ", transparent" if args.transparent else ", opaque"
-        print(f"  {src.name} -> {dest}  ({PANEL_W}x{PANEL_H}, {how}, "
+        w, h = panel(args.device)
+        print(f"  {src.name} -> {dest}  ({w}x{h}, {how}, "
               f"{dest.stat().st_size // 1024} KB)")
 
     print(f"\n{len(sources)} image(s) -> {out_dir}")

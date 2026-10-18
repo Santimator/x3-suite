@@ -214,16 +214,18 @@ def edit_book_metadata(path: Path, library_dir: Path, updates: dict,
 # -- wallpapers ------------------------------------------------------------
 
 
-def probe_image(src: Path, fit: str = "cover") -> dict:
-    """Does this image fill the panel, or does it need a mat? And would filling
-    it crop enough to be worth asking about (`ask_fit`)?
+def probe_image(src: Path, fit: str = "cover", model: str = "x3") -> dict:
+    """Does this image fill `model`'s panel, or does it need a mat? And would
+    filling it crop enough to be worth asking about (`ask_fit`)?
 
     The thresholds live in make_wallpaper.py and are asked, never copied — see
     its `probe()`. A 500x750 photo is smaller than the panel in both dimensions
-    and still fills.
+    and still fills. The answer is per panel: a 3:4 photo crops differently on
+    the X3's 2:3 than on the X4 Pro's 3:5.
     """
     rc, out, err = run([PY_DEPS, "tools/wallpaper-maker/scripts/make_wallpaper.py",
-                        str(src), "--probe", "--fit", fit], timeout=180)
+                        str(src), "--probe", "--fit", fit, "--device", model],
+                       timeout=180)
     reports = _json_out(rc, out, err, "probe")
     if not reports:
         raise SuiteError("that file did not read as an image")
@@ -237,8 +239,10 @@ ORIGINAL_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif",
 
 
 def build_wallpaper(src: Path, mat: str = "waves", transparent: bool = False,
-                    out_dir: Path | None = None, fit: str = "cover") -> tuple:
-    """Convert one original. Returns (wallpaper_png, preview_png).
+                    out_dir: Path | None = None, fit: str = "cover",
+                    model: str = "x3") -> tuple:
+    """Convert one original for `model`'s panel. Returns (wallpaper_png,
+    preview_png).
 
     Into `build/` by default, which is not a collection: a file there is one
     queued for the reader, and it is deleted once it lands (see `drop_build`).
@@ -248,7 +252,7 @@ def build_wallpaper(src: Path, mat: str = "waves", transparent: bool = False,
     out_dir = Path(out_dir or WALLPAPER_OUT)
     cmd = [PY_DEPS, "tools/wallpaper-maker/scripts/make_wallpaper.py",
            str(src), "--out", str(out_dir), "--mat", mat, "--fit", fit,
-           "--preview"]
+           "--device", model, "--preview"]
     if transparent:
         cmd.append("--transparent")
     rc, out, err = run(cmd, timeout=300)
@@ -263,8 +267,21 @@ def build_wallpaper(src: Path, mat: str = "waves", transparent: bool = False,
     return png, out_dir / "previews" / png.name
 
 
-def place_build(png: Path, preview: Path, replace: Path | None = None) -> tuple:
-    """Move a freshly built wallpaper into build/ under a name of its own.
+def build_dir(device_id: str) -> Path:
+    """Where wallpapers queued for one reader wait: build/<reader>/.
+
+    One folder per reader, because the same original queued for an X3 and an
+    X4 Pro is two different files under one name — and the name is what it
+    lands as on the card, so neither can be renamed out of the other's way.
+    """
+    safe = "".join(c if c.isalnum() or c in "-_" else "-" for c in device_id)
+    return WALLPAPER_OUT / safe
+
+
+def place_build(png: Path, preview: Path, replace: Path | None = None,
+                into: Path | None = None) -> tuple:
+    """Move a freshly built wallpaper into `into` (build/ by default) under a
+    name of its own.
 
     Built elsewhere first, because two originals can share a stem — dawn.jpg
     and dawn.png both build to dawn.png — and building straight into build/
@@ -272,12 +289,13 @@ def place_build(png: Path, preview: Path, replace: Path | None = None) -> tuple:
     the *same* original, whose name it takes over; anything else gets the
     first free name: dawn.png, dawn-2.png, ...
     """
+    into = Path(into or WALLPAPER_OUT)
     if replace is not None:
         dest = Path(replace)
     else:
-        dest, n = WALLPAPER_OUT / png.name, 2
+        dest, n = into / png.name, 2
         while dest.exists():
-            dest = WALLPAPER_OUT / f"{png.stem}-{n}{png.suffix}"
+            dest = into / f"{png.stem}-{n}{png.suffix}"
             n += 1
     # The bot builds in build/.building, so this is a plain rename. shutil.move
     # rather than Path.replace only so that a scratch folder on another mount
@@ -302,8 +320,9 @@ def drop_build(png: Path) -> None:
     (png.parent / "previews" / png.name).unlink(missing_ok=True)
 
 
-def mat_sheet(src: Path, cache: Path, mats: list, fit: str = "cover") -> dict:
-    """Every way of filling the panel around a small image, side by side.
+def mat_sheet(src: Path, cache: Path, mats: list, fit: str = "cover",
+              model: str = "x3") -> dict:
+    """Every way of filling `model`'s panel around a small image, side by side.
 
     Built for real, one conversion per mat, into a scratch folder — what is on
     the sheet is exactly what would be queued. Numbered in `mats` order.
@@ -311,7 +330,7 @@ def mat_sheet(src: Path, cache: Path, mats: list, fit: str = "cover") -> dict:
     previews = []
     for style in mats:
         _, preview = build_wallpaper(src, style, out_dir=Path(cache) / style,
-                                     fit=fit)
+                                     fit=fit, model=model)
         previews.append(preview)
     return contact_sheet(previews, Path(cache) / "sheet.png")
 
@@ -634,12 +653,13 @@ SLIM = REPO_ROOT / "tools" / "epub-slimmer" / "scripts" / "slim_epub.py"
 SLIM_WORTH_IT = 0.05
 
 
-def slim_book(src: Path, cache_dir: Path) -> dict:
-    """Slim a book for the device, keeping the original untouched.
+def slim_book(src: Path, cache_dir: Path, model: str = "x3") -> dict:
+    """Slim a book for `model`'s panel, keeping the original untouched.
 
     The server holds the book you were given; the reader gets the one it can
     actually use. Slimming is deterministic, so the result is cached by content
-    hash and a book queued twice is only ever built once.
+    hash *and panel* — an X3 copy is not an X4 Pro copy — and a book queued
+    twice for one reader is only ever built once.
 
     Returns {"path", "before", "after", "saved", "used"} — `used` is False when
     the saving was too small to be worth a second file, in which case `path` is
@@ -647,13 +667,13 @@ def slim_book(src: Path, cache_dir: Path) -> dict:
     """
     before = src.stat().st_size
     digest = hashlib.sha1(src.read_bytes()).hexdigest()[:16]
-    dest = cache_dir / f"{digest}.epub"
+    dest = cache_dir / (f"{digest}.epub" if model == "x3" else f"{digest}-{model}.epub")
     plain = {"path": src, "before": before, "after": before, "saved": 0,
              "used": False}
     if not dest.exists():
         cache_dir.mkdir(parents=True, exist_ok=True)
         rc, out, err = run([PY_DEPS, str(SLIM), str(src), "--out", str(dest),
-                            "--json"], timeout=300)
+                            "--device", model, "--json"], timeout=300)
         if rc != 0 or not dest.exists():
             # A book that will not slim is still a book: push what we have.
             return plain

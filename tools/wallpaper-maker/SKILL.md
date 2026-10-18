@@ -1,16 +1,16 @@
 ---
 name: wallpaper-maker
 description: >-
-  Turn any image into an Xteink X3 sleep-screen wallpaper, and push it to the
-  reader over WiFi. Use when the user wants a custom sleep screen or lock
+  Turn any image into a sleep-screen wallpaper for an Xteink X3 or X4 Pro, and
+  push it to the reader over WiFi. Use when the user wants a custom sleep screen or lock
   screen on the device, when changing how images are converted (size,
   dithering, tone) or delivered, or when a wallpaper is on the device and does
   not show up. Triggers include "sleep screen", "wallpaper", "lock screen",
-  "screensaver", "make this photo work on the X3", "the wallpaper isn't
-  showing".
+  "screensaver", "make this photo work on the X3", "for the X4 Pro", "the
+  wallpaper isn't showing".
 ---
 
-# wallpaper-maker — the X3's sleep screen
+# wallpaper-maker — the reader's sleep screen
 
 Drop images in a folder, run one command, get files the reader can draw.
 Run the second command and they are on the reader.
@@ -52,7 +52,11 @@ python3 tools/wallpaper-maker/scripts/push_wallpaper.py
 ```
 
 There is nothing to configure and nothing to answer. Every parameter below has
-a right answer on this device, so it is already chosen.
+a right answer on this device, so it is already chosen — except **which
+device**: `--device x4pro` builds for the X4 Pro's 480×800 panel instead of
+the X3's 528×792 (the default). Sizes come from `epub-builder/scripts/devices.py`.
+One file is for one panel, and `push_wallpaper.py` refuses to put a wallpaper
+on the other model's reader (`--any-size` to insist).
 
 Flags exist for the things that are genuinely taste — `--transparent` to let
 the page show through, `--fit contain` to keep the whole frame instead of
@@ -68,7 +72,7 @@ on the device, `--replace` to clear it first.
 
 | Choice | Why it is that and not something else |
 |---|---|
-| **528x792 exactly** | The panel, portrait. The firmware centres an image that fits and only ever scales *down* — so a smaller image is a stamp in a black field, and a larger one is resampled by an ESP32. |
+| **the panel exactly** (528×792 X3, 480×800 X4 Pro) | Portrait. The firmware centres an image that fits and only ever scales *down* — so a smaller image is a stamp in a black field, and a larger one is resampled by an ESP32. |
 | **PNG** | The overlay folder opens PNG and BMP. PNG is the one that is both small and *paints white*: with an alpha line the firmware writes every opaque pixel, white included, so an opaque wallpaper hides the page. A plain BMP there leaves white unpainted, and on the X3 lets the page ghost through its greys too (device-observed 2026-10). The only BMP with alpha the firmware takes is 32-bit: 1.7 MB a file against ~50 KB. Not JPEG, and **not `.pxc`** — see the note below. |
 | **indexed, 2 bits; 4 with `--transparent`** | Four palette entries, the panel's four states — a fifth, white at alpha 0 (tRNS), only when something is clear. Quantised here with the reader's *own* algorithm and mapped straight through by it: this path does no dithering at all, it takes `grey >> 6`. See *Who quantises* below. |
 | **0 / 85 / 170 / 255, exactly** | Because the path *shifts* rather than rounds: 60 is nearer 85 than 0, and still lands black. Exact palette greys make `>> 6` the level we chose — and they are, device-confirmed, a fair model of what the four states look like on an X3, which is why the quantiser aims at them too. |
@@ -379,10 +383,21 @@ default sleep screen, with no message anywhere. In order of likelihood:
 | The page shows through a photo's highlights | It was made `--transparent`. Photos want opaque. |
 | A cut-out came out solid | The source lost its alpha on the way — sent as a *photo* through a messenger that recompresses to JPEG. Send it as a file. |
 | Darker than the preview | The file's greys are not exactly 0/85/170/255, so `>> 6` rounds them down. Re-run `make_wallpaper.py`; an image editor re-saving it will not keep the palette. |
-| A picture floating in a black frame | Not 528x792 — the firmware never scales *up*, and that black is the device's, not our mat. Re-run `make_wallpaper.py`. |
+| A picture floating in a black frame | Not this panel's size — the firmware never scales *up*, and that black is the device's, not our mat. Most likely an X4 Pro wallpaper (480×800) on an X3. Re-run `make_wallpaper.py` with the right `--device`. |
 | Upload fails with "File already exists" | The firmware refuses collisions. `--replace`, or delete on the device. |
 | `push_wallpaper: cannot reach ...` | The device is not on the File Transfer screen — the web server only runs while it is. |
 | `no reader found (tried ...)` | mDNS is not working here and nothing answered the discovery ping. Read the address off the File Transfer screen and pass `--ip`; it is remembered after that. |
+
+## The X4 Pro
+
+Same code, other numbers. The overlay sleep screen is one piece of firmware
+for both readers, so everything above holds at 480×800: the PNG, the four
+levels, the draw rule, the folder. The quantiser is also the same, the even
+0/85/170/255 ramp — CrossPoint 1.6.5 itself quantises against that ramp on an
+SSD1677 panel, which the X4 Pro has. That is **source-confirmed, not yet
+device-confirmed**: if X4 Pro wallpapers look too bright or too dark next to
+the same picture on the X3, this assumption is the one to revisit
+(`extras/readers.md` → "The X4 Pro's sleep screen and grey levels").
 
 ## The gate
 
@@ -397,7 +412,10 @@ that the scan would open the file, that the decoder accepts it, that every grey
 is an exact level, that it draws back to exactly the levels we computed —
 **opaque, on every pixel, white included** — that a transparent one clears
 exactly the pixels meant (and keeps a cut-out's white painted), that it lands
-at 0,0 unscaled, and that a second run is byte-identical.
+at 0,0 unscaled, and that a second run is byte-identical — then all of it again
+at the X4 Pro's 480×800, plus a push that refuses an X3 file on an X4 Pro, and
+which-reader-is-this (MAC from the discovery reply, serial when there is none)
+and the card walk behind the bot's inventory.
 `crosspoint_bmp.py` stays: its port of the firmware's quantiser is what the
 converter runs, and the bot previews BMPs still on a card through it.
 
@@ -466,7 +484,7 @@ SKILL.md                     this file
 requirements.txt             Pillow (the only dependency)
 last-device.json             gitignored; the reader's address, once one answers
 scripts/
-  make_wallpaper.py          image -> X3 overlay sleep-screen PNG
+  make_wallpaper.py          image -> overlay sleep-screen PNG, X3 or --device x4pro
   push_wallpaper.py          PNGs -> /sleep-overlay, over the file-transfer API
   crosspoint_overlay.py      port of the device's overlay PNG path — the gate's oracle
   crosspoint_bmp.py          port of its BMP reader and quantiser

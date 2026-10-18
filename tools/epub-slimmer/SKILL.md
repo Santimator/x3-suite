@@ -1,7 +1,7 @@
 ---
 name: epub-slimmer
 description: >-
-  Strip a third-party EPUB down to what the Xteink X3 can actually render —
+  Strip a third-party EPUB down to what the Xteink X3 or X4 Pro can render —
   drop embedded fonts, re-encode images to the panel, keep every word. Use when
   a downloaded book is far bigger than it needs to be, when changing what gets
   stripped, or when a slimmed book renders differently from the original.
@@ -23,19 +23,23 @@ Two facts do all the work, both device-confirmed in
 - **Embedded fonts are ignored.** The renderer only rasterizes pre-converted
   `.cpfont` bitmaps. `@font-face` is dead weight, and on a typical shop-bought
   book it is most of the file.
-- **Colour is dropped, detail is wasted.** 528×792, four grey levels. A
-  2000px full-colour plate is decoded, converted and discarded on every draw.
+- **Colour is dropped, detail is wasted.** 528×792 on the X3, 480×800 on the
+  X4 Pro, four grey levels on both. A 2000px full-colour plate is decoded,
+  converted and discarded on every draw.
 
 ## Usage
 
 ```bash
 .venv/bin/python tools/epub-slimmer/scripts/slim_epub.py BOOK.epub --out slim.epub
+.venv/bin/python tools/epub-slimmer/scripts/slim_epub.py BOOK.epub --out slim.epub --device x4pro
 .venv/bin/python tools/epub-slimmer/scripts/slim_epub.py BOOK.epub --probe   # measure only
 .venv/bin/python tools/epub-slimmer/scripts/selftest.py                      # the gate
 ```
 
 Needs Pillow — it is the only unit here besides `wallpaper-maker` that decodes
-images.
+images. The panel comes from `epub-builder/scripts/devices.py`; X3 by default.
+A copy slimmed for one device is not the copy for the other, so a cache keys on
+both (`tools/tgbot/` does).
 
 ## What it does, and what it refuses to do
 

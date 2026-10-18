@@ -15,10 +15,18 @@ wallpaper, stage a PDF, put a book where the catalog will find it, rename and
 delete inside `workspace/`. Work that is bound for the device is *queued*, not
 sent.
 
-*Push* happens only when you ask for it, and only while the X3 is sitting on
-**Home -> File Transfer -> Join a Network**. If the reader cannot be found, the
-queue is left exactly as it was — a push that half-happens in silence is the
-one failure that would make the queue useless.
+*Push* happens only when you ask for it, and only while the reader is sitting
+on **Home -> File Transfer -> Join a Network**. If the reader cannot be found,
+the queue is left exactly as it was — a push that half-happens in silence is
+the one failure that would make the queue useless.
+
+**More than one reader.** The bot tells readers apart by what they say about
+themselves — the MAC in the discovery reply, else the serial — never by their
+address, since every CrossPoint reader answers to `crosspoint.local`. A reader
+you save gets a name, its own queue, and an inventory of its card that can be
+read while it is off. One you don't save can still be browsed and sent to
+directly; it just has nothing queued and nothing remembered. Wallpapers and
+slimmed books are made for the panel of the reader they are queued for.
 
 Books enter the delivery queue only when you explicitly ask for a card copy.
 They are named exactly as the OPDS client would name them, so push and pull
@@ -49,7 +57,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import suite
 from config import ConfigError, inside, load, resolve_token, safe_join
 from config import warnings as config_warnings
-from state import Notes, Queue, Tokens
+from state import Devices, Notes, Queue, Tokens
 from telegram import GETFILE_LIMIT, Telegram, TelegramError
 
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
@@ -60,6 +68,38 @@ MATS = [("≈ waves", "waves"), ("▣ edges", "edges"),
         ("◌ blur", "blur"), ("— white", "none")]
 NAV_PAGE = 7
 ALPHABET_THRESHOLD = 7
+DEVICE_NAME_MAX = 24
+# What the inventory shows in the chat before handing over the whole file.
+INVENTORY_LINES = 40
+
+
+def model_name(model: str | None, reported: str | None = None) -> str:
+    """"X4 Pro" for a model devices.py knows, what the reader said otherwise."""
+    if model in suite.device.DEVICES:
+        return suite.device.DEVICES[model]["name"].replace("Xteink ", "")
+    return reported or "reader"
+
+
+def ago(when: float | None) -> str:
+    if not when:
+        return "never"
+    s = max(0, time.time() - when)
+    if s < 90:
+        return "just now"
+    if s < 5400:
+        return f"{round(s / 60)} min ago"
+    if s < 129600:
+        return f"{round(s / 3600)} h ago"
+    return f"{round(s / 86400)} days ago"
+
+
+class ManyReaders(Exception):
+    """More than one reader answered and none of them is the one we were
+    talking to — which one is a question for the person, not a guess."""
+
+    def __init__(self, found: list):
+        super().__init__(f"{len(found)} readers answered")
+        self.found = found
 
 
 def log(*parts) -> None:
@@ -97,7 +137,15 @@ class Bot:
         self.workspace = Path(cfg["workspace_path"])
         self.state_dir = Path(cfg["state_path"])
         self.queue = Queue(self.state_dir / "queue.json")
+        self.devices = Devices(self.state_dir / "devices.json")
         self.notes = Notes(self.state_dir / "notes.json")
+        # The reader this session is talking to: {"host", "info", "ident"}.
+        # In memory — after a restart the next device action finds it again.
+        self.current = None
+        # Readers already offered for saving this session, so "Not now" sticks
+        # and a new reader is announced once rather than on every tap.
+        self.announced = set()
+        self.chat = None              # where an announcement goes; one user
         self.tokens = Tokens()
         self.pending = None           # what the next plain text message means
         # Uploads that need human series aliases are grouped by the exact
@@ -162,6 +210,8 @@ class Bot:
         same offer to name the address costs one branch and saves repeating it
         at a dozen call sites.
         """
+        if isinstance(exc, ManyReaders):
+            return self.choose_reader(chat, exc.found)
         if isinstance(exc, suite.DeviceError):
             return self.no_reader(chat, str(exc))
         self.say(chat, f"⚠️ {exc}")
@@ -247,6 +297,7 @@ class Bot:
             log(f"ignored update from user={sender} chat={chat}")
             return False
 
+        self.chat = chat
         try:
             if callback:
                 self.on_callback(callback)
@@ -330,13 +381,54 @@ class Bot:
             def work():
                 info = suite.device.status(host)      # raises if it is not there
                 suite.device.remember(host)
+                self.current = None
+                self.use_reader(host, info)
+                ident = self.current["ident"]
                 self.say(chat,
-                         f"📲 Found it at <code>{html.escape(host)}</code> — "
-                         f"{info.get('model', 'reader')}, firmware "
-                         f"{info.get('version', '?')}.\n\n"
+                         f"📲 Found <b>{html.escape(self.reader_label(ident))}</b> at "
+                         f"<code>{html.escape(host)}</code> — "
+                         f"{model_name(ident.get('model'), ident.get('reported'))}, firmware "
+                         f"{html.escape(str(info.get('version', '?')))}.\n\n"
                          f"Remembered, so I will try this one first from now on.",
                          [[("📤 Push queue", "push:ask"), ("📂 Browse", "dev:ls0:")],
                           [("🏠 Menu", "m:main")]])
+            return self.submit(chat, work)
+
+        if job["kind"] == "devname":
+            name = " ".join(text.split())
+            if len(name) > DEVICE_NAME_MAX:
+                self.pending = job
+                return self.say(chat, f"Shorter, please — {DEVICE_NAME_MAX} "
+                                      "characters at most. Send another.")
+            if self.devices.name_taken(name, other_than=job.get("rename")):
+                self.pending = job
+                return self.say(chat, f"Another reader is already called "
+                                      f"<b>{html.escape(name)}</b>. Send another name.")
+            if job.get("rename"):
+                self.devices.update(job["rename"], name=name)
+                return self.show_reader_card(chat, job["rename"])
+            ident = job["ident"]
+            self.devices.save(ident["id"], ident, name, job["host"])
+
+            def work():
+                lines = [f"💾 Saved as <b>{html.escape(name)}</b>. Queue things "
+                         f"for it, and I will keep a list of what is on it."]
+                if (self.current or {}).get("ident", {}).get("id") == ident["id"]:
+                    try:
+                        inv = self.refresh_inventory(job["host"])
+                        files = sum(1 for e in inv["entries"]
+                                    if e.get("path") and not e.get("dir"))
+                        lines.append(f"📋 {counted(files, 'file')} on it right now.")
+                    except suite.DeviceError:
+                        lines.append("📋 Could not look at its card just now — "
+                                     "next time it is on File Transfer.")
+                if ident.get("model") is None:
+                    lines.append(f"⚠️ I do not know the panel of a "
+                                 f"{html.escape(str(ident.get('reported') or 'reader'))}, "
+                                 "so wallpapers cannot be made for it. Books and "
+                                 "fonts can.")
+                self.say(chat, "\n".join(lines),
+                         [[("📲 Device", "m:dev"), ("🏠 Menu", "m:main")]])
             return self.submit(chat, work)
 
         if job["kind"] == "devmkdir":
@@ -362,6 +454,8 @@ class Bot:
             def work():
                 suite.device.dav_move(job["host"], job["path"], dest)
                 self.say(chat, f"✅ folder renamed to <code>{html.escape(dest)}</code>")
+                # A whole subtree moved, which listing one folder cannot see.
+                self.refresh_inventory(job["host"])
                 self.browse(chat, dest)
             return self.submit(chat, work)
 
@@ -533,30 +627,37 @@ class Bot:
                 chat, rest, (cb.get("message") or {}).get("message_id"))
 
         if head == "wq":                       # put an original on the reader
-            src = self.tokens.get(rest)
-            if not src:
+            job = self.tokens.get(rest)
+            if not job:
                 return self.stale(chat)
-            return self.submit(chat, lambda: self.start_wallpaper(chat, Path(src)))
+            job = job if isinstance(job, dict) else {"src": job}
+            # Which reader first: the panel decides the crop, the mat and the
+            # file, so nothing below can be asked before it is known.
+            dev = self.pick_target(chat, "wq:", job, "this wallpaper")
+            if not dev:
+                return
+            return self.submit(chat, lambda: self.start_wallpaper(
+                chat, Path(job["src"]), dev=dev))
         if head == "wf":                       # fill-and-crop or keep it whole
             job = self.tokens.get(rest)
             if not job:
                 return self.stale(chat)
             return self.submit(chat, lambda: self.start_wallpaper(
-                chat, Path(job["src"]), job["fit"]))
+                chat, Path(job["src"]), job["fit"], dev=job.get("dev")))
         if head == "wm":                       # the mat was chosen off the sheet
             job = self.tokens.get(rest)
             if not job:
                 return self.stale(chat)
             return self.ask_wallpaper_mode(chat, Path(job["src"]), job["mat"],
                                            job.get("alpha", False),
-                                           job.get("fit", "cover"))
+                                           job.get("fit", "cover"), job.get("dev"))
         if head == "wo":                       # opaque or transparent: build, queue
             job = self.tokens.get(rest)
             if not job:
                 return self.stale(chat)
             return self.submit(chat, lambda: self.queue_wallpaper(
                 chat, Path(job["src"]), job["mat"], job["clear"],
-                job.get("fit", "cover")))
+                job.get("fit", "cover"), job.get("dev")))
         if head == "wpx":
             return self.say(chat, "Kept on the server — it is in 🖼 Wallpapers.",
                             [[("🖼 Wallpapers", "m:wl"), ("🏠 Menu", "m:main")]])
@@ -565,16 +666,21 @@ class Bot:
             book = self.tokens.get(rest)
             if not book:
                 return self.stale(chat)
+            dev = self.pick_target(chat, "bq:", book, "this book")
+            if not dev:
+                return
 
             def work():
-                result = self.queue_book(book)
+                result = self.queue_book(book, dev)
+                name = html.escape(self.devices.get(dev)["name"])
                 if not result["queued"]:
                     return self.say(
-                        chat, "Already queued — there will still be only one card copy.",
+                        chat, f"Already queued for {name} — there will still be "
+                              "only one card copy.",
                         [[("📤 Queue", "m:q"), ("🏠 Menu", "m:main")]])
                 self.say(
                     chat,
-                    f"📕 queued for the card — {len(self.queue)} waiting."
+                    f"📕 queued for {name} — {self.queue.count(dev)} waiting."
                     f"{result['note']}\nIt stays on the catalog either way.",
                     [[("📲 Push now", "push:ask"), ("🏠 Menu", "m:main")]])
             return self.submit(chat, work)
@@ -612,7 +718,7 @@ class Bot:
             if rest == "ask":
                 return self.ask_push(chat)
             if rest == "go":
-                if not len(self.queue):
+                if not any(self.queue.count(d) for d in self.devices.all()):
                     return self.say(chat, "Nothing queued.",
                                     [[("🏠 Menu", "m:main")]])
                 # Said here rather than inside do_push, and before anything
@@ -638,6 +744,15 @@ class Bot:
             if not path:
                 return self.stale(chat)
             return self.submit(chat, lambda: self.route_local(chat, Path(path)))
+        if head == "pdf":                      # which panel a PDF is converted for
+            job = self.tokens.get(rest)
+            if not job:
+                return self.stale(chat)
+            job_dir = Path(job["job_dir"])
+            if not inside(self.workspace, job_dir):
+                return self.stale(chat)
+            return self.submit(chat, lambda: self.convert_pdf(
+                chat, job_dir, [f"📄 <b>{html.escape(job_dir.name)}</b>"], job["model"]))
 
     def no_reader(self, chat, detail: str = "", retry: str | None = None) -> None:
         """The one failure that happens to everybody, answered usefully.
@@ -657,7 +772,7 @@ class Bot:
                  "Tried the address that worked last time, "
                  "<code>crosspoint.local</code>, and a discovery ping on this "
                  "network.\n\n"
-                 "On the X3: <b>Home → File Transfer → Join a Network</b>. It "
+                 "On the reader: <b>Home → File Transfer → Join a Network</b>. It "
                  "prints an address on that screen — send it to me and I will "
                  "remember it."
                  # Only the first line of the underlying error. It names the
@@ -734,7 +849,26 @@ class Bot:
                  [[("📤 Yes, put it on the reader", f"wq:{token}")],
                   [("Just keep it", "wpx:")]])
 
-    def start_wallpaper(self, chat, src: Path, fit: str | None = None) -> None:
+    def wallpaper_model(self, chat, dev: str | None) -> str | None:
+        """The panel a wallpaper for `dev` is made for, or None after saying why
+        there is none."""
+        if not dev:
+            # A button from before readers were told apart.
+            self.stale(chat)
+            return None
+        entry = self.devices.get(dev)
+        if not entry:
+            self.say(chat, "That reader is no longer saved.", [[("📲 Device", "m:dev")]])
+            return None
+        if not entry.get("model"):
+            self.say(chat, f"I do not know {html.escape(entry['name'])}'s panel, so "
+                           "I cannot make a wallpaper for it.",
+                     [[("🏠 Menu", "m:main")]])
+            return None
+        return entry["model"]
+
+    def start_wallpaper(self, chat, src: Path, fit: str | None = None,
+                        dev: str | None = None) -> None:
         """Step one of putting an original on the reader: crop or not, then the
         mat, if any.
 
@@ -747,33 +881,37 @@ class Bot:
         """
         if not src.exists():
             return self.say(chat, "That picture is gone from the server.")
-        report = suite.probe_image(src, fit or "cover")
+        model = self.wallpaper_model(chat, dev)
+        if not model:
+            return
+        report = suite.probe_image(src, fit or "cover", model)
         if fit is None and report.get("ask_fit"):
-            return self.ask_fit(chat, src, report)
+            return self.ask_fit(chat, src, report, dev)
         fit = fit or "cover"
         alpha = bool(report.get("has_alpha"))
         if report["fills"]:
-            return self.ask_wallpaper_mode(chat, src, "waves", alpha, fit)
+            return self.ask_wallpaper_mode(chat, src, "waves", alpha, fit, dev)
         self.say(chat, "Building the ways to fill it…")
         sheet = suite.mat_sheet(src, self.state_dir / "cache" / "mats",
-                                [style for _, style in MATS], fit)
-        why = ("kept whole" if fit == "contain" else "too small to fill 528×792")
+                                [style for _, style in MATS], fit, model)
+        pw, ph = report["panel"]
+        why = ("kept whole" if fit == "contain" else f"too small to fill {pw}×{ph}")
         lines = [f"{report['width']}×{report['height']} — {why}. How should "
                  f"the rest be filled?"]
         lines += [f"{n} {label}" for n, (label, _) in enumerate(MATS, 1)]
-        job = {"src": str(src), "alpha": alpha, "fit": fit}
+        job = {"src": str(src), "alpha": alpha, "fit": fit, "dev": dev}
         buttons = [(f"{n}", f"wm:{self.tokens.put({**job, 'mat': style})}")
                    for n, (_, style) in enumerate(MATS, 1)]
         self.send_preview(chat, Path(sheet["png"]), "\n".join(lines),
                           [buttons, [("✗ Cancel", "wpx:")]])
 
-    def ask_fit(self, chat, src: Path, report: dict) -> None:
+    def ask_fit(self, chat, src: Path, report: dict, dev: str | None = None) -> None:
         """Filling the screen would crop a lot: crop, or keep it all?"""
         pw, ph = report["panel"]
         wide = report["width"] * ph > report["height"] * pw
         side = "left and right" if wide else "top and bottom"
         pct = round(report["crop"] * 100)
-        job = {"src": str(src)}
+        job = {"src": str(src), "dev": dev}
         self.say(chat,
                  f"<code>{html.escape(src.name)}</code> is "
                  f"{report['width']}×{report['height']} — filling the screen "
@@ -786,7 +924,8 @@ class Bot:
                   [("✗ Cancel", "wpx:")]])
 
     def ask_wallpaper_mode(self, chat, src: Path, mat: str,
-                           has_alpha: bool = False, fit: str = "cover") -> None:
+                           has_alpha: bool = False, fit: str = "cover",
+                           dev: str | None = None) -> None:
         """Step two: does it cover the page, or let it show through?
 
         Not asked of a picture with its own transparency: it has answered
@@ -795,8 +934,8 @@ class Bot:
         """
         if has_alpha:
             return self.submit(chat, lambda: self.queue_wallpaper(
-                chat, src, mat, True, fit))
-        job = {"src": str(src), "mat": mat, "fit": fit}
+                chat, src, mat, True, fit, dev))
+        job = {"src": str(src), "mat": mat, "fit": fit, "dev": dev}
         self.say(chat,
                  f"<code>{html.escape(src.name)}</code> — how should it sit "
                  f"over the page?\n\n"
@@ -811,48 +950,57 @@ class Bot:
                   [("✗ Cancel", "wpx:")]])
 
     def queue_wallpaper(self, chat, src: Path, mat: str, clear: bool,
-                        fit: str = "cover") -> None:
-        """Step three: build it into build/ and queue it.
+                        fit: str = "cover", dev: str | None = None) -> None:
+        """Step three: build it for that reader's panel and queue it.
 
-        One queued copy per original: asking again with other choices replaces
-        the waiting one rather than sending both, since they land under the
-        same name on the card anyway.
+        One queued copy per original per reader: asking again with other
+        choices replaces the waiting one rather than sending both, since they
+        land under the same name on the card anyway.
         """
-        item, png, preview = self.build_and_queue(src, mat, clear, fit)
+        if not self.wallpaper_model(chat, dev):
+            return
+        item, png, preview = self.build_and_queue(src, mat, clear, fit, dev)
         how = "transparent" if clear else "opaque"
         self.send_preview(
             chat, preview,
-            f"✅ {html.escape(png.name)} — {how}, queued "
-            f"({len(self.queue)} waiting).",
+            f"✅ {html.escape(png.name)} — {how}, queued for "
+            f"{html.escape(self.devices.get(dev)['name'])} "
+            f"({self.queue.count(dev)} waiting).",
             [[("📲 Push now", "push:ask"), ("↩ Unqueue", f"qdel:{item['id']}")],
              [("🏠 Menu", "m:main")]])
 
     def build_and_queue(self, src: Path, mat: str, clear: bool,
-                        fit: str = "cover") -> tuple:
-        """Build one original into build/ and queue it, replacing any copy of
-        *it* already waiting. Returns (queue item, built png, preview)."""
+                        fit: str = "cover", dev: str | None = None) -> tuple:
+        """Build one original for `dev`'s panel into build/<reader>/ and queue
+        it, replacing any copy of *it* already waiting for that reader.
+        Returns (queue item, built png, preview)."""
+        model = self.devices.get(dev)["model"]
+        into = suite.build_dir(dev)
         # Scratch space inside build/ itself, so the move into place stays on
         # one mount. Under the systemd unit, workspace/ and the state dir are
         # separate ReadWritePaths bind mounts, and a rename between them fails
         # with EXDEV even on a single disk.
         png, preview = suite.build_wallpaper(
             src, mat, transparent=clear,
-            out_dir=suite.WALLPAPER_OUT / ".building", fit=fit)
-        old = [item for item in self.queue.items()
+            out_dir=into / ".building", fit=fit, model=model)
+        old = [item for item in self.queue.items(dev)
                if item.get("kind") == "wallpaper"
                and (item.get("meta") or {}).get("source") == str(src)]
         replace = Path(old[0]["path"]) if old else None
         # Placed first, unqueued after: if the move fails, the copy already
         # waiting stays queued rather than vanishing with it.
-        png, preview = suite.place_build(png, preview, replace)
+        png, preview = suite.place_build(png, preview, replace, into=into)
         for item in old:
             self.queue.remove(item["id"])
         item = self.queue.add("wallpaper", str(png),
                               meta={"source": str(src), "mat": mat,
-                                    "transparent": clear, "fit": fit})
+                                    "transparent": clear, "fit": fit,
+                                    "model": model},
+                              device=dev)
         return item, png, preview
 
-    def queue_wallpapers(self, chat, sources: list, clear: bool) -> None:
+    def queue_wallpapers(self, chat, sources: list, clear: bool,
+                         dev: str | None = None) -> None:
         """Several originals at once, picked off the sheet.
 
         One question for the batch — opaque or transparent — rather than two
@@ -860,10 +1008,13 @@ class Bot:
         mat, and the report names them: any one can be opened and sent again
         to choose its mat by looking, which replaces the queued copy.
         """
+        model = self.wallpaper_model(chat, dev)
+        if not model:
+            return
         done, matted, own_alpha, failed = 0, [], [], []
         for src in map(Path, sources):
             try:
-                report = suite.probe_image(src)
+                report = suite.probe_image(src, "cover", model)
                 if not report["fills"]:
                     matted.append(src.name)
                 # A picture with its own transparency keeps it, whatever the
@@ -871,13 +1022,15 @@ class Bot:
                 if report.get("has_alpha"):
                     own_alpha.append(src.name)
                 self.build_and_queue(src, "waves",
-                                     clear or bool(report.get("has_alpha")))
+                                     clear or bool(report.get("has_alpha")),
+                                     dev=dev)
                 done += 1
             except Exception as exc:
                 # One unreadable picture must not cost the rest of the batch.
                 failed.append(f"{src.name} — {str(exc)[:60]}")
         how = "transparent" if clear else "opaque"
-        lines = [f"📤 {done} queued, {how} ({len(self.queue)} waiting)."]
+        lines = [f"📤 {done} queued for {html.escape(self.devices.get(dev)['name'])}, "
+                 f"{how} ({self.queue.count(dev)} waiting)."]
         if matted:
             lines.append("\nToo small to fill the screen, so framed with the "
                          "≈ waves mat — open one in 🖼 Wallpapers to pick "
@@ -1094,22 +1247,28 @@ class Bot:
                  [[("📤 Also send to device", f"bq:{token}")],
                   [("🏠 Menu", "m:main")]])
 
-    def queue_book(self, book: dict) -> dict:
-        """Warm the same slim cache for one book, individual or whole series."""
+    def queue_book(self, book: dict, dev: str) -> dict:
+        """Queue one book for one reader, warming the slim cache for its panel.
+        Individual or whole series."""
         path = Path(book["path"])
         resolved = path.resolve()
-        for item in self.queue.items():
+        for item in self.queue.items(dev):
             if item.get("kind") == "book" and Path(item["path"]).resolve() == resolved:
                 return {"queued": False, "note": "", "saved": 0}
-        meta = dict(book)
-        slimmed = suite.slim_book(path, self.state_dir / "cache" / "slim")
+        # Only the catalog record goes in the queue entry — not the routing.
+        meta = {k: v for k, v in book.items() if k != "dev"}
+        model = self.devices.get(dev).get("model")
         note = ""
+        slimmed = {"used": False, "saved": 0}
+        if model:
+            slimmed = suite.slim_book(path, self.state_dir / "cache" / "slim", model)
         if slimmed["used"]:
             meta["slim"] = str(slimmed["path"])
-            note = (f"\nSlimmed for the reader: {human(slimmed['before'])} → "
+            note = (f"\nSlimmed for the {model_name(model)}: {human(slimmed['before'])} → "
                     f"{human(slimmed['after'])}. The catalog keeps the original.")
         self.queue.add("book", str(path),
-                       label=(book.get("title") or path.stem)[:40], meta=meta)
+                       label=(book.get("title") or path.stem)[:40], meta=meta,
+                       device=dev)
         return {"queued": True, "note": note, "saved": slimmed.get("saved", 0)}
 
     def take_pdf(self, chat, path: Path) -> None:
@@ -1137,12 +1296,43 @@ class Bot:
         lines = [f"📄 <b>{html.escape(slug)}</b> staged",
                  f"route: <b>{html.escape(str(route))}</b>",
                  f"pages: {report.get('pages', '?')}", ""]
+        if suite.pdf2epub_runner():
+            return self.convert_pdf(chat, job_dir, lines)
+        lines.append("pdf2epub has no headless runner yet "
+                     "(<code>ai-tools/pdf2epub/DESIGN.md</code>, open question 6), "
+                     "so this one is waiting for a driver:")
+        lines.append(f"<code>workspace/{slug}/</code> — point Claude Code at the "
+                     f"repo and read <code>ai-tools/pdf2epub/SKILL.md</code>.")
+        self.say(chat, "\n".join(lines), [[("🏠 Menu", "m:main")]])
+
+    def convert_pdf(self, chat, job_dir: Path, lines: list,
+                    model: str | None = None) -> None:
+        """Run the headless converter on a staged job.
+
+        Figures are rendered for one panel. With readers of two models saved,
+        which one is a question; with one model, it is that one; with none, the
+        converter's own config decides. A job already planned keeps its device.
+        """
         runner = suite.pdf2epub_runner()
         if runner:
+            models = sorted({e["model"] for e in self.devices.all().values()
+                             if e.get("model")})
+            planned = (job_dir / "job.json").exists()
+            if model is None and len(models) > 1 and not planned:
+                self.say(chat, "\n".join(lines))
+                return self.say(chat, "Convert it for which reader's screen? "
+                                      "Figures and tables are drawn to fit it.",
+                                [[(model_name(m), "pdf:" + self.tokens.put(
+                                    {"job_dir": str(job_dir), "model": m}))
+                                  for m in models], [("✗ Cancel", "m:main")]])
+            model = model or (models[0] if len(models) == 1 else None)
+            cmd = [suite.PY_DEPS, str(runner), str(job_dir)]
+            if model and not planned:
+                cmd += ["--device", model]
+                lines.append(f"for the {model_name(model)}")
             lines.append("Running the headless converter…")
             self.say(chat, "\n".join(lines))
-            rc, out, err = suite.run([suite.PY_DEPS, str(runner), str(job_dir)],
-                                     timeout=3600)
+            rc, out, err = suite.run(cmd, timeout=3600)
             tail = (err or out).strip()[-600:]
             return self.say(
                 chat,
@@ -1150,12 +1340,6 @@ class Bot:
                  else "⚠️ the converter stopped and saved its progress.")
                 + (f"\n<pre>{html.escape(tail)}</pre>" if tail else ""),
                 [[("🏠 Menu", "m:main")]])
-        lines.append("pdf2epub has no headless runner yet "
-                     "(<code>ai-tools/pdf2epub/DESIGN.md</code>, open question 6), "
-                     "so this one is waiting for a driver:")
-        lines.append(f"<code>workspace/{slug}/</code> — point Claude Code at the "
-                     f"repo and read <code>ai-tools/pdf2epub/SKILL.md</code>.")
-        self.say(chat, "\n".join(lines), [[("🏠 Menu", "m:main")]])
 
     # -- views -------------------------------------------------------------
 
@@ -1325,7 +1509,7 @@ class Bot:
             library_back = (f"lib:v:{self.tokens.put(library_state)}"
                             if library_state else "m:lib")
             rows.extend([
-                [(f"📤 Add all {len(books)} to X3", f"ser:q:{again}")],
+                [(f"📤 Add all {len(books)} to the reader", f"ser:q:{again}")],
                 [("✏️ Change series name", f"ser:n:{again}")],
                 [("✏️ Change short name", f"ser:a:{again}")],
                 [("📚 Library", library_back)],
@@ -1333,11 +1517,15 @@ class Bot:
             return self.panel(chat, message_id, "\n".join(lines), rows)
 
         if action == "q":
+            dev = self.pick_target(chat, "ser:q:", payload if isinstance(payload, dict)
+                                   else {"key": key}, "these books")
+            if not dev:
+                return
             self.panel(chat, message_id,
                        f"Preparing {counted(len(books), 'book')} for the queue…")
             return self.submit(
                 chat, lambda: self.queue_series(
-                    chat, group, books, message_id=message_id,
+                    chat, group, books, dev, message_id=message_id,
                     library_state=library_state))
 
         if action in {"rm", "rm!"}:
@@ -1347,7 +1535,7 @@ class Bot:
                                      "library_state": library_state})
             return self.panel(
                 chat, message_id,
-                "Removing books belongs in <b>Device</b>, where the X3 is "
+                "Removing books belongs in <b>Device</b>, where the reader is "
                 "connected and its actual contents are visible.",
                 [[("📲 Device", "m:dev"),
                   ("◀ Series", f"ser:f:{again}")]])
@@ -1383,14 +1571,14 @@ class Bot:
                 "together; their EPUB bytes do not change.",
                 [[("✗ Cancel", f"ser:f:{self.tokens.put(again_payload)}")]])
 
-    def queue_series(self, chat, group: dict, books: list, *, message_id=None,
-                     library_state: dict | None = None) -> None:
+    def queue_series(self, chat, group: dict, books: list, dev: str, *,
+                     message_id=None, library_state: dict | None = None) -> None:
         queued = skipped = 0
         saved = 0
         failed = []
         for book in books:
             try:
-                result = self.queue_book(book)
+                result = self.queue_book(book, dev)
             except Exception as exc:
                 failed.append(f"{book.get('base_title') or book.get('title')}: {exc}")
                 continue
@@ -1399,7 +1587,8 @@ class Bot:
                 saved += result["saved"]
             else:
                 skipped += 1
-        lines = [f"📕 <b>{html.escape(group['name'])}</b>",
+        lines = [f"📕 <b>{html.escape(group['name'])}</b> → "
+                 f"{html.escape(self.devices.get(dev)['name'])}",
                  f"queued: {queued}", f"already queued: {skipped}",
                  "Catalog originals were not changed."]
         if saved:
@@ -2127,17 +2316,36 @@ class Bot:
             + queued_note,
             [[("📝 Metadata", f"bm:show:{token}"), ("📚 Library", "m:lib")]])
 
-    def show_queue(self, chat) -> None:
-        items = self.queue.items()
+    def show_queue(self, chat, dev: str | None = None) -> None:
+        """What is waiting, reader by reader — or, with `dev`, for one."""
+        items = self.queue.items(dev) if dev else self.queue.items()
         if not items:
-            return self.say(chat, "📤 Queue empty. Nothing is waiting for the reader.",
+            who = html.escape((self.devices.get(dev) or {}).get("name", "the reader"))
+            return self.say(chat, f"📤 Queue empty. Nothing is waiting for {who}.",
                             [[("🏠 Menu", "m:main")]])
         icons = {"book": "📕", "font": "🔤"}
-        rows = [[(f"✗ {icons.get(i.get('kind'), '🖼')} {i['label'][:28]}",
-                  f"qdel:{i['id']}")] for i in items]
+        saved = self.devices.all()
+        groups = {}
+        for i in items:
+            groups.setdefault(i.get("device") if i.get("device") in saved else None,
+                              []).append(i)
+        lines, rows = [], []
+        for dev_id in sorted(groups, key=lambda d: (d is None, (saved.get(d) or {}).get("name", ""))):
+            group = groups[dev_id]
+            if dev_id:
+                lines.append(f"📲 <b>{html.escape(saved[dev_id]['name'])}</b> — "
+                             f"{len(group)} waiting")
+                rows.append([(f"— {saved[dev_id]['name']} —"[:40], "dev:nop:")])
+            else:
+                lines.append(f"❔ {len(group)} for no saved reader — from before "
+                             "readers were told apart, or for one since forgotten. "
+                             "No push takes these; ✗ them.")
+                rows.append([("— no reader —", "dev:nop:")])
+            rows += [[(f"✗ {icons.get(i.get('kind'), '🖼')} {i['label'][:28]}",
+                       f"qdel:{i['id']}")] for i in group]
         rows.append([("📲 Push now", "push:ask"), ("Clear all", "qclr:")])
         rows.append([("🏠 Menu", "m:main")])
-        self.say(chat, f"📤 {len(items)} waiting to go to the reader:", rows)
+        self.say(chat, "📤 Waiting to go to the reader:\n" + "\n".join(lines), rows)
 
     def show_inbox(self, chat) -> None:
         inbox = self.workspace / "inbox"
@@ -2166,7 +2374,9 @@ class Bot:
             "⚙️ <b>Status</b>",
             f"catalog: {'up' if opds else 'not answering'} ({self.cfg['opds_url']})",
             f"books served: {count}",
-            f"queue: {len(self.queue)} waiting",
+            "queue: " + (", ".join(f"{html.escape(e['name'])} {self.queue.count(d)}"
+                                   for d, e in self.devices.all().items())
+                         or f"{len(self.queue)} waiting"),
             f"graded-reader AI: {'configured' if ready else 'not configured'}",
             f"pdf2epub runner: {'present' if suite.pdf2epub_runner() else 'not built yet'}",
             f"last push: {last or 'never'}",
@@ -2355,9 +2565,12 @@ class Bot:
             job = self.tokens.get(token)
             if not job:
                 return self.stale(chat)
+            dev = self.pick_target(chat, "wl:send!:", job, "these wallpapers")
+            if not dev:
+                return
             self.selected.clear()
             return self.submit(chat, lambda: self.queue_wallpapers(
-                chat, job["paths"], job["clear"]))
+                chat, job["paths"], job["clear"], dev))
 
         if action == "del":
             if not self.selected:
@@ -2498,15 +2711,19 @@ class Bot:
         if action == "q":
             # Same promise as a wallpaper: queued now, sent when you are next
             # in front of the reader. Twice is a slip, not an instruction.
+            dev = self.pick_target(chat, "fo:q:", family, "this font")
+            if not dev:
+                return
             if any(i["path"] == family["path"] and i.get("kind") == "font"
-                   for i in self.queue.items()):
-                return self.say(chat, "Already in the queue.",
+                   for i in self.queue.items(dev)):
+                return self.say(chat, "Already in that reader's queue.",
                                 [[("📤 Queue", "m:q"), ("🔤 Fonts", "m:fo")]])
             self.queue.add("font", family["path"], label=family["name"],
-                           meta={"family": family["name"]})
+                           meta={"family": family["name"]}, device=dev)
             return self.say(
                 chat,
-                f"🔤 queued — {len(self.queue)} waiting.\n"
+                f"🔤 queued for {html.escape(self.devices.get(dev)['name'])} — "
+                f"{self.queue.count(dev)} waiting.\n"
                 f"{family['name']} goes across on the next push, and is "
                 f"verified and selected there.",
                 [[("📲 Push now", "push:ask"), ("🏠 Menu", "m:main")]])
@@ -2815,39 +3032,399 @@ class Bot:
 
     # -- the device --------------------------------------------------------
 
-    def show_device(self, chat, *, message_id=None) -> None:
-        self.panel(
-            chat, message_id,
-            "📲 The reader answers only while it is on "
-            "<b>Home → File Transfer → Join a Network</b>.",
-            [[("🔎 Find it", "dev:st:"), ("📂 Browse", "dev:ls0:")],
-             [("🖼 Wallpapers", "dev:wp:"), ("🔤 Fonts", "dev:fo:")],
-             [("📤 Push queue", "push:ask")],
-             [("📍 Set its address", "dev:addr:")],
-             [("🏠 Menu", "m:main")]])
+    # -- which reader ------------------------------------------------------
+
+    def reader_label(self, ident: dict | None) -> str:
+        """The name you gave it, or what it is: "Night Pro", "new X4 Pro"."""
+        entry = self.devices.get((ident or {}).get("id"))
+        if entry:
+            return entry["name"]
+        return f"unsaved {model_name((ident or {}).get('model'), (ident or {}).get('reported'))}"
+
+    def current_id(self) -> str | None:
+        """The saved reader this session is talking to, or None (none found
+        yet, or one that was never saved)."""
+        ident = (self.current or {}).get("ident") or {}
+        return ident.get("id") if self.devices.get(ident.get("id")) else None
 
     def device_host(self):
-        host, info = suite.device.find_device(None)
+        """Find the reader, find out which one it is, and keep talking to it.
+
+        Every reader answers to `crosspoint.local`, so the address that
+        answered says nothing about *which* one did. Everything that could
+        answer is asked at once — the reader we were just talking to, the last
+        address of every saved one, the name, the broadcast — and if two
+        answer, the one we were talking to wins; otherwise that is a question
+        for you (`ManyReaders`), not a guess.
+
+        Returns (host, status) like it always has; the identity lands in
+        `self.current`. A saved reader's address, firmware and last-seen are
+        updated; a reader not saved is offered for saving once per session.
+
+        The reader we are already talking to is asked first, alone: browsing
+        is a tap per folder, and each one paying for a full search would make
+        every tap slow. Only when it stops answering is everything asked.
+        """
+        if self.current:
+            try:
+                info = suite.device.status(self.current["host"],
+                                           timeout=suite.device.PROBE_TIMEOUT)
+                return self.use_reader(self.current["host"], info)
+            except suite.DeviceError:
+                self.current = None
+        candidates = []
+        if self.current:
+            candidates.append(self.current["host"])
+        saved = sorted(self.devices.all().values(), key=lambda e: -(e.get("seen") or 0))
+        candidates += [e["host"] for e in saved if e.get("host")]
+        found = suite.device.find_devices(candidates)
+        if not found:
+            raise suite.DeviceError(
+                "no reader found (tried " + ", ".join(
+                    dict.fromkeys([*candidates, "crosspoint.local"])) + ", and a "
+                "discovery ping)")
+        if len(found) > 1:
+            mine = [f for f in found if self.current and (
+                f[0] == self.current["host"]
+                or f[1].get("ip") == (self.current.get("info") or {}).get("ip"))]
+            if not mine:
+                raise ManyReaders(found)
+            found = mine[:1]
+        host, info, hostname = found[0]
+        return self.use_reader(host, info, hostname)
+
+    def use_reader(self, host: str, info: dict, hostname: str | None = None):
+        """Make this reader the one the session talks to. Returns (host, info)."""
+        # The same address still saying it is the same model is the same
+        # reader; anything else — a DHCP lease handed to the other one — is
+        # asked again.
+        known = (self.current if self.current and self.current["host"] == host
+                 and self.current["ident"].get("reported") == info.get("device")
+                 else None)
+        ident = (known or {}).get("ident") or suite.device.identify(host, info, hostname)
+        self.current = {"host": host, "info": info, "ident": ident}
+        entry = self.devices.get(ident.get("id"))
+        if entry:
+            self.devices.update(ident["id"], host=host, seen=time.time(),
+                                firmware=ident.get("firmware"),
+                                model=ident.get("model"))
+        elif ident.get("id") not in self.announced or not ident.get("id"):
+            self.announce(ident, host)
         return host, info
+
+    def announce(self, ident: dict, host: str) -> None:
+        """A reader the bot has not been told to remember. Said once."""
+        key = ident.get("id") or f"anon:{host}"
+        if key in self.announced or self.chat is None:
+            return
+        self.announced.add(key)
+        what = model_name(ident.get("model"), ident.get("reported"))
+        fw = f", firmware {html.escape(str(ident.get('firmware')))}" if ident.get("firmware") else ""
+        if not ident.get("id"):
+            return self.say(
+                self.chat,
+                f"🆕 This is a new {html.escape(what)}{fw} — but it does not say "
+                f"who it is (no MAC in its name, no serial), so I cannot tell it "
+                f"from another one and will not save it. Everything else works; "
+                f"nothing can be queued for it.")
+        tail = (ident.get("mac") or ident.get("serial") or "")[-6:]
+        self.say(self.chat,
+                 f"🆕 New reader: <b>{html.escape(what)}</b>{fw} (…{html.escape(tail)}).\n\n"
+                 "Save it? A saved reader gets a name, its own queue, and a list "
+                 "of what is on it that you can read while it is off. Not saved, "
+                 "you can still browse and send to it now — I just will not "
+                 "remember it.",
+                 [[("💾 Save it", f"dev:save:{self.tokens.put({'ident': ident, 'host': host})}"),
+                   ("Not now", "dev:nosave:")]])
+
+    def choose_reader(self, chat, found: list) -> None:
+        """Two readers on File Transfer at once: which one?"""
+        rows = []
+        for host, info, hostname in found:
+            ident = suite.device.identify(host, info, hostname)
+            rows.append([(f"📲 {self.reader_label(ident)} · {host}"[:60],
+                          f"dev:use:{self.tokens.put({'host': host, 'info': info, 'hostname': hostname})}")])
+        rows.append([("🏠 Menu", "m:main")])
+        self.say(chat, f"📲 {len(found)} readers are answering. Which one?", rows)
+
+    def show_device(self, chat, *, message_id=None) -> None:
+        """The readers you saved, readable while they are off, and the live
+        actions for whichever one is on its File Transfer screen."""
+        saved = self.devices.all()
+        lines = ["📲 <b>Readers</b>"]
+        rows = []
+        for dev_id, entry in sorted(saved.items(), key=lambda kv: kv[1].get("name", "").lower()):
+            n = self.queue.count(dev_id)
+            here = " · 🟢 talking to it" if dev_id == self.current_id() else ""
+            lines.append(f"· <b>{html.escape(entry['name'])}</b> — "
+                         f"{model_name(entry.get('model'))}, "
+                         f"{counted(n, 'queued', 'queued')}, seen {ago(entry.get('seen'))}{here}")
+            rows.append([(f"📲 {entry['name']}"[:40], f"dev:card:{self.tokens.put(dev_id)}")])
+        if not saved:
+            lines.append("None saved yet. Put one on its File Transfer screen "
+                         "and tap 🔎 Find it.")
+        lines.append("\nA reader answers only while it is on "
+                     "<b>Home → File Transfer → Join a Network</b>.")
+        rows += [[("🔎 Find it", "dev:st:"), ("📂 Browse", "dev:ls0:")],
+                 [("🖼 Wallpapers", "dev:wp:"), ("🔤 Fonts", "dev:fo:")],
+                 [("📤 Push queue", "push:ask")],
+                 [("📍 Set its address", "dev:addr:")],
+                 [("🏠 Menu", "m:main")]]
+        self.panel(chat, message_id, "\n".join(lines), rows)
+
+    def show_reader_card(self, chat, dev_id: str, *, message_id=None) -> None:
+        """One saved reader, from what the bot remembers — no reader needed."""
+        entry = self.devices.get(dev_id)
+        if not entry:
+            return self.panel(chat, message_id, "That reader is no longer saved.",
+                              [[("📲 Readers", "m:dev")]])
+        inv = self.devices.inventory(dev_id)
+        files = [e for e in (inv or {}).get("entries", []) if e.get("path") and not e.get("dir")]
+        t = self.tokens.put(dev_id)
+        lines = [f"📲 <b>{html.escape(entry['name'])}</b>",
+                 f"{model_name(entry.get('model'))}"
+                 + (f" · firmware {html.escape(str(entry['firmware']))}" if entry.get("firmware") else ""),
+                 f"last seen {ago(entry.get('seen'))}"
+                 + (f" at <code>{html.escape(entry['host'])}</code>" if entry.get("host") else ""),
+                 f"queued: {self.queue.count(dev_id)}",
+                 (f"on the card: {counted(len(files), 'file')}, as of {ago(inv.get('taken'))}"
+                  if inv else "on the card: not looked yet")]
+        if dev_id == self.current_id():
+            lines.append("🟢 the reader this session is talking to")
+        self.panel(chat, message_id, "\n".join(lines),
+                   [[("📋 What's on it", f"dev:inv:{t}"), ("📤 Its queue", f"dev:q:{t}")],
+                    [("✏️ Rename", f"dev:ren:{t}"), ("🗑 Forget", f"dev:forget:{t}")],
+                    [("📲 Readers", "m:dev")]])
+
+    def refresh_inventory(self, host: str | None = None) -> dict | None:
+        """Walk the card of the reader we are talking to, if it is saved, and
+        keep what is on it. Names and sizes only — nothing is downloaded."""
+        dev_id = self.current_id()
+        if not dev_id:
+            return None
+        host = host or self.current["host"]
+        entries = suite.device.walk(host)
+        try:
+            fonts = [{"name": f.get("name"), "sizes": f.get("sizes", [])}
+                     for f in suite.device.fonts(host).get("families", [])]
+        except suite.DeviceError:
+            fonts = []
+        return self.devices.save_inventory(dev_id, entries, fonts)
+
+    def note_listing(self, host: str, path: str, entries: list) -> None:
+        """A folder was just listed: bring the saved inventory up to date for it.
+
+        Free — the listing happened anyway — and it is what keeps the
+        inventory right after a rename, delete or move from the chat, since
+        each of those ends by showing the folder again. A folder that vanished
+        takes everything under it along.
+        """
+        dev_id = self.current_id()
+        if not dev_id or not self.current or self.current["host"] != host:
+            return
+        inv = self.devices.inventory(dev_id)
+        if inv is None:
+            return
+        base = path.rstrip("/")
+        fresh = {f"{base}/{e.get('name', '')}": e for e in entries if e.get("name")}
+        old = inv.get("entries", [])
+        gone_dirs = {e["path"] for e in old
+                     if e.get("dir") and e.get("path")
+                     and e["path"].rpartition("/")[0] == base and e["path"] not in fresh}
+        kept = [e for e in old
+                if not e.get("path")
+                or (e["path"].rpartition("/")[0] != base
+                    and not any(e["path"].startswith(f"{d}/") for d in gone_dirs))]
+        for p, e in fresh.items():
+            is_dir = bool(e.get("isDirectory"))
+            kept.append({"path": p, "size": 0 if is_dir else int(e.get("size") or 0),
+                         "dir": is_dir})
+        self.devices.save_inventory(dev_id, kept, inv.get("fonts"))
+
+    def inventory_text(self, dev_id: str) -> str:
+        """The saved inventory as a plain text tree, for a file you can keep."""
+        entry, inv = self.devices.get(dev_id) or {}, self.devices.inventory(dev_id) or {}
+        stamp = (datetime.fromtimestamp(inv["taken"]).strftime("%Y-%m-%d %H:%M")
+                 if inv.get("taken") else "never")
+        lines = [f"{entry.get('name', dev_id)} — {model_name(entry.get('model'))}",
+                 f"as of {stamp}", ""]
+        for e in sorted((e for e in inv.get("entries", []) if e.get("path")),
+                        key=lambda e: e["path"].lower()):
+            depth = e["path"].count("/") - 1
+            name = e["path"].rpartition("/")[2]
+            lines.append("  " * depth + (f"{name}/" if e.get("dir")
+                                          else f"{name}  ({human(e.get('size', 0))})"))
+        if any(e.get("truncated") for e in inv.get("entries", [])):
+            lines.append("… stopped there: too many folders to walk")
+        if inv.get("fonts"):
+            lines += ["", "fonts the reader lists:"]
+            lines += [f"  {f['name']}  ({', '.join(str(s) for s in f.get('sizes', []))} pt)"
+                      for f in inv["fonts"]]
+        return "\n".join(lines) + "\n"
+
+    def show_inventory(self, chat, dev_id: str) -> None:
+        entry, inv = self.devices.get(dev_id), self.devices.inventory(dev_id)
+        if not entry:
+            return self.say(chat, "That reader is no longer saved.", [[("📲 Readers", "m:dev")]])
+        t = self.tokens.put(dev_id)
+        back = [[("🔄 Look again", f"dev:invr:{t}"), (f"📲 {entry['name']}"[:30], f"dev:card:{t}")]]
+        if not inv:
+            return self.say(chat, f"I have not looked at <b>{html.escape(entry['name'])}</b>'s "
+                                  "card yet. Put it on File Transfer and tap 🔄.", back)
+        text = self.inventory_text(dev_id)
+        body = text.splitlines()
+        shown = body[:INVENTORY_LINES + 3]
+        more = len(body) - len(shown)
+        self.say(chat, "<pre>" + html.escape("\n".join(shown))[:3800] + "</pre>"
+                 + (f"\n… {more} more lines in the file below." if more > 0 else ""), back)
+        if more > 0:
+            safe = re.sub(r"[^A-Za-z0-9_-]+", "-", entry["name"]).strip("-") or "reader"
+            out = self.state_dir / "cache" / f"inventory-{safe}.txt"
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(text, encoding="utf-8")
+            try:
+                self.tg.send_document(chat, out, f"Everything on {entry['name']}")
+            except TelegramError as exc:
+                log("inventory file failed:", exc)
+
+    def pick_target(self, chat, resume: str, job: dict, what: str = "it") -> str | None:
+        """Which saved reader queued work is for. Returns its id, or None after
+        asking (or explaining there is none). `resume` + a token is the button
+        that comes back here with the answer in `job["dev"]`."""
+        saved = self.devices.all()
+        if job.get("dev") in saved:
+            return job["dev"]
+        if not saved:
+            self.say(chat,
+                     "📲 There is no saved reader to queue for yet. Put one on "
+                     "<b>Home → File Transfer → Join a Network</b>, tap 🔎 Find it "
+                     "and save it — then queue away.",
+                     [[("📲 Device", "m:dev"), ("🏠 Menu", "m:main")]])
+            return None
+        if len(saved) == 1:
+            return next(iter(saved))
+        rows = [[(f"📲 {e['name']} · {model_name(e.get('model'))}"[:40],
+                  f"{resume}{self.tokens.put({**job, 'dev': dev_id})}")]
+                for dev_id, e in sorted(saved.items(), key=lambda kv: kv[1]["name"].lower())]
+        rows.append([("✗ Cancel", "m:main")])
+        self.say(chat, f"Which reader is {what} for?", rows)
+        return None
 
     def on_device_callback(self, chat, rest: str, msg_id=None) -> None:
         action, _, token = rest.partition(":")
 
         if action == "st":
             def work():
+                # Looking afresh: forget which reader we were talking to, so
+                # two readers on File Transfer get asked about, not assumed.
+                self.current = None
                 host, info = self.device_host()
-                self.say(chat, f"📲 {host}\n"
-                               f"{info.get('model', 'reader')} · firmware "
-                               f"{info.get('version', '?')}\n"
-                               f"free heap: {info.get('freeHeap', '?')}",
-                         [[("📂 Browse", "dev:ls0:")], [("🏠 Menu", "m:main")]])
+                ident = self.current["ident"]
+                dev_id = self.current_id()
+                lines = [f"📲 <b>{html.escape(self.reader_label(ident))}</b> at "
+                         f"<code>{html.escape(host)}</code>",
+                         f"{model_name(ident.get('model'), ident.get('reported'))} · firmware "
+                         f"{html.escape(str(info.get('version', '?')))}",
+                         f"free heap: {info.get('freeHeap', '?')}"]
+                rows = [[("📂 Browse", "dev:ls0:")]]
+                if dev_id:
+                    try:
+                        inv = self.refresh_inventory(host)
+                        files = sum(1 for e in inv["entries"]
+                                    if e.get("path") and not e.get("dir"))
+                        on_card = f"{counted(files, 'file')} on the card"
+                    except suite.DeviceError:
+                        # It answered a moment ago: say the walk failed, not
+                        # that there is no reader.
+                        on_card = "could not list its card just now"
+                    lines.append(f"{counted(self.queue.count(dev_id), 'item')} queued for it · "
+                                 f"{on_card}")
+                    t = self.tokens.put(dev_id)
+                    rows[0].append(("📋 What's on it", f"dev:inv:{t}"))
+                    if self.queue.count(dev_id):
+                        rows.insert(0, [("📤 Push its queue", "push:ask")])
+                rows.append([("🏠 Menu", "m:main")])
+                self.say(chat, "\n".join(lines), rows)
             return self.submit(chat, work)
+
+        if action == "use":
+            pick = self.tokens.get(token)
+            if not pick:
+                return self.stale(chat)
+
+            def work():
+                self.current = None
+                host, _ = self.use_reader(pick["host"], pick["info"], pick.get("hostname"))
+                self.say(chat, f"📲 Talking to <b>{html.escape(self.reader_label(self.current['ident']))}</b> "
+                               "now — tap what you wanted again.",
+                         [[("📂 Browse", "dev:ls0:"), ("📤 Push queue", "push:ask")],
+                          [("🏠 Menu", "m:main")]])
+            return self.submit(chat, work)
+
+        if action == "save":
+            pick = self.tokens.get(token)
+            if not pick:
+                return self.stale(chat)
+            if self.devices.get(pick["ident"]["id"]):
+                return self.say(chat, "Already saved.", [[("📲 Device", "m:dev")]])
+            self.pending = {"kind": "devname", "ident": pick["ident"], "host": pick["host"]}
+            what = model_name(pick["ident"].get("model"), pick["ident"].get("reported"))
+            return self.say(chat, f"What should I call this {html.escape(what)}? "
+                                  f"Something short, like <i>Night Pro</i>.")
+        if action == "nosave":
+            return self.say(chat, "Not saved. Browse and send away — I will not "
+                                  "remember it, or queue for it.",
+                            [[("📂 Browse", "dev:ls0:"), ("🏠 Menu", "m:main")]])
+
+        if action in ("card", "inv", "invr", "q", "ren", "forget", "forget!"):
+            dev_id = self.tokens.get(token)
+            if not dev_id:
+                return self.stale(chat)
+            if action == "card":
+                return self.show_reader_card(chat, dev_id, message_id=msg_id)
+            if action == "inv":
+                return self.show_inventory(chat, dev_id)
+            if action == "invr":
+                def work():
+                    self.device_host()
+                    if self.current_id() != dev_id:
+                        entry = self.devices.get(dev_id) or {}
+                        return self.say(
+                            chat, f"The reader answering is "
+                                  f"<b>{html.escape(self.reader_label(self.current['ident']))}</b>, "
+                                  f"not {html.escape(entry.get('name', 'that one'))}.",
+                            [[("📲 Device", "m:dev")]])
+                    self.refresh_inventory()
+                    self.show_inventory(chat, dev_id)
+                return self.submit(chat, work)
+            if action == "q":
+                return self.show_queue(chat, dev_id)
+            if action == "ren":
+                self.pending = {"kind": "devname", "rename": dev_id}
+                return self.say(chat, "Send me its new name.")
+            entry = self.devices.get(dev_id) or {}
+            if action == "forget":
+                n = self.queue.count(dev_id)
+                return self.say(
+                    chat, f"Forget <b>{html.escape(entry.get('name', dev_id))}</b>? "
+                          + (f"Its queue ({counted(n, 'item')}) goes too. " if n else "")
+                          + "Nothing on the reader changes.",
+                    [[("Yes, forget it", f"dev:forget!:{token}"),
+                      ("No", f"dev:card:{token}")]])
+            for item in self.queue.items(dev_id):
+                if item.get("kind") == "wallpaper":
+                    suite.drop_build(Path(item["path"]))
+            self.queue.clear(dev_id)
+            self.devices.forget(dev_id)
+            self.announced.discard(dev_id)
+            return self.say(chat, f"Forgot {html.escape(entry.get('name', dev_id))}.",
+                            [[("📲 Device", "m:dev")]])
 
         if action == "addr":
             self.pending = {"kind": "devaddr"}
             return self.say(
                 chat,
-                "📍 Send me the address the X3 is showing on its <b>File "
+                "📍 Send me the address the reader is showing on its <b>File "
                 "Transfer</b> screen.\n\n"
                 "An IP like <code>192.168.1.42</code> is what you want; a name "
                 "works too. I will check it answers before keeping it.")
@@ -2880,7 +3457,7 @@ class Bot:
             payload = self.tokens.get(token)
             if not isinstance(payload, dict):
                 return self.stale(chat)
-            self.panel(chat, msg_id, "Removing the series from the X3…")
+            self.panel(chat, msg_id, "Removing the series from the reader…")
             return self.submit(
                 chat, lambda: self.remove_device_series(
                     chat, payload, message_id=msg_id))
@@ -3360,10 +3937,10 @@ class Bot:
         if navigation:
             rows.append(navigation)
         current = self.tokens.put({"path": path, "key": key, "page": page})
-        rows.append([(f"🗑 Remove all {len(files)} from X3", f"dev:srm:{current}")])
+        rows.append([(f"🗑 Remove all {len(files)} from the reader", f"dev:srm:{current}")])
         rows.append([("📂 Back", f"dev:ls:{self.tokens.put(path)}")])
         lines = [f"📚 <b>{html.escape(group['name'])}</b>",
-                 f"on the X3: {counted(len(files), 'book file')}"]
+                 f"on the reader: {counted(len(files), 'book file')}"]
         if last_page:
             lines.append(f"Page {page + 1} of {last_page + 1}")
         self.panel(chat, message_id, "\n".join(lines), rows)
@@ -3380,7 +3957,7 @@ class Bot:
         self.panel(
             chat, message_id,
             f"Remove all {counted(len(files), 'book')} in "
-            f"<b>{html.escape(group['name'])}</b> from the X3?",
+            f"<b>{html.escape(group['name'])}</b> from the reader?",
             [[("Yes, remove all", f"dev:srm!:{token}"),
               ("No", f"dev:sf:{token}")]])
 
@@ -3397,12 +3974,12 @@ class Bot:
         if not ok:
             return self.panel(
                 chat, message_id,
-                "⚠️ The X3 refused the removal: " + html.escape(detail[:200]),
+                "⚠️ The reader refused the removal: " + html.escape(detail[:200]),
                 [[("◀ Series", f"dev:sf:{self.tokens.put(payload)}")]])
         self.panel(
             chat, message_id,
             f"🗑 Removed {counted(len(targets), 'book')} in "
-            f"<b>{html.escape(group['name'])}</b> from the X3.",
+            f"<b>{html.escape(group['name'])}</b> from the reader.",
             [[("📂 Browse", f"dev:ls:{self.tokens.put(payload['path'])}")]])
 
     def browse(self, chat, path: str, *, message_id=None) -> None:
@@ -3417,6 +3994,7 @@ class Bot:
         entries = sorted(suite.device.list_dir(host, path),
                          key=lambda e: (not e.get("isDirectory"),
                                         e.get("name", "").lower()))
+        self.note_listing(host, path, entries)
         series_groups, grouped_names = self.device_series_groups(host, path, entries)
         sent = self.panel(chat, message_id,
                           f"📂 <code>{html.escape(path)}</code> — "
@@ -3603,12 +4181,16 @@ class Bot:
     # -- push --------------------------------------------------------------
 
     def ask_push(self, chat) -> None:
-        n = len(self.queue)
-        if not n:
+        saved = self.devices.all()
+        waiting = [(e["name"], self.queue.count(d)) for d, e in saved.items()
+                   if self.queue.count(d)]
+        if not waiting:
             return self.say(chat, "Nothing queued.", [[("🏠 Menu", "m:main")]])
+        which = "\n".join(f"· {html.escape(n)}: {c}" for n, c in waiting)
         self.say(chat,
-                 f"📤 {n} item(s) ready.\n\nOn the X3: <b>Home → File Transfer → "
-                 f"Join a Network</b>, then tap Ready.",
+                 f"📤 Ready to go:\n{which}\n\nOn the reader: <b>Home → File "
+                 f"Transfer → Join a Network</b>, then tap Ready. Whichever one "
+                 f"answers gets its own queue.",
                  [[("✅ Ready", "push:go")], [("🏠 Menu", "m:main")]])
 
     def do_push(self, chat) -> None:
@@ -3617,10 +4199,45 @@ class Bot:
         Only items the push script reported as landed are removed. A device
         that never answered removes nothing at all — which is the promise that
         makes it safe to queue things all week and push once.
+
+        Only the queue of the reader that answered goes across. Which reader
+        that is comes from the reader itself (`device_host`), so an X4 Pro on
+        the File Transfer screen can never be handed an X3's wallpapers.
         """
-        items = self.queue.items()
+        # Find the reader once, and hand the address to both halves. Two
+        # discovery passes could disagree, and "no reader" has to mean the same
+        # thing for wallpapers and books or the all-or-nothing promise leaks.
+        try:
+            host, info = self.device_host()
+        except suite.DeviceError as exc:
+            self.say(chat, "The queue is untouched — nothing was sent.")
+            return self.no_reader(chat, str(exc), retry="push:ask")
+        if not self.current or self.current["host"] != host:
+            self.use_reader(host, info)
+
+        dev = self.current_id()
+        if not dev:
+            ident = (self.current or {}).get("ident") or {}
+            rows = [[("🏠 Menu", "m:main")]]
+            if ident.get("id"):
+                rows.insert(0, [("💾 Save it", "dev:save:" + self.tokens.put(
+                    {"ident": ident, "host": host}))])
+            return self.say(
+                chat,
+                f"📲 The reader answering is an {html.escape(self.reader_label(ident))} — "
+                "nothing is queued for a reader I have not saved. Save it, and "
+                "queue for it; the queue is untouched.", rows)
+        entry = self.devices.get(dev)
+        items = self.queue.items(dev)
         if not items:
-            return self.say(chat, "Nothing queued.")
+            others = [(e["name"], self.queue.count(d))
+                      for d, e in self.devices.all().items() if d != dev and self.queue.count(d)]
+            return self.say(
+                chat, f"📲 <b>{html.escape(entry['name'])}</b> answered, and nothing "
+                      "is queued for it."
+                      + ("\nWaiting for others: " + ", ".join(
+                          f"{html.escape(n)} ({c})" for n, c in others) if others else ""),
+                [[("🏠 Menu", "m:main")]])
 
         missing = [i for i in items if not Path(i["path"]).exists()]
         live = [i for i in items if Path(i["path"]).exists()]
@@ -3631,22 +4248,13 @@ class Bot:
         if not live:
             return self.say(chat, "Nothing left to push.", [[("🏠 Menu", "m:main")]])
 
-        # Find the reader once, and hand the address to both halves. Two
-        # discovery passes could disagree, and "no reader" has to mean the same
-        # thing for wallpapers and books or the all-or-nothing promise leaks.
-        try:
-            host, _ = self.device_host()
-        except suite.DeviceError as exc:
-            self.say(chat, "The queue is untouched — nothing was sent.")
-            return self.no_reader(chat, str(exc), retry="push:ask")
-
         books = [i for i in live if i.get("kind") == "book"]
         fonts = [i for i in live if i.get("kind") == "font"]
         # Anything else is a wallpaper. Kept as the default rather than an
         # explicit "wallpaper" test because queues written before fonts and
         # books existed carry entries with no kind at all.
         walls = [i for i in live if i.get("kind") not in ("book", "font")]
-        lines = [f"📲 {host}"]
+        lines = [f"📲 <b>{html.escape(entry['name'])}</b> · {host}"]
         progress_message_id = None
 
         def show_progress(current="", keyboard=None):
@@ -3707,8 +4315,9 @@ class Bot:
                     # here — queued days ago, cache since cleared, or never
                     # queued at all — it is slimmed before it goes across.
                     slim = Path(meta["slim"]) if meta.get("slim") else None
-                    if not (slim and slim.exists()):
-                        made = suite.slim_book(Path(item["path"]), slim_cache)
+                    if not (slim and slim.exists()) and entry.get("model"):
+                        made = suite.slim_book(Path(item["path"]), slim_cache,
+                                               entry["model"])
                         slim = made["path"] if made["used"] else None
                     source = slim or Path(item["path"])
                     try:
@@ -3772,7 +4381,12 @@ class Bot:
             {(i.get("meta") or {}).get("slim") for i in self.queue.items()
              if (i.get("meta") or {}).get("slim")})
         self.notes.set("last_push", datetime.now().strftime("%Y-%m-%d %H:%M"))
-        remaining = len(self.queue)
+        # What is on the card now, for reading while it is off.
+        try:
+            self.refresh_inventory(host)
+        except suite.DeviceError as exc:
+            lines.append(f"⚠️ could not list the card afterwards: {html.escape(str(exc)[:80])}")
+        remaining = self.queue.count(dev)
         lines.append(f"\n{remaining} still queued." if remaining
                      else "\nQueue empty. Leave the File Transfer screen and "
                           "let it sleep.")
@@ -3780,7 +4394,7 @@ class Bot:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="the X3 suite, operated from a phone")
+    ap = argparse.ArgumentParser(description="the x3-suite, operated from a phone")
     ap.add_argument("--config", type=Path, metavar="PATH",
                     help="configuration to read (default: tools/tgbot/config.json). "
                          "Paths inside it resolve against its own directory, so "
@@ -3806,7 +4420,7 @@ def main(argv=None) -> int:
             {"command": "menu", "description": "the buttons"},
             {"command": "status", "description": "is anything wrong"},
             {"command": "queue", "description": "what is waiting for the reader"},
-            {"command": "push", "description": "send the queue to the X3"},
+            {"command": "push", "description": "send the queue to the reader"},
             {"command": "library", "description": "books the catalog serves"},
             {"command": "wallpapers", "description": "sleep screens built here"},
             {"command": "device", "description": "browse the reader"},

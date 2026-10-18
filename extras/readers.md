@@ -1,4 +1,4 @@
-# Device notes — Xteink X3, plus X4 Pro font compatibility
+# Device notes — Xteink X3 and X4 Pro
 
 The suite's EPUBs target an **Xteink X3** (ESP32-C3, ~400 KB RAM, 528×792
 e-ink) running **CrossPoint** (open-source firmware; 1.5.0 as of mid-2026),
@@ -86,11 +86,82 @@ from SD fonts. So compatibility is source-proven, but it would be
 wrong to label any family X4-Pro-confirmed before opening real Bulgarian,
 Arabic and CJK pages on that hardware.
 
+*Update, source-read at tag **1.6.5** (2026-10):* the stable release builds the
+X4 Pro as its own PlatformIO environment, `x4pro`, whose version string is the
+release's with `-x4pro` appended (`1.6.5-x4pro`). The suite's X4 Pro plan is
+CrossPoint on both readers; CrossInk (a CrossPoint fork) was evaluated and not
+adopted — its sleep-screen enum, overlay folder and font-option labels differ
+from CrossPoint's, which the tools here do not handle.
+
 Current sources: https://github.com/crosspoint-reader/crosspoint-reader ·
 https://github.com/crosspoint-reader/crosspoint-reader/releases ·
 https://crosspointreader.com/blog/release-1.5.0 ·
 https://updates.crosspointreader.com/cmsuphnoa0m040ro513ptjbwg ·
 https://www.xteink.com/products/xteink-x4-pro-pocket-ereader
+
+## Two readers on one network: which one answered
+
+*Source-confirmed against CrossPoint **1.6.5** (`src/network/CrossPointWebServer.cpp`
+`handleStatus` and the discovery responder, `src/activities/network/WifiSelectionActivity.cpp`,
+`CrossPointWebServerActivity.cpp`, `platformio.ini`) and the freeink-sdk commit
+it pins (`111fdcc`, `BoardConfig.h`). Not yet device-confirmed with two readers on.*
+
+An address says nothing about *which* reader answered: both run the same web
+server under the same mDNS name. What the reader says about itself does.
+
+| What | X3 | X4 Pro |
+|---|---|---|
+| mDNS name | `crosspoint.local` | `crosspoint.local` — **the same**: with both on File Transfer, whichever answers first wins |
+| `/api/status` → `device` | `"X3"` (`gpio.deviceIsX3()`) | `"xteink_x4_pro"` (the board profile's name) — `devices.py` maps both |
+| `/api/status` → `version` | `1.6.5` | `1.6.5-x4pro` |
+| `/api/status` → `serial` | eFuse `USER_DATA`, or `"Not found"` when the factory burned none | same |
+| Discovery reply (UDP 8134, `hello`) | `crosspoint (on CrossPoint-Reader-AABBCCDDEEFF);81` | same shape |
+
+**The MAC is the identity.** On joining a network the firmware sets its DHCP
+hostname to `CrossPoint-Reader-` + the station MAC in hex, and the discovery
+reply carries that hostname. The responder answers whoever asked
+(`udp.remoteIP()`, `udp.remotePort()`), so a `hello` sent straight to a typed
+address identifies that reader too — the HTTP API never states the MAC. In
+hotspot mode nothing sets the hostname and the reply says `crosspoint (on
+crosspoint)`; the serial is then the only identity, and a reader without one
+cannot be told apart from another. `crosspoint_device.identify` implements
+exactly this order.
+
+**There is no recursive listing.** `/api/files` lists one folder, and WebDAV
+`PROPFIND` treats `Depth: infinity` as depth 1 (`WebDAVHandler::getDepth`).
+So an inventory of the card is one request per folder — `crosspoint_device.walk`,
+which does not enter dot folders: `/.crosspoint` alone holds a cache folder per
+book ever opened.
+
+## The X4 Pro's sleep screen and grey levels
+
+*Source-confirmed against 1.6.5; **not device-confirmed** — the first X4 Pro
+wallpaper on the glass is the check.*
+
+- **Same code path.** Transparent custom (`sleepScreen` 7, `/sleep-overlay/`)
+  is one `SleepActivity` for both readers: placement is computed from the
+  renderer's own screen size, PNG decode and the draw rule are the same, and
+  `grey >> 6` picks the level. Only the panel differs: **480×800** portrait.
+  So the suite builds X4 Pro wallpapers at 480×800 and nothing else changes.
+- **The even ramp, on purpose.** For covers, 1.6.5 itself quantises with the
+  *original* even thresholds (43/128/213 → 0/85/170/255) on an **SSD1677**
+  panel with absolute greyscale, and keeps the legacy tuning for other
+  controllers (`SleepActivity.cpp`, `originalThresholds`). The X4 Pro's board
+  profile is SSD1677. That is upstream's own judgement for this panel, and it
+  is the same ramp the suite already uses on the X3 (device-confirmed there,
+  see "The dither ships two tunings" below) — so both readers get one
+  quantiser. If X4 Pro wallpapers come out visibly too bright or too dark
+  against the same file on the X3, this is the assumption to revisit.
+- **A wallpaper is for one panel.** A 528×792 file on the X4 Pro is wider than
+  its panel and is shrunk to fit (letterboxed); a 480×800 one on the X3 is
+  centred in a black frame. `push_wallpaper.py` reads the model from
+  `/api/status` and refuses a file built for the other panel.
+
+**Frontlight, while we are here:** CrossPoint 1.6.5 and CrossInk 1.6.1 drive
+it through the same freeink-sdk `FrontlightManager` (byte-identical between the
+SDK commits they pin): one perceptual curve, 1% = the smallest non-zero PWM
+step. The dimmest setting is the same on both firmwares (source-read, not
+measured).
 
 ## CJK in the interface (why the chapter list was blank)
 

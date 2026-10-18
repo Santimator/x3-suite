@@ -22,6 +22,15 @@ business. Add a third consumer and it deserves promoting somewhere neutral.
     for entry in list_dir(host, "/"):
         print(entry["name"], entry["size"])
     rename(host, "/Author - Title.epub", "shorter.epub")
+    identify(host, info)                    # {"id": "mac:aabbccddeeff", "model": "x3", ...}
+
+**Which reader is this.** Two readers on one LAN both answer to
+`crosspoint.local`, so an address says nothing about *which* one answered.
+`identify` asks the reader itself: its discovery reply carries the hostname the
+firmware gave itself on joining the network, `CrossPoint-Reader-<MAC>`, and
+`/api/status` carries `device` (the model, looked up in `devices.py`) and an
+eFuse `serial` when the factory burned one. The MAC is the identity; the serial
+is the fallback.
 
 **Names are opaque tokens.** Whatever `list_dir` hands back is what the SD card
 holds, byte for byte, and it is what must go back out in a `path=`. Reader
@@ -34,15 +43,37 @@ might helpfully clean it up. Show it, carry it, send it back unchanged.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
+import re
 import socket
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
+
+
+def _devices():
+    """`epub-builder/scripts/devices.py`, loaded by path. Not via sys.path:
+    `tools/tgbot/` imports this module and keeps other units' script folders
+    off its search path on purpose (see `suite._borrow`)."""
+    if "devices" in sys.modules:
+        return sys.modules["devices"]
+    path = Path(__file__).resolve().parents[3] / "epub-builder" / "scripts" / "devices.py"
+    spec = importlib.util.spec_from_file_location("devices", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules["devices"] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+from_status = _devices().from_status
+DEVICES = _devices().DEVICES
 
 # Where the last address that answered is kept, so the next run starts there.
 # Gitignored: it is a fact about your LAN, not about this repo. X3_LAST_DEVICE
@@ -74,12 +105,17 @@ class DeviceError(Exception):
 # finding it
 
 
-def discover(timeout: float = 2.0) -> list:
-    """Broadcast the firmware's discovery ping and collect who answers.
+# `crosspoint (on CrossPoint-Reader-AABBCCDDEEFF);81` — CrossPointWebServer.cpp
+# builds the reply from WiFi.getHostname(), which WifiSelectionActivity sets
+# from the station MAC on joining a network. In hotspot mode nothing sets it,
+# and the reply says `crosspoint (on crosspoint)`.
+_REPLY = re.compile(rb"^crosspoint \(on ([^)]*)\)")
+_MAC_HOSTNAME = re.compile(r"^CrossPoint-Reader-([0-9A-Fa-f]{12})$")
 
-    The reply is `crosspoint (on <hostname>);<websocket port>` — we only want
-    the address it came from.
-    """
+
+def discover_named(timeout: float = 2.0) -> list:
+    """Broadcast the firmware's discovery ping: [(address, hostname)] for
+    every reader that answers."""
     found = []
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
@@ -91,13 +127,74 @@ def discover(timeout: float = 2.0) -> list:
                 data, addr = sock.recvfrom(256)
             except socket.timeout:
                 break
-            if data.startswith(b"crosspoint") and addr[0] not in found:
-                found.append(addr[0])
+            if data.startswith(b"crosspoint") and addr[0] not in (a for a, _ in found):
+                m = _REPLY.match(data)
+                found.append((addr[0], m.group(1).decode(errors="replace") if m else ""))
     except OSError:
         pass
     finally:
         sock.close()
     return found
+
+
+def discover(timeout: float = 2.0) -> list:
+    """Broadcast the firmware's discovery ping and collect who answers.
+
+    The reply is `crosspoint (on <hostname>);<websocket port>` — this one only
+    wants the address it came from; `discover_named` keeps the hostname.
+    """
+    return [addr for addr, _ in discover_named(timeout)]
+
+
+def hello(host: str, timeout: float = 1.5) -> str | None:
+    """The same discovery ping, sent to one address: the hostname the reader
+    calls itself, or None if it does not answer on the discovery port.
+
+    This is how a reader found by name or typed address still gets identified:
+    the HTTP API never states the MAC, the discovery reply does. `host` may
+    carry a `:port` for the web server; discovery has its own port."""
+    addr = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    try:
+        sock.sendto(DISCOVERY_PAYLOAD, (addr, DISCOVERY_PORT))
+        data, _ = sock.recvfrom(256)
+    except OSError:
+        return None
+    finally:
+        sock.close()
+    m = _REPLY.match(data)
+    return m.group(1).decode(errors="replace") if m else None
+
+
+def mac_from_hostname(hostname: str | None) -> str | None:
+    """`CrossPoint-Reader-AABBCCDDEEFF` -> `aabbccddeeff`; anything else None."""
+    m = _MAC_HOSTNAME.match(hostname or "")
+    return m.group(1).lower() if m else None
+
+
+def identify(host: str, info: dict | None = None, hostname: str | None = None) -> dict:
+    """Which reader answered at `host`.
+
+    Returns {"id", "mac", "serial", "model", "reported", "firmware",
+    "hostname"}. `id` is `mac:<12 hex>` when the discovery reply names one,
+    else `serial:<eFuse serial>` when the reader has one, else None — a reader
+    that cannot be told apart from another, which a caller must not remember.
+    `model` is the `devices.py` key (`x3`, `x4pro`) or None for a board that
+    table does not describe; `reported` is what the reader itself said.
+    """
+    info = info if info is not None else status(host)
+    if hostname is None:
+        hostname = hello(host)
+    mac = mac_from_hostname(hostname)
+    serial = info.get("serial")
+    if not isinstance(serial, str) or not serial.strip() or serial == "Not found":
+        serial = None
+    ident = f"mac:{mac}" if mac else (f"serial:{serial.strip()}" if serial else None)
+    return {"id": ident, "mac": mac, "serial": serial,
+            "model": from_status(info.get("device")),
+            "reported": info.get("device"), "firmware": info.get("version"),
+            "hostname": hostname}
 
 
 def remember(host: str) -> None:
@@ -155,6 +252,53 @@ def find_device(explicit: str | None = None):
         "no reader found" + (f" (tried {', '.join(tried)})" if tried else "") + ".\n"
         "  On the device: Home -> File Transfer -> Join a Network.\n"
         "  Then pass the address it prints: --ip 192.168.x.x")
+
+
+def find_devices(candidates=()) -> list:
+    """Every reader that answers right now: [(host, status, hostname)].
+
+    `find_device` stops at the first answer, which is right for one reader and
+    wrong for two — `crosspoint.local` names whichever answered mDNS first. So
+    this asks everything at once: each candidate address (say, the last one
+    every known reader had), `crosspoint.local`, and the broadcast ping, in
+    parallel, so a dead address costs its timeout once rather than once each.
+    Answers are de-duplicated by the address the reader reports for itself.
+    """
+    hosts = list(dict.fromkeys(h for h in (*candidates, recall(), DEFAULT_HOST) if h))
+
+    def probe(h):
+        try:
+            return h, status(h, timeout=PROBE_TIMEOUT)
+        except DeviceError:
+            return h, None
+
+    with ThreadPoolExecutor(max_workers=len(hosts) + 1) as pool:
+        # A reader on the LAN answers the broadcast in milliseconds; this only
+        # bounds how long silence takes to be believed.
+        named = pool.submit(discover_named, 1.2)
+        probed = list(pool.map(probe, hosts))
+        broadcast = named.result()
+
+    names = dict(broadcast)
+    found, seen = [], set()
+    for h, info in probed:
+        if info is None:
+            continue
+        ip = info.get("ip") or h
+        if ip in seen:
+            continue
+        seen.add(ip)
+        found.append((h, info, names.get(ip)))
+    for ip, hostname in broadcast:
+        if ip in seen:
+            continue
+        try:
+            info = status(ip, timeout=PROBE_TIMEOUT)
+        except DeviceError:
+            continue
+        seen.add(info.get("ip") or ip)
+        found.append((ip, info, hostname))
+    return found
 
 
 # --------------------------------------------------------------------------
@@ -215,6 +359,38 @@ def list_dir(host: str, path: str) -> list:
         return json.loads(body)
     except json.JSONDecodeError:
         return []
+
+
+def walk(host: str, root: str = "/", *, max_dirs: int = 200) -> list:
+    """Every file and folder under `root`, as one flat list of
+    {"path", "size", "dir"} — names only, nothing downloaded.
+
+    The firmware has no recursive listing: `/api/files` is one folder, and
+    WebDAV quietly answers `Depth: infinity` as depth 1. So this is one request
+    per folder, breadth first. Dot-prefixed folders are not entered — they are
+    the firmware's own (`/.crosspoint` holds a cache folder per book ever
+    opened) and the listing hides them unless `showHiddenFiles` is on anyway.
+    `max_dirs` bounds a pathological card; the result says if it was hit by
+    ending with {"path": None, "truncated": True}.
+    """
+    out, queue, visited = [], [root], 0
+    while queue:
+        if visited >= max_dirs:
+            out.append({"path": None, "size": 0, "dir": False, "truncated": True})
+            break
+        folder = queue.pop(0)
+        visited += 1
+        for entry in list_dir(host, folder):
+            name = entry.get("name", "")
+            if not name:
+                continue
+            path = f"{folder.rstrip('/')}/{name}"
+            is_dir = bool(entry.get("isDirectory"))
+            out.append({"path": path, "size": 0 if is_dir else int(entry.get("size") or 0),
+                        "dir": is_dir})
+            if is_dir and not name.startswith("."):
+                queue.append(path)
+    return out
 
 
 def mkdir(host: str, parent: str, name: str) -> bool:

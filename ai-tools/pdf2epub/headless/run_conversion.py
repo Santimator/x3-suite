@@ -26,7 +26,12 @@ Not for the TRANSCRIPT route (a user transcript beside the PDF): matching its
 text to chunks is a judgement call for an interactive driver.
 
 Usage:
-  run_conversion.py WORKDIR [--config PATH] [--plan-only] [--no-epub]
+  run_conversion.py WORKDIR [--config PATH] [--device x3|x4pro] [--plan-only] [--no-epub]
+
+`--device` picks the reader a *new* job is planned for, over the config's
+`device` — so a caller that knows (tools/tgbot/, asking which reader) need not
+edit the config. A job already planned keeps the device it was planned with:
+its figures were rendered for that panel, and resuming must not mix two.
 Exit: 0 EPUB built and verified · 1 stopped (progress saved) · 2 not configured
 """
 from __future__ import annotations
@@ -256,12 +261,16 @@ def main():
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("workdir", type=Path)
     ap.add_argument("--config", type=Path)
+    ap.add_argument("--device", choices=("x3", "x4pro"),
+                    help="the reader a new job is planned for (overrides the config)")
     ap.add_argument("--plan-only", action="store_true")
     ap.add_argument("--no-epub", action="store_true")
     args = ap.parse_args()
     try:
         cfg = llm_mod.load_config(args.config)
         cfg.setdefault("max_attempts", 3)
+        if args.device:
+            cfg["device"] = args.device
         if not args.plan_only:
             llm_mod.resolve_key(cfg)
     except llm_mod.LLMError as e:

@@ -2,7 +2,8 @@
 name: tgbot
 description: >-
   Operate the whole suite from a phone over Telegram — build a wallpaper from a
-  photo, queue it, push it to the X3, browse and rename files on the device,
+  photo, queue it for one of your readers (X3 or X4 Pro), push it, browse and
+  rename files on the device, read what is on a reader while it is off,
   drop books into the catalog, stage a PDF for conversion. Use when the reader
   should be managed without a terminal, when changing what the bot offers or
   how it talks to the device, or when a queued item never arrived. Triggers
@@ -53,7 +54,7 @@ wallpaper, file a book where the catalog will find it, stage a PDF, rename or
 delete inside `workspace/`. Work that is *bound for the device* is **queued**,
 not sent — a wallpaper, a book you asked to copy onto the card, a font family.
 
-**Push** happens only when you ask, and only while the X3 sits on **Home →
+**Push** happens only when you ask, and only while the reader sits on **Home →
 File Transfer → Join a Network** — the firmware runs its web server only on
 that screen and stops the moment you leave it. If the reader cannot be found,
 **the queue is left exactly as it was**.
@@ -238,6 +239,53 @@ This is what makes a wiped SD card a non-event: every picture you ever sent is
 still here, and putting it all back is a few taps — redoing two choices each,
 which is cheaper than keeping a copy of every answer forever.
 
+### Readers, told apart
+
+The bot can serve more than one reader — an X3 and an X4 Pro, or two X3s — and
+it tells them apart by what each says about itself, never by address: every
+CrossPoint reader answers to `crosspoint.local`. `crosspoint_device.identify`
+reads the MAC out of the discovery reply (`CrossPoint-Reader-<MAC>`), the
+serial from `/api/status` when there is no MAC, and the model from `device`
+(`devices.py` maps it). The facts are in `extras/readers.md` → "Two readers on
+one network".
+
+**Saved or not.** A reader the bot has never seen is announced once per session
+— *🆕 New reader: X4 Pro (…44aa). Save it?* — and the usual things work for it
+either way: browse, rename, delete, send a font now. **💾 Save it** asks for a
+name (short, unique) and from then on that reader has:
+
+- **its own queue.** Every queue item names the reader it is for. Queueing
+  asks *which reader* when two are saved, and does not ask when one is; with
+  none saved it says how to save one. A push sends **only the queue of the
+  reader that answered**, so an X4 Pro on the File Transfer screen can never
+  be handed an X3's wallpapers.
+- **work made for its panel.** The reader is chosen *before* a wallpaper is
+  built — the crop question, the mat and the file all depend on the panel —
+  and the build waits in `build/<reader>/`, so the same picture queued for an
+  X3 and an X4 Pro is two files under one name, neither replacing the other.
+  A book is slimmed for the panel of the reader it is queued for (the cache key
+  includes it). A PDF, when the readers saved are of two models, is converted
+  for the one you pick (`run_conversion.py --device`).
+- **an inventory**: names and sizes of everything on its card, walked when it
+  is saved, on 🔎 Find it, after every push, and patched for free each time a
+  folder is listed — which is also how a rename, delete or move from the chat
+  shows up. 📲 Device lists the saved readers even when all are off; each one's
+  card says when it was last seen, what is queued, and **📋 What's on it**,
+  which sends the whole list as a text file when it is long.
+
+A reader that is not saved has no queue and no inventory, and a push to it
+says so and changes nothing. One that says neither its MAC nor a serial
+(hotspot mode, no factory serial) cannot be told from another and is never
+offered for saving.
+
+**Two on at once.** The reader the session is talking to is asked first, alone,
+so browsing stays one quick request per tap. When nobody has been chosen and
+two answer, the bot asks which one rather than guessing; **🔎 Find it** always
+starts the search afresh.
+
+State: `state/devices.json` (the readers) and `state/inventory/<reader>.json`
+(their cards), both gitignored, both readable with `cat`.
+
 ### A push session
 
 **When it cannot be found** — the commonest thing to go wrong, since the
@@ -251,8 +299,8 @@ The underlying error comes from `push_wallpaper.py` and ends by suggesting
 `--ip 192.168.x.x`; that line is deliberately not repeated into a chat, where
 it is advice you cannot take.
 
-**📲 Device → Push queue** tells you to open File Transfer on the X3, then
-waits for **✅ Ready**. That tap is acknowledged *immediately*, before anything
+**📲 Device → Push queue** lists what is waiting per reader, tells you to open
+File Transfer on the reader, then waits for **✅ Ready**. That tap is acknowledged *immediately*, before anything
 slow runs — finding the reader takes seconds and the worker may be busy with
 something else, and a tap that produces silence reads as a tap that missed.
 A second line lands once the reader answers, naming it and saying what is
@@ -545,21 +593,21 @@ occur, and every list pages seven rows at a time. Button navigation edits one
 Telegram message in place; only answers that genuinely need text create a new
 user message.
 
-A server-side series card offers exactly **Add all to X3**, **Change series
-name**, and **Change short name**. Add all reuses the exact same slimmer and
+A server-side series card offers exactly **Add all to the reader** (it asks
+which, when two are saved), **Change series name**, and **Change short name**. Add all reuses the exact same slimmer and
 queue path as one book and skips volumes already queued. Changing the short
 name renames the catalog files together without rewriting bytes and updates
 queued paths so a later push does not go stale. Changing the full name uses the
 OPDS metadata engine to rewrite every volume transactionally; merging with an
 existing series requires a second, explicit confirmation. There is deliberately
-no remove-from-X3 action while browsing the server catalog: that view does not
+no remove-from-the-reader action while browsing the server catalog: that view does not
 claim to know the disconnected reader's contents.
 
-**📲 Device** groups exact catalog matches on the connected X3 into the same
+**📲 Device** groups exact catalog matches on the connected reader into the same
 virtual series rows without creating folders on its SD card. Files whose names
 cannot be matched deterministically remain standalone rather than being
 guessed into a series. The device-side series card offers **Remove all from
-X3**, deleting only the files present in that live group. It does not change the
+the reader**, deleting only the files present in that live group. It does not change the
 catalog or the queue. Thus the two views mirror intent cleanly: Library adds;
 Device removes.
 
@@ -782,6 +830,18 @@ temporary workspace. It grades the four things that would actually hurt:
    the re-scan probe is a valid family name that can match nothing; a rename
    moves the folder and only the folder, then re-scans and re-selects; and
    `/.fonts` is named as the reason only when the card has no `/fonts`.
+8. **Readers, told apart**, against fakes that answer as an X3, an X4 Pro, a
+   second X4 Pro and one that cannot say who it is: a new reader is announced
+   once and still browsable; pushing to it sends nothing; saving refuses a taken
+   or overlong name and walks its card; with two saved, a wallpaper and a book
+   ask which reader and are built and slimmed for that panel, the same picture
+   queued for both is two files; a PDF asks which screen and the converter is
+   told; a push sends only the queue of the reader that answered; two answering
+   at once is a question, and the pick sticks; the device card and the
+   inventory read while every reader is off; a listing patches the inventory,
+   and a vanished folder takes its contents with it; the unidentifiable reader
+   is never offered for saving; forgetting one takes its queue and inventory
+   and nothing else.
 
 Plus: a 200-character device name with decomposed accents round-trips through a
 button token byte-identically, a stale token is answered rather than guessed
@@ -809,12 +869,12 @@ config.example.json          copy to config.json (gitignored)
 tgbot.service                systemd unit (Debian; edit five lines)
 helper-info.txt              what each systemctl command does, and what breaks
 secrets/                     gitignored; the bot token
-state/                       gitignored; the delivery queue
+state/                       gitignored; the queue, the saved readers, their inventories
 scripts/
   bot.py                     the loop, the whitelist, the menus, the flows
   telegram.py                the Bot API, in as much of it as this needs
   suite.py                   every call into the rest of the repo
-  state.py                   durable queue, notes, button tokens
+  state.py                   durable queue, saved readers + inventories, notes, tokens
   config.py                  config, the token seam, the path jail
   selftest.py                the gate
 ```

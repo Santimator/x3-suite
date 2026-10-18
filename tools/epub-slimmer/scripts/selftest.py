@@ -14,6 +14,8 @@ and grades the four things that would actually hurt:
      cached instead of rebuilt on every push.
   4. **Nothing is broken quietly.** A manifest entry never outlives its file,
      and a book that fails verification is not written at all.
+  5. **Sized for the device it is going to.** The X3 by default, the X4 Pro's
+     narrower panel on request, both from `devices.py`.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ sys.path.insert(0, str(REPO / "epub-builder" / "scripts"))
 from PIL import Image  # noqa: E402
 
 import slim_epub  # noqa: E402
+from devices import panel  # noqa: E402
 from verify_epub import verify_integrity  # noqa: E402
 
 failures = []
@@ -167,9 +170,11 @@ def main() -> int:
               "A Fat Book" in opf and "Someone" in opf)
 
         print("\nthe pictures:")
-        check("the cover fits the panel", cover.size <= (528, 792), str(cover.size))
+        x3w, x3h = panel("x3")
+        check("the cover fits the panel",
+              cover.width <= x3w and cover.height <= x3h, str(cover.size))
         check("... in grayscale", cover.mode == "L", cover.mode)
-        check("a content image is capped at the panel's 528 wide", plate.width == 528,
+        check(f"a content image is capped at the panel's {x3w} wide", plate.width == x3w,
               str(plate.size))
         check("... and is grayscale", plate.mode == "L", plate.mode)
         check("a progressive JPEG comes back baseline",
@@ -178,6 +183,29 @@ def main() -> int:
         check("every image got smaller",
               all(i["after"] <= i["before"] for i in report["images"]),
               str(report["images"]))
+
+        print("\nfor the X4 Pro:")
+        pro = tmp / "pro.epub"
+        pro_report = slim_epub.slim(fat, pro, "x4pro")
+        pw, ph = panel("x4pro")
+        with zipfile.ZipFile(pro) as z:
+            pro_cover = Image.open(io.BytesIO(z.read("OEBPS/images/cover.jpg")))
+            pro_plate = Image.open(io.BytesIO(z.read("OEBPS/images/plate.png")))
+            pro_ch1 = z.read("OEBPS/ch1.xhtml").decode()
+        check("it verifies", pro_report.get("verified") is True,
+              str(pro_report.get("errors")))
+        check("the report names the device", pro_report["device"] == "x4pro")
+        check(f"the cover fits its {pw}x{ph} panel",
+              pro_cover.width <= pw and pro_cover.height <= ph, str(pro_cover.size))
+        check(f"a content image is capped at {pw} wide", pro_plate.width == pw,
+              str(pro_plate.size))
+        check("the text is the same text", pro_ch1 == CH1)
+        check("it is not the X3's copy", pro.read_bytes() != slim.read_bytes())
+        try:
+            slim_epub.slim(fat, tmp / "never-x5.epub", "x5")
+            check("an unknown device is refused", False, "it was accepted")
+        except KeyError as exc:
+            check("an unknown device is refused", "x4pro" in str(exc), str(exc))
 
         print("\nrun it twice:")
         again = tmp / "again.epub"

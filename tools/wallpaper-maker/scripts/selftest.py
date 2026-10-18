@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The gate: would the X3 draw exactly the pixels we computed?
+"""The gate: would the reader draw exactly the pixels we computed?
 
 Run after changing anything in this directory:
 
@@ -26,6 +26,10 @@ Checks, in order:
   9. the same source converts to a byte-identical file, twice
  10. the failure modes we designed around really are failure modes
  11. the push protocol drives the firmware's file-transfer API correctly
+ 12. all of it again for the X4 Pro's 480x800 panel, and a push refuses a
+     wallpaper built for the other device
+ 13. which reader answered: the MAC from the discovery reply, the serial when
+     there is none, the model from /api/status — and a walk of the card
 """
 
 from __future__ import annotations
@@ -45,8 +49,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import crosspoint_bmp as cp
+import crosspoint_device as cd
 import crosspoint_overlay as co
 import make_wallpaper as mw
+from devices import panel
 from PIL import Image, ImageDraw
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -162,6 +168,7 @@ class FakeDevice(BaseHTTPRequestHandler):
     root: Path = None
     show_hidden = False
     settings: dict = {}
+    device = "X3"               # what /api/status calls it; the X4 Pro says xteink_x4_pro
 
     def log_message(self, *a):
         pass
@@ -184,7 +191,7 @@ class FakeDevice(BaseHTTPRequestHandler):
         route = urllib.parse.urlparse(self.path).path
         if route == "/api/status":
             return self._send(200, json.dumps(
-                {"version": "1.6.5", "model": "Xteink X3", "ip": "127.0.0.1"}
+                {"version": "1.6.5", "device": self.device, "ip": "127.0.0.1"}
             ).encode(), "application/json")
         if route == "/api/files":
             target = self._sd(self._args().get("path", "/"))
@@ -253,9 +260,10 @@ class FakeDevice(BaseHTTPRequestHandler):
         return name, payload.rsplit(b"\r\n", 1)[0]
 
 
-def serve(root: Path):
+def serve(root: Path, device: str = "X3"):
     FakeDevice.root = root
     FakeDevice.settings = {}
+    FakeDevice.device = device
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeDevice)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return server, f"127.0.0.1:{server.server_address[1]}"
@@ -263,7 +271,8 @@ def serve(root: Path):
 
 # ------------------------------------------------------------------ checks ---
 
-def grade_output(src: Path, png: Path, algorithm: str = "device") -> None:
+def grade_output(src: Path, png: Path, algorithm: str = "device",
+                 device: str = "x3") -> None:
     """Grade an opaque wallpaper through the firmware's own overlay path.
 
     The strong contract: through the device's decoder and draw rule the file
@@ -282,10 +291,10 @@ def grade_output(src: Path, png: Path, algorithm: str = "device") -> None:
         return
     check(f"{label}: the device's PNG decoder accepts it", True)
 
-    check(f"{label}: exactly the panel, so nothing is resampled",
-          (img["width"], img["height"]) == (co.PANEL_W, co.PANEL_H),
+    check(f"{label}: exactly the {device} panel, so nothing is resampled",
+          (img["width"], img["height"]) == panel(device),
           f"{img['width']}x{img['height']}")
-    x, y, scaled = co.placement(img["width"], img["height"])
+    x, y, scaled = co.placement(img["width"], img["height"], panel(device))
     check(f"{label}: lands at 0,0 unscaled", (x, y, scaled) == (0, 0, False),
           f"x={x} y={y} scaled={scaled}")
     check(f"{label}: indexed, 2 bits — the smallest shape that holds four levels",
@@ -294,7 +303,7 @@ def grade_output(src: Path, png: Path, algorithm: str = "device") -> None:
     check(f"{label}: every grey is an exact level, so >> 6 is the level we chose",
           set(img["grey"]) <= {0, 85, 170, 255}, str(sorted(set(img["grey"]))[:8]))
 
-    intended = mw.render(src, algorithm=algorithm)
+    intended = mw.render(src, algorithm=algorithm, device=device)
     got = co.panel_levels(img)
     check(f"{label}: paints every pixel, white included — the page stays hidden",
           None not in got)
@@ -302,14 +311,15 @@ def grade_output(src: Path, png: Path, algorithm: str = "device") -> None:
           len(got) == len(intended) and all(a == b for a, b in zip(got, intended)))
 
 
-def grade_transparent(src: Path, out_dir: Path, *, expect: str) -> None:
+def grade_transparent(src: Path, out_dir: Path, *, expect: str,
+                      device: str = "x3") -> None:
     """Grade a --transparent wallpaper: clear exactly where we meant, painted
     everywhere else at exactly our levels."""
-    png = mw.convert(src, out_dir, transparent=True)
-    label = f"{png.name} --transparent"
+    png = mw.convert(src, out_dir, transparent=True, device=device)
+    label = f"{png.name} --transparent ({device})"
     img = co.decode(png.read_bytes())
-    levels = mw.render(src)
-    clear = mw.transparency(src, levels)
+    levels = mw.render(src, device=device)
+    clear = mw.transparency(src, levels, size=panel(device))
     check(f"{label}: alpha is all or nothing, so no edge turns to stipple",
           set(img["alpha"]) <= {0, 255}, str(sorted(set(img["alpha"]))))
     got = co.panel_levels(img)
@@ -318,7 +328,7 @@ def grade_transparent(src: Path, out_dir: Path, *, expect: str) -> None:
           got == want)
     cleared = sum(clear)
     if expect == "white":
-        check_halo(levels, clear, label)
+        check_halo(levels, clear, label, panel(device))
     else:
         kept = sum(1 for i, v in enumerate(levels) if v == 3 and not clear[i])
         check(f"{label}: the source's alpha decides — its white stays painted",
@@ -326,11 +336,11 @@ def grade_transparent(src: Path, out_dir: Path, *, expect: str) -> None:
               f"{kept} white kept, {cleared} clear")
 
 
-def check_halo(levels, clear, label: str) -> None:
+def check_halo(levels, clear, label: str, size: tuple = (cp.PANEL_W, cp.PANEL_H)) -> None:
     """No source alpha: only white clears, and none of it within HALO of
     anything drawn. Checked on the clear region's rim, which is where the
     nearest clear pixel to any drawn one has to be."""
-    W, H, r = cp.PANEL_W, cp.PANEL_H, mw.HALO
+    (W, H), r = size, mw.HALO
     cleared = sum(clear)
     check(f"{label}: no source alpha, so only white clears",
           cleared > 0 and all(levels[i] == 3 for i in range(len(levels)) if clear[i]),
@@ -692,6 +702,166 @@ def check_push(build_dir: Path) -> None:
             server.shutdown()
 
 
+def check_x4pro(sources: list, work: Path) -> None:
+    """The same contract on the X4 Pro's panel: the size from devices.py, the
+    same overlay path, the same four levels."""
+    W, H = panel("x4pro")
+    out = work / "x4pro"
+    by_name = {s.name: s for s in sources}
+    for src in sources:
+        png = mw.convert(src, out, device="x4pro")
+        grade_output(src, png, device="x4pro")
+    grade_transparent(by_name["split.png"], out / "clear", expect="white",
+                      device="x4pro")
+    grade_transparent(make_cutout(work), out / "clear", expect="alpha",
+                      device="x4pro")
+
+    tiny = mw.render(by_name["tiny.png"], mat_style="edges", device="x4pro")
+    check(f"a small source is matted out to {W}x{H}", len(tiny) == W * H, str(len(tiny)))
+    corners = [{tiny[(y + dy) * W + (x + dx)] for dy in range(16) for dx in range(16)}
+               for x, y in ((8, 8), (W - 24, 8), (8, H - 24), (W - 24, H - 24))]
+    check("... and its frame draws flat in every corner",
+          all(len(c) == 1 for c in corners), str(corners))
+    waves = mw.render(by_name["split.png"], mat_style="waves", device="x4pro")
+    check("--mat waves fills the narrower panel too", len(waves) == W * H)
+
+    pro = mw.probe(by_name["gradient.png"], device="x4pro")
+    check("the probe answers for the X4 Pro's panel",
+          pro["panel"] == [W, H] and pro["device"] == "x4pro", str(pro))
+    x3 = mw.probe(by_name["gradient.png"])
+    check("... and a 3:4 portrait crops differently on 3:5 than on 2:3",
+          pro["crop"] != x3["crop"], f"{pro['crop']} vs {x3['crop']}")
+
+    again = mw.convert(by_name["gradient.png"], out / "again", device="x4pro")
+    check("byte-identical on a second run",
+          again.read_bytes() == (out / again.name).read_bytes())
+    check("not the X3's file",
+          again.read_bytes() != mw.convert(by_name["gradient.png"], out / "x3").read_bytes())
+    rep = co.report(again, "x4pro")
+    check("the oracle says it fits the X4 Pro exactly",
+          rep["fits_exactly"] and not co.report(again, "x3")["fits_exactly"], str(rep))
+
+
+def check_push_panel(x3_build: Path, pro_build: Path) -> None:
+    """A wallpaper built for one panel is not pushed to the other."""
+    with tempfile.TemporaryDirectory() as sd_dir:
+        sd = Path(sd_dir)
+        server, host = serve(sd, device="xteink_x4_pro")
+        env = {**os.environ, "X3_LAST_DEVICE": str(sd / "last-device.json")}
+        try:
+            run = lambda folder, *extra: subprocess.run(  # noqa: E731
+                [sys.executable, str(SCRIPTS / "push_wallpaper.py"), str(folder),
+                 "--ip", host, "--json", *extra],
+                capture_output=True, text=True, timeout=60, env=env)
+            refused = run(x3_build)
+            report = json.loads(refused.stdout or "{}")
+            landed = list((sd / "sleep-overlay").glob("*.png")) \
+                if (sd / "sleep-overlay").is_dir() else []
+            check("push: X3 wallpapers are refused by an X4 Pro, and nothing lands",
+                  refused.returncode == 1 and not landed
+                  and all("X4 Pro" in i.get("error", "") for i in report.get("items", [])),
+                  refused.stdout[-300:])
+            check("push: the report names the device it found",
+                  report.get("device") == "x4pro", str(report.get("device")))
+            fits = run(pro_build)
+            landed = sorted(p.name for p in (sd / "sleep-overlay").glob("*.png"))
+            check("push: X4 Pro wallpapers land on the X4 Pro",
+                  fits.returncode == 0
+                  and landed == sorted(p.name for p in pro_build.glob("*.png")),
+                  fits.stdout[-300:])
+            forced = run(x3_build, "--any-size")
+            check("push: --any-size pushes one anyway", forced.returncode == 0,
+                  forced.stdout[-300:])
+        finally:
+            server.shutdown()
+
+
+def serve_hello(hostname: str):
+    """The discovery responder from CrossPointWebServer::handleClient: answer
+    "hello" with `crosspoint (on <hostname>);81`, to whoever asked."""
+    import socket
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.bind(("127.0.0.1", 0))
+    sock.settimeout(0.2)
+    stop = threading.Event()
+
+    def loop():
+        while not stop.is_set():
+            try:
+                data, addr = sock.recvfrom(64)
+            except OSError:
+                continue
+            if data == b"hello":
+                sock.sendto(f"crosspoint (on {hostname});81".encode(), addr)
+
+    threading.Thread(target=loop, daemon=True).start()
+    return sock.getsockname()[1], lambda: (stop.set(), sock.close())
+
+
+def check_identity() -> None:
+    port, stop = serve_hello("CrossPoint-Reader-A1B2C3D4E5F6")
+    old_port, old_default = cd.DISCOVERY_PORT, cd.DEFAULT_HOST
+    cd.DISCOVERY_PORT = port
+    try:
+        check("the discovery reply names the reader",
+              cd.hello("127.0.0.1") == "CrossPoint-Reader-A1B2C3D4E5F6")
+        pro = cd.identify("127.0.0.1:80", {"device": "xteink_x4_pro",
+                                           "serial": "Not found", "version": "1.6.5-x4pro"})
+        check("its MAC is the identity, and the model is looked up",
+              pro["id"] == "mac:a1b2c3d4e5f6" and pro["model"] == "x4pro", str(pro))
+    finally:
+        stop()
+        cd.DISCOVERY_PORT = old_port
+    hotspot = cd.identify("127.0.0.1", {"device": "X3", "serial": "XT3-0042"},
+                          hostname="crosspoint")
+    check("no MAC in the name (hotspot mode): the eFuse serial instead",
+          hotspot["id"] == "serial:XT3-0042" and hotspot["model"] == "x3", str(hotspot))
+    blank = cd.identify("127.0.0.1", {"device": "X4", "serial": "Not found"},
+                        hostname="crosspoint")
+    check("neither: no identity, and a board devices.py does not describe has no model",
+          blank["id"] is None and blank["model"] is None, str(blank))
+
+    with tempfile.TemporaryDirectory() as sd_dir:
+        sd = Path(sd_dir)
+        for rel in ("Books/a.epub", "Books/deep/b.epub", "sleep-overlay/w.png",
+                    "fonts/WenZilla/WenZilla_12.cpfont", "root.epub",
+                    ".crosspoint/epub_123/progress.bin"):
+            (sd / rel).parent.mkdir(parents=True, exist_ok=True)
+            (sd / rel).write_bytes(b"x" * 10)
+        server, host = serve(sd, device="xteink_x4_pro")
+        FakeDevice.show_hidden = True        # the worst case: hidden folders listed
+        cd.DEFAULT_HOST = host
+        try:
+            tree = cd.walk(host)
+            paths = {e["path"] for e in tree}
+            check("the walk reaches every visible file, however deep",
+                  {"/Books/a.epub", "/Books/deep/b.epub", "/sleep-overlay/w.png",
+                   "/fonts/WenZilla/WenZilla_12.cpfont", "/root.epub"} <= paths, str(paths))
+            check("... and never enters a dot folder, even when it is listed",
+                  "/.crosspoint" in paths
+                  and not any(p.startswith("/.crosspoint/") for p in paths), str(paths))
+            check("sizes for files, folders marked as folders",
+                  all(e["size"] == 10 for e in tree if not e["dir"])
+                  and {e["path"] for e in tree if e["dir"]} >= {"/Books", "/Books/deep"})
+            capped = cd.walk(host, max_dirs=1)
+            check("a cap on folders says it was hit", capped[-1].get("truncated") is True)
+            # Hermetic: no remembered address, and the broadcast goes to a port
+            # nothing listens on, so a real reader on this LAN cannot answer.
+            old_last = cd.LAST_DEVICE
+            cd.LAST_DEVICE, cd.DISCOVERY_PORT = sd / "none.json", 9
+            try:
+                found = cd.find_devices([host, "127.0.0.1:9"])
+            finally:
+                cd.LAST_DEVICE, cd.DISCOVERY_PORT = old_last, old_port
+            check("find_devices: one reader answering twice is one reader",
+                  len(found) == 1 and found[0][1].get("device") == "xteink_x4_pro",
+                  str(found))
+        finally:
+            FakeDevice.show_hidden = False
+            cd.DEFAULT_HOST = old_default
+            server.shutdown()
+
+
 def main() -> int:
     print(__doc__.split("Checks, in order:")[0].strip().splitlines()[0])
     print()
@@ -758,6 +928,13 @@ def main() -> int:
 
         print("\nthe push protocol, against a port of the device's API:")
         check_push(build)
+
+        print("\nwhich reader is this, and what is on it:")
+        check_identity()
+
+        print("\nthe X4 Pro (480x800, same overlay path, same four levels):")
+        check_x4pro(sources, work)
+        check_push_panel(build, work / "x4pro")
 
     print()
     if failures:
