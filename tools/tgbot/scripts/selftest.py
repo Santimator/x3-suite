@@ -2574,22 +2574,34 @@ def check_readers(tmp: Path) -> None:
         suite.upload_book = lambda host, path, name: uploaded.append((host, name))
         suite.device_book_name = lambda a, t, host=None: f"{t}.epub"
 
-        # A new reader answers: announced once, with a way to save it.
+        # 📲 Device searches: the saved X3 is off, a new X4 Pro answers.
         answering[:] = ["10.0.0.7"]
         tg.sent.clear()
-        bot.handle(cb("dev:st:"))
-        offers = [m for m in tg.sent if "New reader" in m["text"]]
-        check("🔎 Find it on a new reader is one card: what it is, and an offer to save it",
-              len(tg.sent) == 1 and len(offers) == 1 and "X4 Pro" in offers[0]["text"]
-              and "firmware" in offers[0]["text"]
-              and any(d.startswith("dev:save:") for _, d in buttons(offers[0]))
-              and any(d == "dev:ls0:" for _, d in buttons(offers[0])),
-              str(tg.sent)[:300])
+        bot.handle(cb("m:dev"))
+        listing = tg.sent[-1]
+        check("📲 Device searches, then lists every saved reader and every one answering",
+              tg.sent[0]["text"].startswith("🔎")
+              and "⚪ <b>Test X3</b>" in listing["text"]
+              and "🆕 New X4 Pro" in listing["text"]
+              and not any(d in ("dev:ls0:", "push:ask") for _, d in buttons(listing)),
+              listing["text"])
+        bot.handle(cb(next(d for t, d in buttons(listing) if t.startswith("🆕"))))
+        offers = [tg.sent[-1]]
+        check("a new reader asks what to do with it: save it, or just use it",
+              {t for t, _ in buttons(offers[0])} >= {"💾 Save it", "👉 Just use it"}
+              and "1.6.5-x4pro" in offers[0]["text"], str(offers[0]))
+        bot.handle(cb(next(d for t, d in buttons(offers[0]) if t == "👉 Just use it")))
+        live = tg.sent[-1]
+        check("... just using it opens it — browse, wallpapers, fonts; no queue, no announcement",
+              {d for _, d in buttons(live)} >= {"dev:ls0:", "dev:wp:", "dev:fo:"}
+              and not any(d.startswith("dev:q:") for _, d in buttons(live))
+              and not any("New reader:" in m["text"] for m in tg.sent)
+              and bot.current["host"] == "10.0.0.7", str(live))
         bot.current = None
         bot.announced.clear()
         tg.sent.clear()
         bot.handle(cb("dev:ls0:"))
-        check("... any other action on a new reader announces it on its own, once",
+        check("browsing with no reader picked finds the one answering, and announces it once",
               sum("New reader" in m["text"] for m in tg.sent) == 1
               and any(d.startswith("dev:save:") for m in tg.sent for _, d in buttons(m)),
               str(tg.sent)[:300])
@@ -2628,9 +2640,10 @@ def check_readers(tmp: Path) -> None:
         check("saved under its name and MAC, with its model",
               entry and entry["name"] == "Night Pro" and entry["model"] == "x4pro"
               and entry["mac"] == "0011223344aa", str(entry))
-        check("... and its card is looked at straight away",
+        check("... its card is looked at straight away, and its live menu shown",
               (bot.devices.inventory(PRO_DEV) or {}).get("entries") == walked["10.0.0.7"]
-              and "2 files" in tg.sent[-1]["text"], tg.sent[-1]["text"])
+              and "2 files" in tg.sent[-1]["text"] and "🟢 online" in tg.sent[-1]["text"]
+              and any(d == "dev:ls0:" for _, d in buttons(tg.sent[-1])), tg.sent[-1]["text"])
 
         # Two saved readers: queueing asks which one, and the panel follows.
         walls = bot.workspace / "wallpapers"
@@ -2741,13 +2754,15 @@ def check_readers(tmp: Path) -> None:
         tg.sent.clear()
         bot.handle(cb("dev:ls0:"))
         picks = buttons(tg.sent[-1])
-        check("two readers answering at once is a question, not a guess",
-              "2 readers" in tg.sent[-1]["text"]
-              and any("Night Pro" in t for t, _ in picks)
-              and any("Test X3" in t for t, _ in picks), str(tg.sent[-1]))
-        bot.handle(cb(next(d for t, d in picks if "Test X3" in t)))
-        check("... and picking one makes it the reader we talk to",
-              bot.current_id() == TEST_DEV and "Test X3" in tg.sent[-1]["text"],
+        check("two readers answering at once is a question: the list, both online",
+              "More than one reader" in tg.sent[-1]["text"]
+              and any(t == "🟢 Night Pro" for t, _ in picks)
+              and any(t == "🟢 Test X3" for t, _ in picks), str(tg.sent[-1]))
+        bot.handle(cb(next(d for t, d in picks if t == "🟢 Test X3")))
+        bot.handle(cb(next(d for t, d in buttons(tg.sent[-1]) if t == "👉 Use it")))
+        check("... and picking one makes it the reader we talk to, with its menu",
+              bot.current_id() == TEST_DEV and "Test X3" in tg.sent[-1]["text"]
+              and any(d == "dev:ls0:" for _, d in buttons(tg.sent[-1])),
               tg.sent[-1]["text"])
         tg.sent.clear()
         bot.handle(cb("dev:ls0:"))
@@ -2791,15 +2806,23 @@ def check_readers(tmp: Path) -> None:
         check("... and a folder gone from a listing takes what was under it",
               paths == {"/Emma.epub"}, str(paths))
 
-        # A long inventory comes as a file you can keep.
+        # A long inventory is paged in the chat — no file.
         walked["10.0.0.7"] = [{"path": f"/Books/b{n:03}.epub", "size": 1000, "dir": False}
                               for n in range(80)]
         bot.refresh_inventory()
         tg.sent.clear()
         bot.show_inventory(bot.user_id, PRO_DEV)
-        docs = [m for m in tg.sent if m.get("doc")]
-        check("a long inventory is summarised, and the whole of it sent as a text file",
-              docs and Path(docs[0]["doc"]).read_text().count(".epub") == 80, str(tg.sent)[:200])
+        first = tg.sent[-1]
+        nxt = next((d for t, d in buttons(first) if t == "›"), None)
+        check("a long inventory is paged in the chat, and no file is sent",
+              "page 1/" in first["text"] and "b000" in first["text"]
+              and "b079" not in first["text"] and nxt
+              and not any(m.get("doc") for m in tg.sent), first["text"][:200])
+        bot.handle(cb(nxt))
+        check("... › shows the next page, in the same message",
+              "page 2/" in tg.sent[-1]["text"] and "b040" in tg.sent[-1]["text"]
+              and "b000" not in tg.sent[-1]["text"]
+              and tg.sent[-1].get("edited"), tg.sent[-1]["text"][:200])
 
         # Identity is the MAC; where a reader is gets found again each time.
         check("a saved reader keeps no address — the MAC is who it is",
@@ -2810,8 +2833,10 @@ def check_readers(tmp: Path) -> None:
         answering[:] = ["10.0.0.11"]
         bot.current = None
         tg.sent.clear()
-        bot.handle(cb("dev:st:"))
-        check("a reader with no MAC and no serial is said to be unsaveable",
+        bot.handle(cb("m:dev"))
+        bot.handle(cb(next(d for t, d in buttons(tg.sent[-1]) if t.startswith("🆕"))))
+        check("a reader with no MAC and no serial is said to be unsaveable, and can still be used",
+              any(t == "👉 Use it" for t, _ in buttons(tg.sent[-1])) and
               any("will not save it" in m["text"] for m in tg.sent)
               and not any(d.startswith("dev:save:") for m in tg.sent for _, d in buttons(m)),
               str(tg.sent)[:300])

@@ -249,10 +249,26 @@ serial from `/api/status` when there is no MAC, and the model from `device`
 (`devices.py` maps it). The facts are in `extras/readers.md` → "Two readers on
 one network".
 
-**Saved or not.** A reader the bot has never seen is announced once per session
-— *🆕 New reader: X4 Pro (…44aa). Save it?* — and the usual things work for it
-either way: browse, rename, delete, send a font now. **💾 Save it** asks for a
-name (short, unique) and from then on that reader has:
+**📲 Device is the list of readers.** Opening it searches the network first,
+then lists every saved reader — 🟢 *online* if it answered, ⚪ with when it was
+last seen if not — and every reader that answered and is not saved, as 🆕 new.
+You pick one, and what you get depends on what it is:
+
+- **saved and online**: its full menu — 📂 Browse, 🖼 Wallpapers, 🔤 Fonts,
+  📤 Push its queue, 📋 What's on it, its queue, rename, forget. Picking it
+  makes it the reader the session talks to.
+- **saved and off**: what the bot remembers — 📋 What's on it, its queue,
+  rename, forget. Queueing for it works as always; the push waits for it.
+- **new**: 💾 Save it, or 👉 Just use it — browse, rename, delete, send a font
+  now, with nothing queued and nothing remembered.
+
+There is no "whichever answers" menu: the reader is chosen first. A device
+action reached some other way (📤 Push from the queue, a button in an old
+message) with none chosen finds the one answering, announces it once if it is
+new, and shows this list if more than one answers.
+
+**💾 Save it** asks for a name (short, unique), and from then on that reader
+has:
 
 - **its own queue.** Every queue item names the reader it is for. Queueing
   asks *which reader* when two are saved, and does not ask when one is; with
@@ -266,26 +282,25 @@ name (short, unique) and from then on that reader has:
   A book is slimmed for the panel of the reader it is queued for (the cache key
   includes it).
 - **an inventory**: names and sizes of everything on its card, walked when it
-  is saved, on 🔎 Find it, after every push, and patched for free each time a
-  folder is listed — which is also how a rename, delete or move from the chat
-  shows up. 📲 Device lists the saved readers even when all are off; each one's
-  card says when it was last seen, what is queued, and **📋 What's on it**,
-  which sends the whole list as a text file when it is long.
+  is saved, after every push and on 🔄 Look again, and patched for free each
+  time a folder is listed — which is also how a rename, delete or move from the
+  chat shows up. **📋 What's on it** shows it in the chat, a page at a time
+  (‹ ›), whether the reader is on or not.
 
 A reader that is not saved has no queue and no inventory, and a push to it
 says so and changes nothing. One that says neither its MAC nor a serial
 (hotspot mode, no factory serial) cannot be told from another and is never
 offered for saving.
 
-**Two on at once.** The reader the session is talking to is asked first, alone,
-so browsing stays one quick request per tap. When nobody has been chosen and
-two answer, the bot asks which one rather than guessing; **🔎 Find it** always
-starts the search afresh.
+**Two on at once.** Both are listed online, and you pick. The reader the
+session is talking to is then asked first, alone, so browsing stays one quick
+request per tap; 🔄 Search again in the list looks afresh.
 
 **Who it is, not where it is.** A saved reader is keyed by its MAC and keeps
 no address: with no reserved lease the IP changes, and a stale one would only
 cost a timeout. Each time, the reader is found by `crosspoint.local` and the
-broadcast ping, then recognised by its MAC. (📍 Enter its address remains for a
+broadcast ping, then recognised by its MAC; within a session, a reader already
+found is also asked at the address it had. (📍 Set its address remains for a
 network where neither works; that one address is remembered, for any reader.)
 
 State: `state/devices.json` (the readers) and `state/inventory/<reader>.json`
@@ -847,17 +862,19 @@ temporary workspace. It grades the four things that would actually hurt:
    moves the folder and only the folder, then re-scans and re-selects; and
    `/.fonts` is named as the reason only when the card has no `/fonts`.
 8. **Readers, told apart**, against fakes that answer as an X3, an X4 Pro, a
-   second X4 Pro and one that cannot say who it is: a new reader is announced
-   once and still browsable; pushing to it sends nothing; saving refuses a taken
-   or overlong name and walks its card; with two saved, a wallpaper and a book
-   ask which reader and are built and slimmed for that panel, the same picture
-   queued for both is two files; a PDF asks which screen, then single or double, and the converter is
-   told; a push sends only the queue of the reader that answered; two answering
-   at once is a question, and the pick sticks; the device card and the
-   inventory read while every reader is off; a listing patches the inventory,
-   and a vanished folder takes its contents with it; the unidentifiable reader
-   is never offered for saving; forgetting one takes its queue and inventory
-   and nothing else.
+   second X4 Pro and one that cannot say who it is: 📲 Device searches and
+   lists saved readers (online or not) and new ones; a new one offers save or
+   just-use, and just-using opens it with no queue; browsing with none chosen
+   announces a new one once; pushing to an unsaved one sends nothing; saving
+   refuses a taken or overlong name, walks its card and opens its menu; with
+   two saved, a wallpaper and a book ask which reader and are built and slimmed
+   for that panel, the same picture queued for both is two files; a PDF asks
+   which screen, then single or double, and the converter is told; a push sends
+   only the queue of the reader that answered; two answering at once shows the
+   list, and the pick sticks; the list and the paged inventory read while every
+   reader is off; a listing patches the inventory, and a vanished folder takes
+   its contents with it; the unidentifiable reader is never offered for saving;
+   forgetting one takes its queue and inventory and nothing else.
 
 Plus: a 200-character device name with decomposed accents round-trips through a
 button token byte-identically, a stale token is answered rather than guessed

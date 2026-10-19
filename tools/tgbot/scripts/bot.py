@@ -70,7 +70,7 @@ MATS = [("≈ waves", "waves"), ("▣ edges", "edges"),
 NAV_PAGE = 7
 ALPHABET_THRESHOLD = 7
 DEVICE_NAME_MAX = 24
-# What the inventory shows in the chat before handing over the whole file.
+# Lines per page of an inventory shown in the chat.
 INVENTORY_LINES = 40
 
 
@@ -146,8 +146,10 @@ class Bot:
         # Readers already offered for saving this session, so "Not now" sticks
         # and a new reader is announced once rather than on every tap.
         self.announced = set()
+        # What the last search found answering: {key: {"host", "info", "ident"}}.
+        # In memory: addresses are good for this session and no longer.
+        self.online = {}
         self.chat = None              # where an announcement goes; one user
-        self.quiet = False            # True while a caller announces it itself
         self.tokens = Tokens()
         self.pending = None           # what the next plain text message means
         # Uploads that need human series aliases are grouped by the exact
@@ -213,7 +215,8 @@ class Bot:
         at a dozen call sites.
         """
         if isinstance(exc, ManyReaders):
-            return self.choose_reader(chat, exc.found)
+            return self.show_device(chat, note="More than one reader is answering — "
+                                               "pick the one you meant, then tap again.")
         if isinstance(exc, suite.DeviceError):
             return self.no_reader(chat, str(exc))
         self.say(chat, f"⚠️ {exc}")
@@ -346,7 +349,7 @@ class Bot:
         elif cmd == "wallpapers":
             self.submit(chat, lambda: self.show_wallpapers(chat))
         elif cmd == "device":
-            self.show_device(chat)
+            self.submit(chat, lambda: self.show_device(chat))
         elif cmd == "inbox":
             self.show_inbox(chat)
         elif cmd == "push":
@@ -413,14 +416,15 @@ class Bot:
             self.devices.save(ident["id"], ident, name)
 
             def work():
-                lines = [f"💾 Saved as <b>{html.escape(name)}</b>. Queue things "
-                         f"for it, and I will keep a list of what is on it."]
-                if (self.current or {}).get("ident", {}).get("id") == ident["id"]:
+                lines = [f"💾 Saved as <b>{html.escape(name)}</b>."]
+                # Saved means talked to: make it the session's reader and look
+                # at its card, so its menu opens with something to show.
+                reader = self.online.get(ident["id"])
+                if reader:
                     try:
-                        inv = self.refresh_inventory(job["host"])
-                        files = sum(1 for e in inv["entries"]
-                                    if e.get("path") and not e.get("dir"))
-                        lines.append(f"📋 {counted(files, 'file')} on it right now.")
+                        self.current = None
+                        self.use_reader(reader["host"], reader["info"])
+                        self.refresh_inventory()
                     except suite.DeviceError:
                         lines.append("📋 Could not look at its card just now — "
                                      "next time it is on File Transfer.")
@@ -429,8 +433,8 @@ class Bot:
                                  f"{html.escape(str(ident.get('reported') or 'reader'))}, "
                                  "so wallpapers cannot be made for it. Books and "
                                  "fonts can.")
-                self.say(chat, "\n".join(lines),
-                         [[("📲 Device", "m:dev"), ("🏠 Menu", "m:main")]])
+                self.say(chat, "\n".join(lines))
+                self.show_reader_card(chat, ident["id"])
             return self.submit(chat, work)
 
         if job["kind"] == "devmkdir":
@@ -613,7 +617,8 @@ class Bot:
                         chat, lambda: self.show_library(chat, message_id=message_id)),
                     "q": lambda: self.show_queue(chat),
                     "in": lambda: self.show_inbox(chat),
-                    "dev": lambda: self.show_device(chat, message_id=message_id),
+                    "dev": lambda: self.submit(
+                        chat, lambda: self.show_device(chat, message_id=message_id)),
                     "fo": lambda: self.show_fonts(chat),
                     "wl": lambda: self.show_wallpapers(chat),
                     "st": lambda: self.submit(chat, lambda: self.show_status(chat)),
@@ -3146,8 +3151,6 @@ class Bot:
         if key in self.announced or self.chat is None:
             return
         self.announced.add(key)
-        if self.quiet:
-            return          # the caller says it itself (🔎 Find it does)
         what = model_name(ident.get("model"), ident.get("reported"))
         fw = f", firmware {html.escape(str(ident.get('firmware')))}" if ident.get("firmware") else ""
         if not ident.get("id"):
@@ -3167,63 +3170,152 @@ class Bot:
                  [[("💾 Save it", f"dev:save:{self.tokens.put({'ident': ident, 'host': host})}"),
                    ("Not now", "dev:nosave:")]])
 
-    def choose_reader(self, chat, found: list) -> None:
-        """Two readers on File Transfer at once: which one?"""
-        rows = []
-        for host, info, hostname in found:
-            ident = suite.device.identify(host, info, hostname)
-            rows.append([(f"📲 {self.reader_label(ident)} · {host}"[:60],
-                          f"dev:use:{self.tokens.put({'host': host, 'info': info, 'hostname': hostname})}")])
-        rows.append([("🏠 Menu", "m:main")])
-        self.say(chat, f"📲 {len(found)} readers are answering. Which one?", rows)
+    def scan_readers(self) -> dict:
+        """Every reader answering right now, identified: {key: {"host", "info",
+        "ident"}}, keyed by device id (or `anon:<host>` for one that cannot say
+        who it is). Also kept as `self.online` for the buttons that follow.
 
-    def show_device(self, chat, *, message_id=None) -> None:
-        """The readers you saved, readable while they are off, and the live
-        actions for whichever one is on its File Transfer screen."""
+        Asked: the readers this session has already found, at the addresses
+        they had (a lease does not change mid-session), plus the name and the
+        broadcast. A saved reader that answers has its last-seen updated; the
+        reader we were talking to is dropped if it no longer answers.
+        """
+        candidates = [v["host"] for v in self.online.values()]
+        if self.current:
+            candidates.append(self.current["host"])
+        online = {}
+        for host, info, hostname in suite.device.find_devices(list(dict.fromkeys(candidates))):
+            ident = suite.device.identify(host, info, hostname)
+            online[ident.get("id") or f"anon:{host}"] = {"host": host, "info": info,
+                                                       "ident": ident}
+            if self.devices.get(ident.get("id")):
+                self.devices.update(ident["id"], seen=time.time(),
+                                    firmware=ident.get("firmware"),
+                                    model=ident.get("model"))
+        self.online = online
+        if self.current and not any(v["host"] == self.current["host"]
+                                    for v in online.values()):
+            self.current = None
+        return online
+
+    def show_device(self, chat, *, message_id=None, note: str = "") -> None:
+        """📲 Device: every reader you saved, and every one answering now.
+
+        Searches first, so 🟢 online means it answered just now. A saved reader
+        is always listed; tapping it gives its full menu when it is online and
+        what the bot remembers (inventory, queue) when it is not. A reader that
+        answers and is not saved is listed as new.
+        """
+        sent = self.panel(chat, message_id, "🔎 Looking for readers…")
+        message_id = (sent or {}).get("message_id") or message_id
+        online = self.scan_readers()
         saved = self.devices.all()
-        lines = ["📲 <b>Readers</b>"]
+        lines = [note] if note else []
+        lines.append("📲 <b>Readers</b>")
         rows = []
-        for dev_id, entry in sorted(saved.items(), key=lambda kv: kv[1].get("name", "").lower()):
+        for dev_id, entry in sorted(saved.items(),
+                                    key=lambda kv: (kv[0] not in online, kv[1].get("name", "").lower())):
             n = self.queue.count(dev_id)
-            here = " · 🟢 talking to it" if dev_id == self.current_id() else ""
-            lines.append(f"· <b>{html.escape(entry['name'])}</b> — "
-                         f"{model_name(entry.get('model'))}, "
-                         f"{counted(n, 'queued', 'queued')}, seen {ago(entry.get('seen'))}{here}")
-            rows.append([(f"📲 {entry['name']}"[:40], f"dev:card:{self.tokens.put(dev_id)}")])
-        if not saved:
-            lines.append("None saved yet. Put one on its File Transfer screen "
-                         "and tap 🔎 Find it.")
+            t = self.tokens.put(dev_id)
+            if dev_id in online:
+                lines.append(f"🟢 <b>{html.escape(entry['name'])}</b> — "
+                             f"{model_name(entry.get('model'))} · online · "
+                             f"{counted(n, 'queued', 'queued')}")
+                rows.append([(f"🟢 {entry['name']}"[:40], f"dev:card:{t}")])
+            else:
+                lines.append(f"⚪ <b>{html.escape(entry['name'])}</b> — "
+                             f"{model_name(entry.get('model'))} · "
+                             f"{counted(n, 'queued', 'queued')} · seen {ago(entry.get('seen'))}")
+                rows.append([(f"⚪ {entry['name']}"[:40], f"dev:card:{t}")])
+        for key, reader in online.items():
+            if key in saved:
+                continue
+            ident = reader["ident"]
+            what = model_name(ident.get("model"), ident.get("reported"))
+            tail = (ident.get("mac") or ident.get("serial") or "")[-6:]
+            label = f"🆕 New {what}" + (f" (…{tail})" if tail else "")
+            lines.append(f"{html.escape(label)} · online")
+            rows.append([(label[:40], f"dev:new:{self.tokens.put(key)}")])
+        if not saved and not online:
+            lines.append("None saved, and none answering.")
         lines.append("\nA reader answers only while it is on "
                      "<b>Home → File Transfer → Join a Network</b>.")
-        rows += [[("🔎 Find it", "dev:st:"), ("📂 Browse", "dev:ls0:")],
-                 [("🖼 Wallpapers", "dev:wp:"), ("🔤 Fonts", "dev:fo:")],
-                 [("📤 Push queue", "push:ask")],
-                 [("📍 Set its address", "dev:addr:")],
+        rows += [[("🔄 Search again", "dev:scan:"), ("📍 Set its address", "dev:addr:")],
                  [("🏠 Menu", "m:main")]]
         self.panel(chat, message_id, "\n".join(lines), rows)
 
-    def show_reader_card(self, chat, dev_id: str, *, message_id=None) -> None:
-        """One saved reader, from what the bot remembers — no reader needed."""
-        entry = self.devices.get(dev_id)
-        if not entry:
+    def open_reader(self, chat, key: str, *, message_id=None) -> None:
+        """Talk to this online reader, and show what can be done with it."""
+        reader = self.online.get(key)
+        if not reader:
+            return self.show_device(chat, message_id=message_id,
+                                    note="That reader is no longer answering.")
+        self.announced.add(key)                 # it was picked as what it is
+        self.current = None
+        self.use_reader(reader["host"], reader["info"])
+        self.show_reader_card(chat, key, message_id=message_id)
+
+    def show_reader_card(self, chat, key: str, *, message_id=None) -> None:
+        """One reader. Online, its full menu; saved and off, what the bot
+        remembers; new, the question of what to do with it."""
+        entry = self.devices.get(key)
+        reader = self.online.get(key)
+        live = bool(reader and self.current and self.current["host"] == reader["host"])
+        if not entry and not reader:
             return self.panel(chat, message_id, "That reader is no longer saved.",
                               [[("📲 Readers", "m:dev")]])
-        inv = self.devices.inventory(dev_id)
+        t = self.tokens.put(key)
+        if not entry:                                   # online, not saved
+            ident = reader["ident"]
+            what = model_name(ident.get("model"), ident.get("reported"))
+            tail = (ident.get("mac") or ident.get("serial") or "")[-6:]
+            lines = [f"🆕 <b>New {html.escape(what)}</b>"
+                     + (f" (…{html.escape(tail)})" if tail else "") + " · online",
+                     f"firmware {html.escape(str(ident.get('firmware') or '?'))}"]
+            rows = []
+            if live:
+                rows += [[("📂 Browse", "dev:ls0:"), ("🖼 Wallpapers", "dev:wp:"),
+                          ("🔤 Fonts", "dev:fo:")]]
+            if ident.get("id"):
+                lines.append("\nNot saved. Saved, it gets a name, its own queue, and "
+                             "a list of what is on it you can read while it is off. "
+                             "Not saved, you can still use it now — I just will not "
+                             "remember it.")
+                row = [("💾 Save it", "dev:save:" + self.tokens.put(
+                    {"ident": ident, "host": reader["host"]}))]
+                if not live:
+                    row.append(("👉 Just use it", f"dev:open:{t}"))
+                rows.insert(0, row)
+            else:
+                lines.append("\nIt does not say who it is (no MAC, no serial), so I "
+                             "cannot tell it from another one and will not save it.")
+                if not live:
+                    rows.insert(0, [("👉 Use it", f"dev:open:{t}")])
+            rows.append([("📲 Readers", "m:dev")])
+            return self.panel(chat, message_id, "\n".join(lines), rows)
+
+        inv = self.devices.inventory(key)
         files = [e for e in (inv or {}).get("entries", []) if e.get("path") and not e.get("dir")]
-        t = self.tokens.put(dev_id)
-        lines = [f"📲 <b>{html.escape(entry['name'])}</b>",
+        n = self.queue.count(key)
+        state = ("🟢 online" if reader else f"⚪ off — last seen {ago(entry.get('seen'))}")
+        lines = [f"📲 <b>{html.escape(entry['name'])}</b> · {state}",
                  f"{model_name(entry.get('model'))}"
                  + (f" · firmware {html.escape(str(entry['firmware']))}" if entry.get("firmware") else ""),
-                 f"last seen {ago(entry.get('seen'))}",
-                 f"queued: {self.queue.count(dev_id)}",
+                 f"queued: {n}",
                  (f"on the card: {counted(len(files), 'file')}, as of {ago(inv.get('taken'))}"
                   if inv else "on the card: not looked yet")]
-        if dev_id == self.current_id():
-            lines.append("🟢 the reader this session is talking to")
-        self.panel(chat, message_id, "\n".join(lines),
-                   [[("📋 What's on it", f"dev:inv:{t}"), ("📤 Its queue", f"dev:q:{t}")],
-                    [("✏️ Rename", f"dev:ren:{t}"), ("🗑 Forget", f"dev:forget:{t}")],
-                    [("📲 Readers", "m:dev")]])
+        rows = []
+        if reader and not live:
+            rows.append([("👉 Use it", f"dev:open:{t}")])
+        if live:
+            rows.append([("📂 Browse", "dev:ls0:"), ("🖼 Wallpapers", "dev:wp:"),
+                         ("🔤 Fonts", "dev:fo:")])
+            if n:
+                rows.append([(f"📤 Push its queue ({n})", "push:go")])
+        rows += [[("📋 What's on it", f"dev:inv:{t}"), ("📤 Its queue", f"dev:q:{t}")],
+                 [("✏️ Rename", f"dev:ren:{t}"), ("🗑 Forget", f"dev:forget:{t}")],
+                 [("📲 Readers", "m:dev")]]
+        self.panel(chat, message_id, "\n".join(lines), rows)
 
     def refresh_inventory(self, host: str | None = None) -> dict | None:
         """Walk the card of the reader we are talking to, if it is saved, and
@@ -3270,13 +3362,10 @@ class Bot:
                          "dir": is_dir})
         self.devices.save_inventory(dev_id, kept, inv.get("fonts"))
 
-    def inventory_text(self, dev_id: str) -> str:
-        """The saved inventory as a plain text tree, for a file you can keep."""
-        entry, inv = self.devices.get(dev_id) or {}, self.devices.inventory(dev_id) or {}
-        stamp = (datetime.fromtimestamp(inv["taken"]).strftime("%Y-%m-%d %H:%M")
-                 if inv.get("taken") else "never")
-        lines = [f"{entry.get('name', dev_id)} — {model_name(entry.get('model'))}",
-                 f"as of {stamp}", ""]
+    def inventory_lines(self, dev_id: str) -> list:
+        """The saved inventory as an indented tree, one line per entry."""
+        inv = self.devices.inventory(dev_id) or {}
+        lines = []
         for e in sorted((e for e in inv.get("entries", []) if e.get("path")),
                         key=lambda e: e["path"].lower()):
             depth = e["path"].count("/") - 1
@@ -3289,32 +3378,35 @@ class Bot:
             lines += ["", "fonts the reader lists:"]
             lines += [f"  {f['name']}  ({', '.join(str(s) for s in f.get('sizes', []))} pt)"
                       for f in inv["fonts"]]
-        return "\n".join(lines) + "\n"
+        return lines
 
-    def show_inventory(self, chat, dev_id: str) -> None:
+    def show_inventory(self, chat, dev_id: str, page: int = 0, *, message_id=None) -> None:
+        """What was on the card when the bot last looked, a page at a time."""
         entry, inv = self.devices.get(dev_id), self.devices.inventory(dev_id)
         if not entry:
-            return self.say(chat, "That reader is no longer saved.", [[("📲 Readers", "m:dev")]])
+            return self.panel(chat, message_id, "That reader is no longer saved.",
+                              [[("📲 Readers", "m:dev")]])
         t = self.tokens.put(dev_id)
-        back = [[("🔄 Look again", f"dev:invr:{t}"), (f"📲 {entry['name']}"[:30], f"dev:card:{t}")]]
+        back = [("🔄 Look again", f"dev:invr:{t}"), (f"📲 {entry['name']}"[:30], f"dev:card:{t}")]
         if not inv:
-            return self.say(chat, f"I have not looked at <b>{html.escape(entry['name'])}</b>'s "
-                                  "card yet. Put it on File Transfer and tap 🔄.", back)
-        text = self.inventory_text(dev_id)
-        body = text.splitlines()
-        shown = body[:INVENTORY_LINES + 3]
-        more = len(body) - len(shown)
-        self.say(chat, "<pre>" + html.escape("\n".join(shown))[:3800] + "</pre>"
-                 + (f"\n… {more} more lines in the file below." if more > 0 else ""), back)
-        if more > 0:
-            safe = re.sub(r"[^A-Za-z0-9_-]+", "-", entry["name"]).strip("-") or "reader"
-            out = self.state_dir / "cache" / f"inventory-{safe}.txt"
-            out.parent.mkdir(parents=True, exist_ok=True)
-            out.write_text(text, encoding="utf-8")
-            try:
-                self.tg.send_document(chat, out, f"Everything on {entry['name']}")
-            except TelegramError as exc:
-                log("inventory file failed:", exc)
+            return self.panel(chat, message_id,
+                              f"I have not looked at <b>{html.escape(entry['name'])}</b>'s "
+                              "card yet. Put it on File Transfer and tap 🔄.", [back])
+        body = self.inventory_lines(dev_id) or ["(empty)"]
+        pages = max(1, -(-len(body) // INVENTORY_LINES))
+        page = min(max(page, 0), pages - 1)
+        shown = body[page * INVENTORY_LINES:(page + 1) * INVENTORY_LINES]
+        stamp = datetime.fromtimestamp(inv["taken"]).strftime("%Y-%m-%d %H:%M")
+        head = (f"📋 <b>{html.escape(entry['name'])}</b> — as of {stamp}"
+                + (f" · page {page + 1}/{pages}" if pages > 1 else ""))
+        nav = []
+        if page:
+            nav.append(("‹", f"dev:invp:{self.tokens.put({'dev': dev_id, 'page': page - 1})}"))
+        if page < pages - 1:
+            nav.append(("›", f"dev:invp:{self.tokens.put({'dev': dev_id, 'page': page + 1})}"))
+        self.panel(chat, message_id,
+                   head + "\n<pre>" + html.escape("\n".join(shown))[:3700] + "</pre>",
+                   ([nav] if nav else []) + [back])
 
     def pick_target(self, chat, resume: str, job: dict, what: str = "it") -> str | None:
         """Which saved reader queued work is for. Returns its id, or None after
@@ -3326,7 +3418,7 @@ class Bot:
         if not saved:
             self.say(chat,
                      "📲 There is no saved reader to queue for yet. Put one on "
-                     "<b>Home → File Transfer → Join a Network</b>, tap 🔎 Find it "
+                     "<b>Home → File Transfer → Join a Network</b>, open 📲 Device "
                      "and save it — then queue away.",
                      [[("📲 Device", "m:dev"), ("🏠 Menu", "m:main")]])
             return None
@@ -3342,73 +3434,26 @@ class Bot:
     def on_device_callback(self, chat, rest: str, msg_id=None) -> None:
         action, _, token = rest.partition(":")
 
-        if action == "st":
-            def work():
-                # Looking afresh: forget which reader we were talking to, so
-                # two readers on File Transfer get asked about, not assumed.
-                self.current = None
-                # One message, not two: a new reader's offer to save goes in
-                # this card rather than ahead of it.
-                self.quiet = True
-                try:
-                    host, info = self.device_host()
-                finally:
-                    self.quiet = False
-                ident = self.current["ident"]
-                dev_id = self.current_id()
-                what = model_name(ident.get("model"), ident.get("reported"))
-                head = (f"📲 <b>{html.escape(self.reader_label(ident))}</b>" if dev_id
-                        else f"🆕 <b>New reader: {html.escape(what)}</b>")
-                lines = [f"{head} at <code>{html.escape(host)}</code>",
-                         f"{html.escape(what)} · firmware "
-                         f"{html.escape(str(info.get('version', '?')))}",
-                         f"free heap: {info.get('freeHeap', '?')}"]
-                rows = [[("📂 Browse", "dev:ls0:")]]
-                if not dev_id and ident.get("id"):
-                    tail = (ident.get("mac") or ident.get("serial") or "")[-6:]
-                    lines[0] += f" (…{html.escape(tail)})"
-                    lines.append("\nNot saved. Save it, and it gets a name, its own "
-                                 "queue, and a list of what is on it you can read "
-                                 "while it is off. Not saved, you can still browse "
-                                 "and send to it now.")
-                    rows.insert(0, [("💾 Save it", "dev:save:" + self.tokens.put(
-                        {"ident": ident, "host": host}))])
-                elif not dev_id:
-                    lines.append("\nIt does not say who it is (no MAC in its name, "
-                                 "no serial), so I cannot tell it from another "
-                                 "one and will not save it.")
-                if dev_id:
-                    try:
-                        inv = self.refresh_inventory(host)
-                        files = sum(1 for e in inv["entries"]
-                                    if e.get("path") and not e.get("dir"))
-                        on_card = f"{counted(files, 'file')} on the card"
-                    except suite.DeviceError:
-                        # It answered a moment ago: say the walk failed, not
-                        # that there is no reader.
-                        on_card = "could not list its card just now"
-                    lines.append(f"{counted(self.queue.count(dev_id), 'item')} queued for it · "
-                                 f"{on_card}")
-                    t = self.tokens.put(dev_id)
-                    rows[0].append(("📋 What's on it", f"dev:inv:{t}"))
-                    if self.queue.count(dev_id):
-                        rows.insert(0, [("📤 Push its queue", "push:ask")])
-                rows.append([("🏠 Menu", "m:main")])
-                self.say(chat, "\n".join(lines), rows)
-            return self.submit(chat, work)
+        if action in ("scan", "st"):            # st: a button from before the list
+            return self.submit(chat, lambda: self.show_device(chat, message_id=msg_id))
 
-        if action == "use":
+        if action in ("new", "open"):
+            key = self.tokens.get(token)
+            if not key:
+                return self.stale(chat)
+            if action == "new":
+                return self.show_reader_card(chat, key, message_id=msg_id)
+            return self.submit(chat, lambda: self.open_reader(chat, key, message_id=msg_id))
+
+        if action == "use":                    # a button from before the picker
             pick = self.tokens.get(token)
             if not pick:
                 return self.stale(chat)
 
             def work():
                 self.current = None
-                host, _ = self.use_reader(pick["host"], pick["info"], pick.get("hostname"))
-                self.say(chat, f"📲 Talking to <b>{html.escape(self.reader_label(self.current['ident']))}</b> "
-                               "now — tap what you wanted again.",
-                         [[("📂 Browse", "dev:ls0:"), ("📤 Push queue", "push:ask")],
-                          [("🏠 Menu", "m:main")]])
+                self.use_reader(pick["host"], pick["info"], pick.get("hostname"))
+                self.show_device(chat)
             return self.submit(chat, work)
 
         if action == "save":
@@ -3426,6 +3471,12 @@ class Bot:
                                   "remember it, or queue for it.",
                             [[("📂 Browse", "dev:ls0:"), ("🏠 Menu", "m:main")]])
 
+        if action == "invp":
+            job = self.tokens.get(token)
+            if not job:
+                return self.stale(chat)
+            return self.show_inventory(chat, job["dev"], job["page"], message_id=msg_id)
+
         if action in ("card", "inv", "invr", "q", "ren", "forget", "forget!"):
             dev_id = self.tokens.get(token)
             if not dev_id:
@@ -3433,19 +3484,20 @@ class Bot:
             if action == "card":
                 return self.show_reader_card(chat, dev_id, message_id=msg_id)
             if action == "inv":
-                return self.show_inventory(chat, dev_id)
+                return self.show_inventory(chat, dev_id, message_id=msg_id)
             if action == "invr":
                 def work():
-                    self.device_host()
-                    if self.current_id() != dev_id:
-                        entry = self.devices.get(dev_id) or {}
-                        return self.say(
-                            chat, f"The reader answering is "
-                                  f"<b>{html.escape(self.reader_label(self.current['ident']))}</b>, "
-                                  f"not {html.escape(entry.get('name', 'that one'))}.",
-                            [[("📲 Device", "m:dev")]])
+                    self.scan_readers()
+                    entry = self.devices.get(dev_id) or {}
+                    if dev_id not in self.online:
+                        return self.panel(
+                            chat, msg_id, f"<b>{html.escape(entry.get('name', 'That reader'))}</b> "
+                                          "is not answering — put it on File Transfer.",
+                            [[("🔄 Look again", f"dev:invr:{token}"), ("📲 Readers", "m:dev")]])
+                    self.current = None
+                    self.use_reader(self.online[dev_id]["host"], self.online[dev_id]["info"])
                     self.refresh_inventory()
-                    self.show_inventory(chat, dev_id)
+                    self.show_inventory(chat, dev_id, message_id=msg_id)
                 return self.submit(chat, work)
             if action == "q":
                 return self.show_queue(chat, dev_id)
