@@ -406,8 +406,11 @@ def check_push_is_all_or_nothing(tmp: Path) -> None:
                   meta={"author": "Someone", "title": "A Book"}, device=TEST_DEV)
 
     bot.device_host = no_reader
+    orig_find = suite.device.find_devices
+    suite.device.find_devices = lambda candidates=(): []
     tg.sent.clear()
     bot.handle(cb("push:go"))
+    suite.device.find_devices = orig_find
     check("tapping Ready is acknowledged before anything slow happens",
           tg.sent and "Listening" in tg.sent[0]["text"],
           tg.sent[0]["text"] if tg.sent else "silence")
@@ -2750,6 +2753,28 @@ def check_readers(tmp: Path) -> None:
         check("... and its report names it",
               any("Night Pro" in m["text"] for m in tg.sent), str(tg.sent[-1]))
 
+        # Push all: every saved reader that answers gets its own queue.
+        bot.queue.add("font", str(walls / "moon.jpg"), "Fam", device=PRO_DEV,
+                      meta={"family": "NoSuchFamily"})
+        answering[:] = ["10.0.0.5"]                  # only the X3 is on
+        pushed.clear()
+        uploaded.clear()
+        x3_before = bot.queue.count(TEST_DEV)
+        tg.sent.clear()
+        bot.handle(cb("push:go"))
+        check("Push all pushes the readers that answer, and keeps the others' queues",
+              pushed and all(h == "10.0.0.5" for h, _ in pushed)
+              and bot.queue.count(TEST_DEV) < x3_before and bot.queue.count(PRO_DEV) == 1
+              and "Not answering, still queued: Night Pro (1)" in tg.sent[-1]["text"],
+              str((pushed, tg.sent[-1]["text"])))
+        answering[:] = []
+        tg.sent.clear()
+        bot.handle(cb("push:go"))
+        check("... and with none answering, nothing changes and it says so",
+              bot.queue.count(PRO_DEV) == 1
+              and any("No reader" in m["text"] for m in tg.sent), str(tg.sent[-1]))
+        bot.queue.remove_many(i["id"] for i in bot.queue.items(PRO_DEV))
+
         # Both on at once, and we were not talking to either: ask.
         answering[:] = ["10.0.0.5", "10.0.0.7"]
         bot.current = None
@@ -2831,6 +2856,28 @@ def check_readers(tmp: Path) -> None:
               "host" not in bot.devices.get(PRO_DEV) and "host" not in bot.devices.get(TEST_DEV),
               str(bot.devices.all()))
 
+        # The same reader, its discovery ping unanswered this time: serial only.
+        bot.devices.save("mac:aabbccddeeff", {"mac": "aabbccddeeff", "serial": "XP-123",
+                                              "model": "x4pro"}, "Twin")
+        serial_only = {"id": "serial:XP-123", "mac": None, "serial": "XP-123",
+                       "model": "x4pro", "reported": "xteink_x4_pro", "firmware": "1.6.5",
+                       "hostname": None}
+        check("a saved reader answering without its MAC is still itself, by its serial",
+              bot.recognise(serial_only)["id"] == "mac:aabbccddeeff")
+        bot.devices.save("serial:SN-9", {"mac": None, "serial": "SN-9", "model": "x3"}, "Late")
+        bot.recognise({"id": "mac:121212121212", "mac": "121212121212", "serial": "SN-9"})
+        check("... and a record saved by serial learns the MAC when it is heard",
+              bot.devices.get("serial:SN-9")["mac"] == "121212121212",
+              str(bot.devices.get("serial:SN-9")))
+        tg.sent.clear()
+        bot.handle(cb("dev:save:" + bot.tokens.put({"ident": serial_only, "host": "10.0.0.9"})))
+        check("... and saving it again is refused, naming what it is saved as",
+              "Already saved" in tg.sent[-1]["text"] and "Twin" in tg.sent[-1]["text"]
+              and len([k for k in bot.devices.all() if "XP-123" in str(bot.devices.get(k))]) == 1,
+              tg.sent[-1]["text"])
+        bot.devices.forget("mac:aabbccddeeff")
+        bot.devices.forget("serial:SN-9")
+
         # A reader that cannot say who it is is never saved.
         answering[:] = ["10.0.0.11"]
         bot.current = None
@@ -2846,11 +2893,12 @@ def check_readers(tmp: Path) -> None:
         # Forgetting one takes its queue with it, and leaves the other alone.
         tok = bot.tokens.put(PRO_DEV)
         bot.queue.add("font", "/x", "WenZilla", device=PRO_DEV)
+        x3_kept = bot.queue.count(TEST_DEV)
         bot.handle(cb(f"dev:forget!:{tok}"))
         check("forgetting a reader drops it, its queue and its inventory — only its",
               bot.devices.get(PRO_DEV) is None and bot.queue.count(PRO_DEV) == 0
               and bot.devices.inventory(PRO_DEV) is None
-              and bot.queue.count(TEST_DEV) == 2, str(bot.queue.items()))
+              and bot.queue.count(TEST_DEV) == x3_kept, str(bot.queue.items()))
 
         # One saved reader: no question asked.
         tg.sent.clear()

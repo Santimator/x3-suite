@@ -146,25 +146,33 @@ def discover(timeout: float = 2.0) -> list:
     return [addr for addr, _ in discover_named(timeout)]
 
 
-def hello(host: str, timeout: float = 1.5) -> str | None:
+def hello(host: str, timeout: float = 1.0, tries: int = 3) -> str | None:
     """The same discovery ping, sent to one address: the hostname the reader
     calls itself, or None if it does not answer on the discovery port.
 
     This is how a reader found by name or typed address still gets identified:
     the HTTP API never states the MAC, the discovery reply does. `host` may
-    carry a `:port` for the web server; discovery has its own port."""
+    carry a `:port` for the web server; discovery has its own port.
+
+    Asked `tries` times: the firmware answers from its web-server loop, and a
+    reader busy serving a request can let one ping go by. Without an answer
+    the identity falls back to the serial, so a missed ping is worth a retry.
+    """
     addr = host.rsplit(":", 1)[0] if host.count(":") == 1 else host
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.settimeout(timeout)
-    try:
-        sock.sendto(DISCOVERY_PAYLOAD, (addr, DISCOVERY_PORT))
-        data, _ = sock.recvfrom(256)
-    except OSError:
-        return None
-    finally:
-        sock.close()
-    m = _REPLY.match(data)
-    return m.group(1).decode(errors="replace") if m else None
+    for _ in range(tries):
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.settimeout(timeout)
+        try:
+            sock.sendto(DISCOVERY_PAYLOAD, (addr, DISCOVERY_PORT))
+            data, _ = sock.recvfrom(256)
+        except OSError:
+            continue
+        finally:
+            sock.close()
+        m = _REPLY.match(data)
+        if m:
+            return m.group(1).decode(errors="replace")
+    return None
 
 
 def mac_from_hostname(hostname: str | None) -> str | None:
