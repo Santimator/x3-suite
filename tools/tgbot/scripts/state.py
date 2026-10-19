@@ -142,10 +142,10 @@ class Queue:
 class Devices:
     """The readers you saved: who they are, what they are, where they were.
 
-    One JSON object keyed by device id, each entry {"name", "model", "mac",
-    "serial", "host", "firmware", "saved", "seen"}. `host` is the address the
-    reader last answered at — both readers answer to `crosspoint.local`, so an
-    address per reader is the only kind worth remembering.
+    One JSON object keyed by device id — `mac:…`, or `serial:…` without one —
+    each entry {"name", "model", "mac", "serial", "firmware", "saved",
+    "seen"}. No address: the id is who it is, and where it is gets found again
+    each time (a DHCP lease is not an identity).
 
     The inventory — names and sizes of what was on the card the last time the
     bot looked — sits beside it, one file per reader under `inventory/`, so a
@@ -169,12 +169,12 @@ class Devices:
     def __len__(self) -> int:
         return len(self.all())
 
-    def save(self, device_id: str, ident: dict, name: str, host: str | None) -> dict:
+    def save(self, device_id: str, ident: dict, name: str) -> dict:
         data = self.all()
         now = time.time()
         entry = {"name": name, "model": ident.get("model"),
                  "mac": ident.get("mac"), "serial": ident.get("serial"),
-                 "host": host, "firmware": ident.get("firmware"),
+                 "firmware": ident.get("firmware"),
                  "saved": now, "seen": now}
         data[device_id] = entry
         _write_atomic(self.path, data)

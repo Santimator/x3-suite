@@ -282,6 +282,12 @@ so browsing stays one quick request per tap. When nobody has been chosen and
 two answer, the bot asks which one rather than guessing; **🔎 Find it** always
 starts the search afresh.
 
+**Who it is, not where it is.** A saved reader is keyed by its MAC and keeps
+no address: with no reserved lease the IP changes, and a stale one would only
+cost a timeout. Each time, the reader is found by `crosspoint.local` and the
+broadcast ping, then recognised by its MAC. (📍 Enter its address remains for a
+network where neither works; that one address is remembered, for any reader.)
+
 State: `state/devices.json` (the readers) and `state/inventory/<reader>.json`
 (their cards), both gitignored, both readable with `cat`.
 

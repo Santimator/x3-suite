@@ -149,7 +149,7 @@ def make_bot(tmp: Path):
     (tmp / "workspace").mkdir(parents=True, exist_ok=True)
     tg = FakeTelegram()
     bot = Bot(cfg, tg, sync=True)
-    bot.devices.save(TEST_DEV, TEST_IDENT, "Test X3", "10.0.0.5")
+    bot.devices.save(TEST_DEV, TEST_IDENT, "Test X3")
     return bot, tg
 
 
@@ -2579,12 +2579,20 @@ def check_readers(tmp: Path) -> None:
         tg.sent.clear()
         bot.handle(cb("dev:st:"))
         offers = [m for m in tg.sent if "New reader" in m["text"]]
-        check("a reader the bot does not know is announced as new, with its model",
-              len(offers) == 1 and "X4 Pro" in offers[0]["text"]
-              and any(d.startswith("dev:save:") for _, d in buttons(offers[0])),
+        check("🔎 Find it on a new reader is one card: what it is, and an offer to save it",
+              len(tg.sent) == 1 and len(offers) == 1 and "X4 Pro" in offers[0]["text"]
+              and "firmware" in offers[0]["text"]
+              and any(d.startswith("dev:save:") for _, d in buttons(offers[0]))
+              and any(d == "dev:ls0:" for _, d in buttons(offers[0])),
               str(tg.sent)[:300])
-        check("... and the usual things still work for it (it is found and shown)",
-              any("unsaved X4 Pro" in m["text"] for m in tg.sent), str(tg.sent[-1]))
+        bot.current = None
+        bot.announced.clear()
+        tg.sent.clear()
+        bot.handle(cb("dev:ls0:"))
+        check("... any other action on a new reader announces it on its own, once",
+              sum("New reader" in m["text"] for m in tg.sent) == 1
+              and any(d.startswith("dev:save:") for m in tg.sent for _, d in buttons(m)),
+              str(tg.sent)[:300])
         tg.sent.clear()
         bot.handle(cb("dev:ls0:"))
         check("... and it is not announced again on the next tap",
@@ -2617,9 +2625,9 @@ def check_readers(tmp: Path) -> None:
                               {"path": "/sleep-overlay/moon.png", "size": 9_000, "dir": False}]
         bot.handle(msg("Night Pro"))
         entry = bot.devices.get(PRO_DEV)
-        check("saved under its name, with its model and address",
+        check("saved under its name and MAC, with its model",
               entry and entry["name"] == "Night Pro" and entry["model"] == "x4pro"
-              and entry["host"] == "10.0.0.7", str(entry))
+              and entry["mac"] == "0011223344aa", str(entry))
         check("... and its card is looked at straight away",
               (bot.devices.inventory(PRO_DEV) or {}).get("entries") == walked["10.0.0.7"]
               and "2 files" in tg.sent[-1]["text"], tg.sent[-1]["text"])
@@ -2792,6 +2800,11 @@ def check_readers(tmp: Path) -> None:
         docs = [m for m in tg.sent if m.get("doc")]
         check("a long inventory is summarised, and the whole of it sent as a text file",
               docs and Path(docs[0]["doc"]).read_text().count(".epub") == 80, str(tg.sent)[:200])
+
+        # Identity is the MAC; where a reader is gets found again each time.
+        check("a saved reader keeps no address — the MAC is who it is",
+              "host" not in bot.devices.get(PRO_DEV) and "host" not in bot.devices.get(TEST_DEV),
+              str(bot.devices.all()))
 
         # A reader that cannot say who it is is never saved.
         answering[:] = ["10.0.0.11"]

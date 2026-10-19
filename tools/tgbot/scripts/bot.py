@@ -147,6 +147,7 @@ class Bot:
         # and a new reader is announced once rather than on every tap.
         self.announced = set()
         self.chat = None              # where an announcement goes; one user
+        self.quiet = False            # True while a caller announces it itself
         self.tokens = Tokens()
         self.pending = None           # what the next plain text message means
         # Uploads that need human series aliases are grouped by the exact
@@ -409,7 +410,7 @@ class Bot:
                 self.devices.update(job["rename"], name=name)
                 return self.show_reader_card(chat, job["rename"])
             ident = job["ident"]
-            self.devices.save(ident["id"], ident, name, job["host"])
+            self.devices.save(ident["id"], ident, name)
 
             def work():
                 lines = [f"💾 Saved as <b>{html.escape(name)}</b>. Queue things "
@@ -3081,11 +3082,12 @@ class Bot:
         """Find the reader, find out which one it is, and keep talking to it.
 
         Every reader answers to `crosspoint.local`, so the address that
-        answered says nothing about *which* one did. Everything that could
-        answer is asked at once — the reader we were just talking to, the last
-        address of every saved one, the name, the broadcast — and if two
-        answer, the one we were talking to wins; otherwise that is a question
-        for you (`ManyReaders`), not a guess.
+        answered says nothing about *which* one did: that is the MAC's job
+        (`identify`). Finding is the name and the broadcast, asked at once; no
+        address is remembered across sessions, because a DHCP lease makes it
+        a guess that only costs a timeout when stale. If two answer, the one
+        we were talking to wins; otherwise that is a question for you
+        (`ManyReaders`), not a guess.
 
         Returns (host, status) like it always has; the identity lands in
         `self.current`. A saved reader's address, firmware and last-seen are
@@ -3102,11 +3104,7 @@ class Bot:
                 return self.use_reader(self.current["host"], info)
             except suite.DeviceError:
                 self.current = None
-        candidates = []
-        if self.current:
-            candidates.append(self.current["host"])
-        saved = sorted(self.devices.all().values(), key=lambda e: -(e.get("seen") or 0))
-        candidates += [e["host"] for e in saved if e.get("host")]
+        candidates = [self.current["host"]] if self.current else []
         found = suite.device.find_devices(candidates)
         if not found:
             raise suite.DeviceError(
@@ -3135,7 +3133,7 @@ class Bot:
         self.current = {"host": host, "info": info, "ident": ident}
         entry = self.devices.get(ident.get("id"))
         if entry:
-            self.devices.update(ident["id"], host=host, seen=time.time(),
+            self.devices.update(ident["id"], seen=time.time(),
                                 firmware=ident.get("firmware"),
                                 model=ident.get("model"))
         elif ident.get("id") not in self.announced or not ident.get("id"):
@@ -3148,6 +3146,8 @@ class Bot:
         if key in self.announced or self.chat is None:
             return
         self.announced.add(key)
+        if self.quiet:
+            return          # the caller says it itself (🔎 Find it does)
         what = model_name(ident.get("model"), ident.get("reported"))
         fw = f", firmware {html.escape(str(ident.get('firmware')))}" if ident.get("firmware") else ""
         if not ident.get("id"):
@@ -3214,8 +3214,7 @@ class Bot:
         lines = [f"📲 <b>{html.escape(entry['name'])}</b>",
                  f"{model_name(entry.get('model'))}"
                  + (f" · firmware {html.escape(str(entry['firmware']))}" if entry.get("firmware") else ""),
-                 f"last seen {ago(entry.get('seen'))}"
-                 + (f" at <code>{html.escape(entry['host'])}</code>" if entry.get("host") else ""),
+                 f"last seen {ago(entry.get('seen'))}",
                  f"queued: {self.queue.count(dev_id)}",
                  (f"on the card: {counted(len(files), 'file')}, as of {ago(inv.get('taken'))}"
                   if inv else "on the card: not looked yet")]
@@ -3348,15 +3347,36 @@ class Bot:
                 # Looking afresh: forget which reader we were talking to, so
                 # two readers on File Transfer get asked about, not assumed.
                 self.current = None
-                host, info = self.device_host()
+                # One message, not two: a new reader's offer to save goes in
+                # this card rather than ahead of it.
+                self.quiet = True
+                try:
+                    host, info = self.device_host()
+                finally:
+                    self.quiet = False
                 ident = self.current["ident"]
                 dev_id = self.current_id()
-                lines = [f"📲 <b>{html.escape(self.reader_label(ident))}</b> at "
-                         f"<code>{html.escape(host)}</code>",
-                         f"{model_name(ident.get('model'), ident.get('reported'))} · firmware "
+                what = model_name(ident.get("model"), ident.get("reported"))
+                head = (f"📲 <b>{html.escape(self.reader_label(ident))}</b>" if dev_id
+                        else f"🆕 <b>New reader: {html.escape(what)}</b>")
+                lines = [f"{head} at <code>{html.escape(host)}</code>",
+                         f"{html.escape(what)} · firmware "
                          f"{html.escape(str(info.get('version', '?')))}",
                          f"free heap: {info.get('freeHeap', '?')}"]
                 rows = [[("📂 Browse", "dev:ls0:")]]
+                if not dev_id and ident.get("id"):
+                    tail = (ident.get("mac") or ident.get("serial") or "")[-6:]
+                    lines[0] += f" (…{html.escape(tail)})"
+                    lines.append("\nNot saved. Save it, and it gets a name, its own "
+                                 "queue, and a list of what is on it you can read "
+                                 "while it is off. Not saved, you can still browse "
+                                 "and send to it now.")
+                    rows.insert(0, [("💾 Save it", "dev:save:" + self.tokens.put(
+                        {"ident": ident, "host": host}))])
+                elif not dev_id:
+                    lines.append("\nIt does not say who it is (no MAC in its name, "
+                                 "no serial), so I cannot tell it from another "
+                                 "one and will not save it.")
                 if dev_id:
                     try:
                         inv = self.refresh_inventory(host)
