@@ -600,7 +600,7 @@ class Bot:
         self.panel(chat, message_id, text, [
             [("📚 Library", "m:lib"), ("🖼 Wallpapers", "m:wl")],
             [("🔤 Fonts", "m:fo"), ("📥 Inbox", "m:in")],
-            [("📲 Device", "m:dev"), ("📤 Queue", "m:q")],
+            [("📲 Device", "m:dev"), ("📤 Queues", "m:q")],
             [("⚙️ Status", "m:st")],
         ])
 
@@ -728,12 +728,19 @@ class Bot:
                 if not any(self.queue.count(d) for d in self.devices.all()):
                     return self.say(chat, "Nothing queued.",
                                     [[("🏠 Menu", "m:main")]])
-                # Said here rather than inside do_push, and before anything
-                # slow: finding the reader takes seconds, and the worker may be
+                # Said here rather than inside the push, and before anything
+                # slow: finding readers takes seconds, and the worker may be
                 # busy with something else entirely. A tap that produces
                 # silence reads as a tap that missed.
-                self.say(chat, "📡 Listening for the reader…")
-                return self.submit(chat, lambda: self.do_push(chat))
+                self.say(chat, "📡 Listening for readers…")
+                return self.submit(chat, lambda: self.push_all(chat))
+            action, _, token = rest.partition(":")
+            if action == "dev":                # one reader, from its own menu
+                dev_id = self.tokens.get(token)
+                if not dev_id:
+                    return self.stale(chat)
+                self.say(chat, "📡 Pushing…")
+                return self.submit(chat, lambda: self.push_one(chat, dev_id))
 
         if head == "dev":
             return self.on_device_callback(
@@ -2379,9 +2386,10 @@ class Bot:
                 rows.append([("— no reader —", "dev:nop:")])
             rows += [[(f"✗ {icons.get(i.get('kind'), '🖼')} {i['label'][:28]}",
                        f"qdel:{i['id']}")] for i in group]
-        rows.append([("📲 Push now", "push:ask"), ("Clear all", "qclr:")])
+        rows.append([("📲 Push all", "push:ask"), ("Clear all", "qclr:")])
         rows.append([("🏠 Menu", "m:main")])
-        self.say(chat, "📤 Waiting to go to the reader:\n" + "\n".join(lines), rows)
+        self.say(chat, "📤 <b>Queues</b> — Push all sends each to its reader, if "
+                       "it answers:\n" + "\n".join(lines), rows)
 
     def show_inbox(self, chat) -> None:
         inbox = self.workspace / "inbox"
@@ -3310,7 +3318,7 @@ class Bot:
             rows.append([("📂 Browse", "dev:ls0:"), ("🖼 Wallpapers", "dev:wp:"),
                          ("🔤 Fonts", "dev:fo:")])
             if n:
-                rows.append([(f"📤 Push its queue ({n})", "push:go")])
+                rows.append([(f"📤 Push its queue ({n})", f"push:dev:{t}")])
         rows += [[("📋 What's on it", f"dev:inv:{t}"), ("📤 Its queue", f"dev:q:{t}")],
                  [("✏️ Rename", f"dev:ren:{t}"), ("🗑 Forget", f"dev:forget:{t}")],
                  [("📲 Readers", "m:dev")]]
@@ -4289,10 +4297,50 @@ class Bot:
             return self.say(chat, "Nothing queued.", [[("🏠 Menu", "m:main")]])
         which = "\n".join(f"· {html.escape(n)}: {c}" for n, c in waiting)
         self.say(chat,
-                 f"📤 Ready to go:\n{which}\n\nOn the reader: <b>Home → File "
-                 f"Transfer → Join a Network</b>, then tap Ready. Whichever one "
-                 f"answers gets its own queue.",
+                 f"📤 Ready to go:\n{which}\n\nOn each reader you want filled: "
+                 f"<b>Home → File Transfer → Join a Network</b>, then tap Ready. "
+                 f"Every reader that answers gets its own queue; the rest wait.",
                  [[("✅ Ready", "push:go")], [("🏠 Menu", "m:main")]])
+
+    def push_all(self, chat) -> None:
+        """Every saved reader that answers gets its own queue, one after the
+        other; the ones that do not answer keep theirs. One search for all of
+        them, then each push exactly as from that reader's own menu."""
+        saved = self.devices.all()
+        online = self.scan_readers()
+        targets = [d for d in saved if d in online and self.queue.count(d)]
+        waiting = [d for d in saved if d not in online and self.queue.count(d)]
+        if not targets:
+            if not online:
+                self.say(chat, "The queues are untouched — nothing was sent.")
+                return self.no_reader(chat, "no reader answered", retry="push:ask")
+            names = ", ".join(self.reader_label(r["ident"]) for r in online.values())
+            return self.say(chat, f"Answering: {html.escape(names)} — nothing is "
+                                  "queued for them. The queues are untouched.",
+                            [[("📤 Queues", "m:q"), ("🏠 Menu", "m:main")]])
+        for dev_id in targets:
+            self.push_one(chat, dev_id)
+        lines = ["📤 Pushed to " + ", ".join(
+            f"<b>{html.escape(saved[d]['name'])}</b>" for d in targets) + "."]
+        if waiting:
+            lines.append("Not answering, still queued: " + ", ".join(
+                f"{html.escape(saved[d]['name'])} ({self.queue.count(d)})" for d in waiting))
+        self.say(chat, "\n".join(lines), [[("📤 Queues", "m:q"), ("🏠 Menu", "m:main")]])
+
+    def push_one(self, chat, dev_id: str) -> None:
+        """Push one saved reader's queue — it must be answering."""
+        reader = self.online.get(dev_id)
+        if not reader:
+            self.scan_readers()
+            reader = self.online.get(dev_id)
+        if not reader:
+            entry = self.devices.get(dev_id) or {}
+            return self.say(chat, f"<b>{html.escape(entry.get('name', 'That reader'))}</b> "
+                                  "is not answering — its queue is untouched.",
+                            [[("📲 Device", "m:dev")]])
+        self.current = None
+        self.use_reader(reader["host"], reader["info"])
+        self.do_push(chat)
 
     def do_push(self, chat) -> None:
         """Drain the queue, and leave it alone if the reader is not there.

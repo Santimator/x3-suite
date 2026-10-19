@@ -272,9 +272,9 @@ has:
 
 - **its own queue.** Every queue item names the reader it is for. Queueing
   asks *which reader* when two are saved, and does not ask when one is; with
-  none saved it says how to save one. A push sends **only the queue of the
-  reader that answered**, so an X4 Pro on the File Transfer screen can never
-  be handed an X3's wallpapers.
+  none saved it says how to save one. A reader only ever receives **its own
+  queue**, so an X4 Pro on the File Transfer screen can never be handed an
+  X3's wallpapers.
 - **work made for its panel.** The reader is chosen *before* a wallpaper is
   built — the crop question, the mat and the file all depend on the panel —
   and the build waits in `build/<reader>/`, so the same picture queued for an
@@ -330,8 +330,12 @@ The underlying error comes from `push_wallpaper.py` and ends by suggesting
 `--ip 192.168.x.x`; that line is deliberately not repeated into a chat, where
 it is advice you cannot take.
 
-**📲 Device → Push queue** lists what is waiting per reader, tells you to open
-File Transfer on the reader, then waits for **✅ Ready**. That tap is acknowledged *immediately*, before anything
+**📤 Queues → 📲 Push all** (or 📲 Push now anywhere) lists what is waiting per
+reader, tells you to open File Transfer on the readers you want filled, then
+waits for **✅ Ready**. One search, then **every saved reader that answers gets
+its own queue**, one after the other, each with its own report; the ones that
+do not answer keep theirs, and a closing line names them. A single reader's
+menu has **📤 Push its queue** for just that one. That tap is acknowledged *immediately*, before anything
 slow runs — finding the reader takes seconds and the worker may be busy with
 something else, and a tap that produces silence reads as a tap that missed.
 A second line lands once the reader answers, naming it and saying what is
@@ -870,7 +874,8 @@ temporary workspace. It grades the four things that would actually hurt:
    two saved, a wallpaper and a book ask which reader and are built and slimmed
    for that panel, the same picture queued for both is two files; a PDF asks
    which screen, then single or double, and the converter is told; a push sends
-   only the queue of the reader that answered; two answering at once shows the
+   only the queue of the reader that answered, and Push all fills every reader
+   answering and leaves the others queued; two answering at once shows the
    list, and the pick sticks; the list and the paged inventory read while every
    reader is off; a listing patches the inventory, and a vanished folder takes
    its contents with it; the unidentifiable reader is never offered for saving;
