@@ -3225,7 +3225,7 @@ class Bot:
             else:
                 lines.append(f"<b>{html.escape(entry['name'])}</b> — "
                              f"{model_name(entry.get('model'))} · "
-                             f"{counted(n, 'queued', 'queued')} · seen {ago(entry.get('seen'))}")
+                             f"{counted(n, 'queued', 'queued')}")
                 rows.append([(entry["name"][:40], f"dev:card:{t}")])
         for key, reader in online.items():
             if key in saved:
@@ -3233,7 +3233,7 @@ class Bot:
             ident = reader["ident"]
             what = model_name(ident.get("model"), ident.get("reported"))
             tail = (ident.get("mac") or ident.get("serial") or "")[-6:]
-            label = f"{what}" + (f" …{tail}" if tail else "") + " (new)"
+            label = f"🆕 New {what}" + (f" …{tail}" if tail else "")
             lines.append(html.escape(label))
             rows.append([(label[:40], f"dev:new:{self.tokens.put(key)}")])
         if not saved and not online:
@@ -3269,8 +3269,8 @@ class Bot:
             ident = reader["ident"]
             what = model_name(ident.get("model"), ident.get("reported"))
             tail = (ident.get("mac") or ident.get("serial") or "")[-6:]
-            lines = [f"<b>{html.escape(what)}</b>"
-                     + (f" …{html.escape(tail)}" if tail else "") + " (new)",
+            lines = [f"🆕 <b>New {html.escape(what)}</b>"
+                     + (f" …{html.escape(tail)}" if tail else ""),
                      f"firmware {html.escape(str(ident.get('firmware') or '?'))}"]
             rows = []
             if live:
@@ -3297,8 +3297,7 @@ class Bot:
         inv = self.devices.inventory(key)
         files = [e for e in (inv or {}).get("entries", []) if e.get("path") and not e.get("dir")]
         n = self.queue.count(key)
-        state = ("(online)" if reader else f"— last seen {ago(entry.get('seen'))}")
-        lines = [f"📲 <b>{html.escape(entry['name'])}</b> {state}",
+        lines = [f"📲 <b>{html.escape(entry['name'])}</b>" + (" (online)" if reader else ""),
                  f"{model_name(entry.get('model'))}"
                  + (f" · firmware {html.escape(str(entry['firmware']))}" if entry.get("firmware") else ""),
                  f"queued: {n}",

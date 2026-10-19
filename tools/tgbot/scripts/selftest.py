@@ -2582,11 +2582,12 @@ def check_readers(tmp: Path) -> None:
         check("📲 Device searches, then lists every saved reader and every one answering",
               tg.sent[0]["text"].startswith("🔎")
               and "<b>Test X3</b> —" in listing["text"]
-              and "X4 Pro …3344aa (new)" in listing["text"]
-              and not any(c in listing["text"] for c in "🟢⚪🆕")
+              and "🆕 New X4 Pro …3344aa" in listing["text"]
+              and "seen" not in listing["text"]
+              and not any(c in listing["text"] for c in "🟢⚪")
               and not any(d in ("dev:ls0:", "push:ask") for _, d in buttons(listing)),
               listing["text"])
-        bot.handle(cb(next(d for t, d in buttons(listing) if t.endswith("(new)"))))
+        bot.handle(cb(next(d for t, d in buttons(listing) if t.startswith("🆕"))))
         offers = [tg.sent[-1]]
         check("a new reader asks what to do with it: save it, or just use it",
               {t for t, _ in buttons(offers[0])} >= {"💾 Save it", "👉 Just use it"}
@@ -2835,7 +2836,7 @@ def check_readers(tmp: Path) -> None:
         bot.current = None
         tg.sent.clear()
         bot.handle(cb("m:dev"))
-        bot.handle(cb(next(d for t, d in buttons(tg.sent[-1]) if t.endswith("(new)"))))
+        bot.handle(cb(next(d for t, d in buttons(tg.sent[-1]) if t.startswith("🆕"))))
         check("a reader with no MAC and no serial is said to be unsaveable, and can still be used",
               any(t == "👉 Use it" for t, _ in buttons(tg.sent[-1])) and
               any("will not save it" in m["text"] for m in tg.sent)
