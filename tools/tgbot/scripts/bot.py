@@ -3201,7 +3201,7 @@ class Bot:
     def show_device(self, chat, *, message_id=None, note: str = "") -> None:
         """📲 Device: every reader you saved, and every one answering now.
 
-        Searches first, so 🟢 online means it answered just now. A saved reader
+        Searches first, so "online" means it answered just now. A saved reader
         is always listed; tapping it gives its full menu when it is online and
         what the bot remembers (inventory, queue) when it is not. A reader that
         answers and is not saved is listed as new.
@@ -3218,23 +3218,23 @@ class Bot:
             n = self.queue.count(dev_id)
             t = self.tokens.put(dev_id)
             if dev_id in online:
-                lines.append(f"🟢 <b>{html.escape(entry['name'])}</b> — "
+                lines.append(f"<b>{html.escape(entry['name'])}</b> (online) — "
                              f"{model_name(entry.get('model'))} · online · "
                              f"{counted(n, 'queued', 'queued')}")
-                rows.append([(f"🟢 {entry['name']}"[:40], f"dev:card:{t}")])
+                rows.append([(f"{entry['name']} (online)"[:40], f"dev:card:{t}")])
             else:
-                lines.append(f"⚪ <b>{html.escape(entry['name'])}</b> — "
+                lines.append(f"<b>{html.escape(entry['name'])}</b> — "
                              f"{model_name(entry.get('model'))} · "
                              f"{counted(n, 'queued', 'queued')} · seen {ago(entry.get('seen'))}")
-                rows.append([(f"⚪ {entry['name']}"[:40], f"dev:card:{t}")])
+                rows.append([(entry["name"][:40], f"dev:card:{t}")])
         for key, reader in online.items():
             if key in saved:
                 continue
             ident = reader["ident"]
             what = model_name(ident.get("model"), ident.get("reported"))
             tail = (ident.get("mac") or ident.get("serial") or "")[-6:]
-            label = f"🆕 New {what}" + (f" (…{tail})" if tail else "")
-            lines.append(f"{html.escape(label)} · online")
+            label = f"{what}" + (f" …{tail}" if tail else "") + " (new)"
+            lines.append(html.escape(label))
             rows.append([(label[:40], f"dev:new:{self.tokens.put(key)}")])
         if not saved and not online:
             lines.append("None saved, and none answering.")
@@ -3269,8 +3269,8 @@ class Bot:
             ident = reader["ident"]
             what = model_name(ident.get("model"), ident.get("reported"))
             tail = (ident.get("mac") or ident.get("serial") or "")[-6:]
-            lines = [f"🆕 <b>New {html.escape(what)}</b>"
-                     + (f" (…{html.escape(tail)})" if tail else "") + " · online",
+            lines = [f"<b>{html.escape(what)}</b>"
+                     + (f" …{html.escape(tail)}" if tail else "") + " (new)",
                      f"firmware {html.escape(str(ident.get('firmware') or '?'))}"]
             rows = []
             if live:
@@ -3297,8 +3297,8 @@ class Bot:
         inv = self.devices.inventory(key)
         files = [e for e in (inv or {}).get("entries", []) if e.get("path") and not e.get("dir")]
         n = self.queue.count(key)
-        state = ("🟢 online" if reader else f"⚪ off — last seen {ago(entry.get('seen'))}")
-        lines = [f"📲 <b>{html.escape(entry['name'])}</b> · {state}",
+        state = ("(online)" if reader else f"— last seen {ago(entry.get('seen'))}")
+        lines = [f"📲 <b>{html.escape(entry['name'])}</b> {state}",
                  f"{model_name(entry.get('model'))}"
                  + (f" · firmware {html.escape(str(entry['firmware']))}" if entry.get("firmware") else ""),
                  f"queued: {n}",

@@ -250,8 +250,8 @@ serial from `/api/status` when there is no MAC, and the model from `device`
 one network".
 
 **📲 Device is the list of readers.** Opening it searches the network first,
-then lists every saved reader — 🟢 *online* if it answered, ⚪ with when it was
-last seen if not — and every reader that answered and is not saved, as 🆕 new.
+then lists every saved reader — *(online)* if it answered, with when it was
+last seen if not — and every reader that answered and is not saved, *(new)*.
 You pick one, and what you get depends on what it is:
 
 - **saved and online**: its full menu — 📂 Browse, 🖼 Wallpapers, 🔤 Fonts,

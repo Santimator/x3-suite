@@ -2581,11 +2581,12 @@ def check_readers(tmp: Path) -> None:
         listing = tg.sent[-1]
         check("📲 Device searches, then lists every saved reader and every one answering",
               tg.sent[0]["text"].startswith("🔎")
-              and "⚪ <b>Test X3</b>" in listing["text"]
-              and "🆕 New X4 Pro" in listing["text"]
+              and "<b>Test X3</b> —" in listing["text"]
+              and "X4 Pro …3344aa (new)" in listing["text"]
+              and not any(c in listing["text"] for c in "🟢⚪🆕")
               and not any(d in ("dev:ls0:", "push:ask") for _, d in buttons(listing)),
               listing["text"])
-        bot.handle(cb(next(d for t, d in buttons(listing) if t.startswith("🆕"))))
+        bot.handle(cb(next(d for t, d in buttons(listing) if t.endswith("(new)"))))
         offers = [tg.sent[-1]]
         check("a new reader asks what to do with it: save it, or just use it",
               {t for t, _ in buttons(offers[0])} >= {"💾 Save it", "👉 Just use it"}
@@ -2642,7 +2643,7 @@ def check_readers(tmp: Path) -> None:
               and entry["mac"] == "0011223344aa", str(entry))
         check("... its card is looked at straight away, and its live menu shown",
               (bot.devices.inventory(PRO_DEV) or {}).get("entries") == walked["10.0.0.7"]
-              and "2 files" in tg.sent[-1]["text"] and "🟢 online" in tg.sent[-1]["text"]
+              and "2 files" in tg.sent[-1]["text"] and "(online)" in tg.sent[-1]["text"]
               and any(d == "dev:ls0:" for _, d in buttons(tg.sent[-1])), tg.sent[-1]["text"])
 
         # Two saved readers: queueing asks which one, and the panel follows.
@@ -2756,9 +2757,9 @@ def check_readers(tmp: Path) -> None:
         picks = buttons(tg.sent[-1])
         check("two readers answering at once is a question: the list, both online",
               "More than one reader" in tg.sent[-1]["text"]
-              and any(t == "🟢 Night Pro" for t, _ in picks)
-              and any(t == "🟢 Test X3" for t, _ in picks), str(tg.sent[-1]))
-        bot.handle(cb(next(d for t, d in picks if t == "🟢 Test X3")))
+              and any(t == "Night Pro (online)" for t, _ in picks)
+              and any(t == "Test X3 (online)" for t, _ in picks), str(tg.sent[-1]))
+        bot.handle(cb(next(d for t, d in picks if t == "Test X3 (online)")))
         bot.handle(cb(next(d for t, d in buttons(tg.sent[-1]) if t == "👉 Use it")))
         check("... and picking one makes it the reader we talk to, with its menu",
               bot.current_id() == TEST_DEV and "Test X3" in tg.sent[-1]["text"]
@@ -2834,7 +2835,7 @@ def check_readers(tmp: Path) -> None:
         bot.current = None
         tg.sent.clear()
         bot.handle(cb("m:dev"))
-        bot.handle(cb(next(d for t, d in buttons(tg.sent[-1]) if t.startswith("🆕"))))
+        bot.handle(cb(next(d for t, d in buttons(tg.sent[-1]) if t.endswith("(new)"))))
         check("a reader with no MAC and no serial is said to be unsaveable, and can still be used",
               any(t == "👉 Use it" for t, _ in buttons(tg.sent[-1])) and
               any("will not save it" in m["text"] for m in tg.sent)
