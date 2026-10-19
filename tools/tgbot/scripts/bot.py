@@ -42,7 +42,6 @@ from __future__ import annotations
 
 import argparse
 import html
-import ipaddress
 import json
 import queue as queuelib
 import re
@@ -93,29 +92,6 @@ def ago(when: float | None) -> str:
     if s < 129600:
         return f"{round(s / 3600)} h ago"
     return f"{round(s / 86400)} days ago"
-
-
-def is_ip(text: str) -> bool:
-    try:
-        ipaddress.ip_address(text)
-        return True
-    except ValueError:
-        return False
-
-
-def stable_address(host: str, info: dict) -> str:
-    """The address worth keeping for a reader that answered at `host`.
-
-    A name like `crosspoint.local` is every CrossPoint reader's name, so it
-    says nothing about which one will answer next time. The reader reports its
-    own address in `/api/status`; when it was reached by name, that is the one
-    kept and used from then on. An address that is already an IP (or carries a
-    port, as a test's does) is left as it is.
-    """
-    ip = str(info.get("ip") or "")
-    if ":" not in host and not is_ip(host) and is_ip(ip) and ip != "0.0.0.0":
-        return ip
-    return host
 
 
 class ManyReaders(Exception):
@@ -434,7 +410,7 @@ class Bot:
                 self.devices.update(job["rename"], name=name)
                 return self.show_reader_card(chat, job["rename"])
             ident = job["ident"]
-            self.devices.save(ident["id"], ident, name, job["host"])
+            self.devices.save(ident["id"], ident, name)
 
             def work():
                 lines = [f"💾 Saved as <b>{html.escape(name)}</b>. Queue things "
@@ -3106,11 +3082,12 @@ class Bot:
         """Find the reader, find out which one it is, and keep talking to it.
 
         Every reader answers to `crosspoint.local`, so the address that
-        answered says nothing about *which* one did. Everything that could
-        answer is asked at once — the reader we were just talking to, the last
-        address of every saved one, the name, the broadcast — and if two
-        answer, the one we were talking to wins; otherwise that is a question
-        for you (`ManyReaders`), not a guess.
+        answered says nothing about *which* one did: that is the MAC's job
+        (`identify`). Finding is the name and the broadcast, asked at once; no
+        address is remembered across sessions, because a DHCP lease makes it
+        a guess that only costs a timeout when stale. If two answer, the one
+        we were talking to wins; otherwise that is a question for you
+        (`ManyReaders`), not a guess.
 
         Returns (host, status) like it always has; the identity lands in
         `self.current`. A saved reader's address, firmware and last-seen are
@@ -3127,11 +3104,7 @@ class Bot:
                 return self.use_reader(self.current["host"], info)
             except suite.DeviceError:
                 self.current = None
-        candidates = []
-        if self.current:
-            candidates.append(self.current["host"])
-        saved = sorted(self.devices.all().values(), key=lambda e: -(e.get("seen") or 0))
-        candidates += [e["host"] for e in saved if e.get("host")]
+        candidates = [self.current["host"]] if self.current else []
         found = suite.device.find_devices(candidates)
         if not found:
             raise suite.DeviceError(
@@ -3150,7 +3123,6 @@ class Bot:
 
     def use_reader(self, host: str, info: dict, hostname: str | None = None):
         """Make this reader the one the session talks to. Returns (host, info)."""
-        host = stable_address(host, info)
         # The same address still saying it is the same model is the same
         # reader; anything else — a DHCP lease handed to the other one — is
         # asked again.
@@ -3161,7 +3133,7 @@ class Bot:
         self.current = {"host": host, "info": info, "ident": ident}
         entry = self.devices.get(ident.get("id"))
         if entry:
-            self.devices.update(ident["id"], host=host, seen=time.time(),
+            self.devices.update(ident["id"], seen=time.time(),
                                 firmware=ident.get("firmware"),
                                 model=ident.get("model"))
         elif ident.get("id") not in self.announced or not ident.get("id"):
@@ -3242,8 +3214,7 @@ class Bot:
         lines = [f"📲 <b>{html.escape(entry['name'])}</b>",
                  f"{model_name(entry.get('model'))}"
                  + (f" · firmware {html.escape(str(entry['firmware']))}" if entry.get("firmware") else ""),
-                 f"last seen {ago(entry.get('seen'))}"
-                 + (f" at <code>{html.escape(entry['host'])}</code>" if entry.get("host") else ""),
+                 f"last seen {ago(entry.get('seen'))}",
                  f"queued: {self.queue.count(dev_id)}",
                  (f"on the card: {counted(len(files), 'file')}, as of {ago(inv.get('taken'))}"
                   if inv else "on the card: not looked yet")]

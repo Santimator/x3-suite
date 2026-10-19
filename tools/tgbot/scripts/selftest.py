@@ -35,7 +35,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import suite                                            # noqa: E402
 from bot import Bot                                     # noqa: E402
-import bot as bot_module                                # noqa: E402
 from config import ConfigError, safe_join               # noqa: E402
 from state import Queue, Tokens                         # noqa: E402
 
@@ -150,7 +149,7 @@ def make_bot(tmp: Path):
     (tmp / "workspace").mkdir(parents=True, exist_ok=True)
     tg = FakeTelegram()
     bot = Bot(cfg, tg, sync=True)
-    bot.devices.save(TEST_DEV, TEST_IDENT, "Test X3", "10.0.0.5")
+    bot.devices.save(TEST_DEV, TEST_IDENT, "Test X3")
     return bot, tg
 
 
@@ -2626,9 +2625,9 @@ def check_readers(tmp: Path) -> None:
                               {"path": "/sleep-overlay/moon.png", "size": 9_000, "dir": False}]
         bot.handle(msg("Night Pro"))
         entry = bot.devices.get(PRO_DEV)
-        check("saved under its name, with its model and address",
+        check("saved under its name and MAC, with its model",
               entry and entry["name"] == "Night Pro" and entry["model"] == "x4pro"
-              and entry["host"] == "10.0.0.7", str(entry))
+              and entry["mac"] == "0011223344aa", str(entry))
         check("... and its card is looked at straight away",
               (bot.devices.inventory(PRO_DEV) or {}).get("entries") == walked["10.0.0.7"]
               and "2 files" in tg.sent[-1]["text"], tg.sent[-1]["text"])
@@ -2802,20 +2801,10 @@ def check_readers(tmp: Path) -> None:
         check("a long inventory is summarised, and the whole of it sent as a text file",
               docs and Path(docs[0]["doc"]).read_text().count(".epub") == 80, str(tg.sent)[:200])
 
-        # Reached by its shared name, a reader is kept by the address it reports.
-        check("a reader reached as crosspoint.local is kept by the IP it reports",
-              bot_module.stable_address("crosspoint.local", {"ip": "192.168.1.7"}) == "192.168.1.7"
-              and bot_module.stable_address("10.0.0.7", {"ip": "192.168.1.7"}) == "10.0.0.7"
-              and bot_module.stable_address("127.0.0.1:8080", {"ip": "127.0.0.1"}) == "127.0.0.1:8080"
-              and bot_module.stable_address("crosspoint.local", {"ip": "0.0.0.0"}) == "crosspoint.local")
-        idents["192.168.1.7"] = PRO_IDENT
-        bot.current = None
-        bot.use_reader("crosspoint.local", {"ip": "192.168.1.7", "device": "xteink_x4_pro",
-                                            "version": "1.6.5-x4pro"})
-        check("... and that IP is what the session and the saved reader use",
-              bot.current["host"] == "192.168.1.7"
-              and bot.devices.get(PRO_DEV)["host"] == "192.168.1.7",
-              str((bot.current, bot.devices.get(PRO_DEV))))
+        # Identity is the MAC; where a reader is gets found again each time.
+        check("a saved reader keeps no address — the MAC is who it is",
+              "host" not in bot.devices.get(PRO_DEV) and "host" not in bot.devices.get(TEST_DEV),
+              str(bot.devices.all()))
 
         # A reader that cannot say who it is is never saved.
         answering[:] = ["10.0.0.11"]
