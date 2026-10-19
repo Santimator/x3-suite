@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import suite                                            # noqa: E402
 from bot import Bot                                     # noqa: E402
+import bot as bot_module                                # noqa: E402
 from config import ConfigError, safe_join               # noqa: E402
 from state import Queue, Tokens                         # noqa: E402
 
@@ -2579,12 +2580,20 @@ def check_readers(tmp: Path) -> None:
         tg.sent.clear()
         bot.handle(cb("dev:st:"))
         offers = [m for m in tg.sent if "New reader" in m["text"]]
-        check("a reader the bot does not know is announced as new, with its model",
-              len(offers) == 1 and "X4 Pro" in offers[0]["text"]
-              and any(d.startswith("dev:save:") for _, d in buttons(offers[0])),
+        check("🔎 Find it on a new reader is one card: what it is, and an offer to save it",
+              len(tg.sent) == 1 and len(offers) == 1 and "X4 Pro" in offers[0]["text"]
+              and "firmware" in offers[0]["text"]
+              and any(d.startswith("dev:save:") for _, d in buttons(offers[0]))
+              and any(d == "dev:ls0:" for _, d in buttons(offers[0])),
               str(tg.sent)[:300])
-        check("... and the usual things still work for it (it is found and shown)",
-              any("unsaved X4 Pro" in m["text"] for m in tg.sent), str(tg.sent[-1]))
+        bot.current = None
+        bot.announced.clear()
+        tg.sent.clear()
+        bot.handle(cb("dev:ls0:"))
+        check("... any other action on a new reader announces it on its own, once",
+              sum("New reader" in m["text"] for m in tg.sent) == 1
+              and any(d.startswith("dev:save:") for m in tg.sent for _, d in buttons(m)),
+              str(tg.sent)[:300])
         tg.sent.clear()
         bot.handle(cb("dev:ls0:"))
         check("... and it is not announced again on the next tap",
@@ -2792,6 +2801,21 @@ def check_readers(tmp: Path) -> None:
         docs = [m for m in tg.sent if m.get("doc")]
         check("a long inventory is summarised, and the whole of it sent as a text file",
               docs and Path(docs[0]["doc"]).read_text().count(".epub") == 80, str(tg.sent)[:200])
+
+        # Reached by its shared name, a reader is kept by the address it reports.
+        check("a reader reached as crosspoint.local is kept by the IP it reports",
+              bot_module.stable_address("crosspoint.local", {"ip": "192.168.1.7"}) == "192.168.1.7"
+              and bot_module.stable_address("10.0.0.7", {"ip": "192.168.1.7"}) == "10.0.0.7"
+              and bot_module.stable_address("127.0.0.1:8080", {"ip": "127.0.0.1"}) == "127.0.0.1:8080"
+              and bot_module.stable_address("crosspoint.local", {"ip": "0.0.0.0"}) == "crosspoint.local")
+        idents["192.168.1.7"] = PRO_IDENT
+        bot.current = None
+        bot.use_reader("crosspoint.local", {"ip": "192.168.1.7", "device": "xteink_x4_pro",
+                                            "version": "1.6.5-x4pro"})
+        check("... and that IP is what the session and the saved reader use",
+              bot.current["host"] == "192.168.1.7"
+              and bot.devices.get(PRO_DEV)["host"] == "192.168.1.7",
+              str((bot.current, bot.devices.get(PRO_DEV))))
 
         # A reader that cannot say who it is is never saved.
         answering[:] = ["10.0.0.11"]

@@ -42,6 +42,7 @@ from __future__ import annotations
 
 import argparse
 import html
+import ipaddress
 import json
 import queue as queuelib
 import re
@@ -92,6 +93,29 @@ def ago(when: float | None) -> str:
     if s < 129600:
         return f"{round(s / 3600)} h ago"
     return f"{round(s / 86400)} days ago"
+
+
+def is_ip(text: str) -> bool:
+    try:
+        ipaddress.ip_address(text)
+        return True
+    except ValueError:
+        return False
+
+
+def stable_address(host: str, info: dict) -> str:
+    """The address worth keeping for a reader that answered at `host`.
+
+    A name like `crosspoint.local` is every CrossPoint reader's name, so it
+    says nothing about which one will answer next time. The reader reports its
+    own address in `/api/status`; when it was reached by name, that is the one
+    kept and used from then on. An address that is already an IP (or carries a
+    port, as a test's does) is left as it is.
+    """
+    ip = str(info.get("ip") or "")
+    if ":" not in host and not is_ip(host) and is_ip(ip) and ip != "0.0.0.0":
+        return ip
+    return host
 
 
 class ManyReaders(Exception):
@@ -147,6 +171,7 @@ class Bot:
         # and a new reader is announced once rather than on every tap.
         self.announced = set()
         self.chat = None              # where an announcement goes; one user
+        self.quiet = False            # True while a caller announces it itself
         self.tokens = Tokens()
         self.pending = None           # what the next plain text message means
         # Uploads that need human series aliases are grouped by the exact
@@ -3125,6 +3150,7 @@ class Bot:
 
     def use_reader(self, host: str, info: dict, hostname: str | None = None):
         """Make this reader the one the session talks to. Returns (host, info)."""
+        host = stable_address(host, info)
         # The same address still saying it is the same model is the same
         # reader; anything else — a DHCP lease handed to the other one — is
         # asked again.
@@ -3148,6 +3174,8 @@ class Bot:
         if key in self.announced or self.chat is None:
             return
         self.announced.add(key)
+        if self.quiet:
+            return          # the caller says it itself (🔎 Find it does)
         what = model_name(ident.get("model"), ident.get("reported"))
         fw = f", firmware {html.escape(str(ident.get('firmware')))}" if ident.get("firmware") else ""
         if not ident.get("id"):
@@ -3348,15 +3376,36 @@ class Bot:
                 # Looking afresh: forget which reader we were talking to, so
                 # two readers on File Transfer get asked about, not assumed.
                 self.current = None
-                host, info = self.device_host()
+                # One message, not two: a new reader's offer to save goes in
+                # this card rather than ahead of it.
+                self.quiet = True
+                try:
+                    host, info = self.device_host()
+                finally:
+                    self.quiet = False
                 ident = self.current["ident"]
                 dev_id = self.current_id()
-                lines = [f"📲 <b>{html.escape(self.reader_label(ident))}</b> at "
-                         f"<code>{html.escape(host)}</code>",
-                         f"{model_name(ident.get('model'), ident.get('reported'))} · firmware "
+                what = model_name(ident.get("model"), ident.get("reported"))
+                head = (f"📲 <b>{html.escape(self.reader_label(ident))}</b>" if dev_id
+                        else f"🆕 <b>New reader: {html.escape(what)}</b>")
+                lines = [f"{head} at <code>{html.escape(host)}</code>",
+                         f"{html.escape(what)} · firmware "
                          f"{html.escape(str(info.get('version', '?')))}",
                          f"free heap: {info.get('freeHeap', '?')}"]
                 rows = [[("📂 Browse", "dev:ls0:")]]
+                if not dev_id and ident.get("id"):
+                    tail = (ident.get("mac") or ident.get("serial") or "")[-6:]
+                    lines[0] += f" (…{html.escape(tail)})"
+                    lines.append("\nNot saved. Save it, and it gets a name, its own "
+                                 "queue, and a list of what is on it you can read "
+                                 "while it is off. Not saved, you can still browse "
+                                 "and send to it now.")
+                    rows.insert(0, [("💾 Save it", "dev:save:" + self.tokens.put(
+                        {"ident": ident, "host": host}))])
+                elif not dev_id:
+                    lines.append("\nIt does not say who it is (no MAC in its name, "
+                                 "no serial), so I cannot tell it from another "
+                                 "one and will not save it.")
                 if dev_id:
                     try:
                         inv = self.refresh_inventory(host)
