@@ -296,6 +296,12 @@ offered for saving.
 session is talking to is then asked first, alone, so browsing stays one quick
 request per tap; 🔄 Search again in the list looks afresh.
 
+**One reader, one record.** The MAC comes from the discovery reply, which a
+busy reader can leave unanswered (it is asked three times); then only the
+eFuse serial is there. So a saved reader is matched on its MAC *or* its
+serial, and its record learns whichever of the two it was missing — the same
+reader never turns up as unsaved, and saving it twice is refused.
+
 **Who it is, not where it is.** A saved reader is keyed by its MAC and keeps
 no address: with no reserved lease the IP changes, and a stale one would only
 cost a timeout. Each time, the reader is found by `crosspoint.local` and the

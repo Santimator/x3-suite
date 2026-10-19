@@ -412,7 +412,11 @@ class Bot:
             if job.get("rename"):
                 self.devices.update(job["rename"], name=name)
                 return self.show_reader_card(chat, job["rename"])
-            ident = job["ident"]
+            ident = self.recognise(job["ident"])
+            if self.devices.get(ident["id"]):
+                return self.say(chat, "Already saved, as <b>"
+                                + html.escape(self.devices.get(ident["id"])["name"]) + "</b>.",
+                                [[("📲 Device", "m:dev")]])
             self.devices.save(ident["id"], ident, name)
 
             def work():
@@ -3085,6 +3089,27 @@ class Bot:
             return entry["name"]
         return f"unsaved {model_name((ident or {}).get('model'), (ident or {}).get('reported'))}"
 
+    def identify(self, host: str, info: dict, hostname: str | None = None) -> dict:
+        """Which reader answered, matched against the saved ones."""
+        return self.recognise(suite.device.identify(host, info, hostname))
+
+    def recognise(self, ident: dict) -> dict:
+        """The same reader is the same record, whichever way it said who it is.
+
+        Its MAC comes from the discovery reply, which can go unanswered; then
+        only the eFuse serial is there, and the id `identify` builds is a
+        different one. So a saved reader matches on its MAC *or* its serial,
+        the id is replaced by the saved one, and the record learns whichever
+        of the two it was missing.
+        """
+        for key, entry in self.devices.all().items():
+            if ((ident.get("mac") and entry.get("mac") == ident["mac"])
+                    or (ident.get("serial") and entry.get("serial") == ident["serial"])):
+                if not entry.get("mac") or not entry.get("serial"):
+                    self.devices.update(key, mac=ident.get("mac"), serial=ident.get("serial"))
+                return {**ident, "id": key}
+        return ident
+
     def current_id(self) -> str | None:
         """The saved reader this session is talking to, or None (none found
         yet, or one that was never saved)."""
@@ -3142,7 +3167,7 @@ class Bot:
         known = (self.current if self.current and self.current["host"] == host
                  and self.current["ident"].get("reported") == info.get("device")
                  else None)
-        ident = (known or {}).get("ident") or suite.device.identify(host, info, hostname)
+        ident = (known or {}).get("ident") or self.identify(host, info, hostname)
         self.current = {"host": host, "info": info, "ident": ident}
         entry = self.devices.get(ident.get("id"))
         if entry:
@@ -3193,7 +3218,7 @@ class Bot:
             candidates.append(self.current["host"])
         online = {}
         for host, info, hostname in suite.device.find_devices(list(dict.fromkeys(candidates))):
-            ident = suite.device.identify(host, info, hostname)
+            ident = self.identify(host, info, hostname)
             online[ident.get("id") or f"anon:{host}"] = {"host": host, "info": info,
                                                        "ident": ident}
             if self.devices.get(ident.get("id")):
@@ -3467,9 +3492,12 @@ class Bot:
             pick = self.tokens.get(token)
             if not pick:
                 return self.stale(chat)
-            if self.devices.get(pick["ident"]["id"]):
-                return self.say(chat, "Already saved.", [[("📲 Device", "m:dev")]])
-            self.pending = {"kind": "devname", "ident": pick["ident"], "host": pick["host"]}
+            ident = self.recognise(pick["ident"])
+            if self.devices.get(ident["id"]):
+                return self.say(chat, "Already saved, as <b>"
+                                + html.escape(self.devices.get(ident["id"])["name"]) + "</b>.",
+                                [[("📲 Device", "m:dev")]])
+            self.pending = {"kind": "devname", "ident": ident, "host": pick["host"]}
             what = model_name(pick["ident"].get("model"), pick["ident"].get("reported"))
             return self.say(chat, f"What should I call this {html.escape(what)}? "
                                   f"Something short, like <i>Night Pro</i>.")

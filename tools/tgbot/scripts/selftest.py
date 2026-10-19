@@ -2856,6 +2856,28 @@ def check_readers(tmp: Path) -> None:
               "host" not in bot.devices.get(PRO_DEV) and "host" not in bot.devices.get(TEST_DEV),
               str(bot.devices.all()))
 
+        # The same reader, its discovery ping unanswered this time: serial only.
+        bot.devices.save("mac:aabbccddeeff", {"mac": "aabbccddeeff", "serial": "XP-123",
+                                              "model": "x4pro"}, "Twin")
+        serial_only = {"id": "serial:XP-123", "mac": None, "serial": "XP-123",
+                       "model": "x4pro", "reported": "xteink_x4_pro", "firmware": "1.6.5",
+                       "hostname": None}
+        check("a saved reader answering without its MAC is still itself, by its serial",
+              bot.recognise(serial_only)["id"] == "mac:aabbccddeeff")
+        bot.devices.save("serial:SN-9", {"mac": None, "serial": "SN-9", "model": "x3"}, "Late")
+        bot.recognise({"id": "mac:121212121212", "mac": "121212121212", "serial": "SN-9"})
+        check("... and a record saved by serial learns the MAC when it is heard",
+              bot.devices.get("serial:SN-9")["mac"] == "121212121212",
+              str(bot.devices.get("serial:SN-9")))
+        tg.sent.clear()
+        bot.handle(cb("dev:save:" + bot.tokens.put({"ident": serial_only, "host": "10.0.0.9"})))
+        check("... and saving it again is refused, naming what it is saved as",
+              "Already saved" in tg.sent[-1]["text"] and "Twin" in tg.sent[-1]["text"]
+              and len([k for k in bot.devices.all() if "XP-123" in str(bot.devices.get(k))]) == 1,
+              tg.sent[-1]["text"])
+        bot.devices.forget("mac:aabbccddeeff")
+        bot.devices.forget("serial:SN-9")
+
         # A reader that cannot say who it is is never saved.
         answering[:] = ["10.0.0.11"]
         bot.current = None
