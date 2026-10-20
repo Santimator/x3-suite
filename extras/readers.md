@@ -135,23 +135,33 @@ book ever opened.
 
 ## The X4 Pro's sleep screen and grey levels
 
-*Source-confirmed against 1.6.5; **not device-confirmed** — the first X4 Pro
-wallpaper on the glass is the check.*
+*Code path source-confirmed against 1.6.5. Grey levels **device-measured
+2026-10** (by eye, see below): the even ramp turned out wrong for this panel.*
 
 - **Same code path.** Transparent custom (`sleepScreen` 7, `/sleep-overlay/`)
   is one `SleepActivity` for both readers: placement is computed from the
   renderer's own screen size, PNG decode and the draw rule are the same, and
   `grey >> 6` picks the level. Only the panel differs: **480×800** portrait.
   So the suite builds X4 Pro wallpapers at 480×800 and nothing else changes.
-- **The even ramp, on purpose.** For covers, 1.6.5 itself quantises with the
-  *original* even thresholds (43/128/213 → 0/85/170/255) on an **SSD1677**
-  panel with absolute greyscale, and keeps the legacy tuning for other
-  controllers (`SleepActivity.cpp`, `originalThresholds`). The X4 Pro's board
-  profile is SSD1677. That is upstream's own judgement for this panel, and it
-  is the same ramp the suite already uses on the X3 (device-confirmed there,
-  see "The dither ships two tunings" below) — so both readers get one
-  quantiser. If X4 Pro wallpapers come out visibly too bright or too dark
-  against the same file on the X3, this is the assumption to revisit.
+- **Its greys are lighter than the X3's.** For covers, 1.6.5 itself quantises
+  with the *original* even thresholds (43/128/213 → 0/85/170/255) on an
+  **SSD1677** panel with absolute greyscale (`SleepActivity.cpp`,
+  `originalThresholds`), so the suite first used the X3's even ramp here too.
+  **Device-observed 2026-10: X4 Pro wallpapers came out visibly lighter** than
+  the same picture on the X3. Measured with a card per panel — levels 1 and 2
+  beside black/white stipples of known white coverage (stipples use only
+  levels 0 and 3, so they read the same whatever the grey waveform):
+
+  | level | X3 | X4 Pro |
+  |---|---|---|
+  | 1 (dark grey) | ≈ 15 % (at or below the card's darkest stipple) | ≈ 27 % |
+  | 2 (light grey) | ≈ 50–60 % | ≈ 75–77 % |
+
+  Eyeballed at under a metre, so ± a few %. The X3's even ramp is the
+  device-confirmed reference, so the X4 Pro's levels are placed on the X3's
+  coverage→tone anchors: it reconstructs **0/110/212/255** with midpoint
+  thresholds **55/161/234** (`crosspoint_bmp.X4PRO_*`). Device check of that
+  ramp pending.
 - **A wallpaper is for one panel.** A 528×792 file on the X4 Pro is wider than
   its panel and is shrunk to fit (letterboxed); a 480×800 one on the X3 is
   centred in a black frame. `push_wallpaper.py` reads the model from

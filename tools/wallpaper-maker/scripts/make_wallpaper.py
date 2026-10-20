@@ -98,10 +98,11 @@ from devices import DEFAULT_DEVICE, DEVICES, panel           # noqa: E402
 # comes from `devices.py` per device; PANEL is the default one, and every
 # function that lays pixels out takes `size` rather than assuming it.
 #
-# The four states are the same on both devices: the overlay PNG path is one
-# piece of firmware code on both (grey >> 6), and the X4 Pro's SSD1677 panel is
-# the one CrossPoint 1.6.5 itself quantises against this even ramp. That is
-# source-confirmed for the X4 Pro, not yet device-confirmed — readers.md.
+# The four states are addressed the same on both devices (the overlay PNG path
+# is one piece of firmware code, grey >> 6), but they do not *look* the same:
+# the X4 Pro shows its greys lighter, so the reader's quantiser runs with a
+# per-device ramp (`crosspoint_bmp.DEVICE_TUNING`). LEVELS is the X3's, and
+# what our own `--dither` routes aim at.
 PANEL = panel(DEFAULT_DEVICE)
 PANEL_W, PANEL_H = PANEL
 LEVELS = (0, 85, 170, 255)
@@ -794,7 +795,8 @@ def compose(src: Path, *, fit: str = "cover", mat_style: str = "waves",
                mat_style, flat, size)
 
 
-def quantise(img: Image.Image, algorithm: str = "device") -> bytearray:
+def quantise(img: Image.Image, algorithm: str = "device",
+             device: str = DEFAULT_DEVICE) -> bytearray:
     """Greyscale panel -> one 2-bit level per pixel.
 
     'device' runs the reader's own quantiser (`crosspoint_bmp.firmware_quantise`)
@@ -803,7 +805,8 @@ def quantise(img: Image.Image, algorithm: str = "device") -> bytearray:
     error diffusion; see `dither`.
     """
     if algorithm == "device":
-        return cp.firmware_quantise(img.tobytes(), img.width, img.height)
+        return cp.firmware_quantise(img.tobytes(), img.width, img.height,
+                                    tuning=cp.DEVICE_TUNING[device])
     return dither(img, algorithm)
 
 
@@ -811,9 +814,9 @@ def render(src: Path, *, fit: str = "cover", mat_style: str = "waves",
            algorithm: str = "device", device: str = DEFAULT_DEVICE) -> bytearray:
     """Source file -> one 2-bit level per panel pixel. The whole pipeline in one
     place, so the self-test grades exactly what the converter writes."""
-    flat = cp.FIRMWARE_RECONSTRUCT if algorithm == "device" else LEVELS
+    flat = cp.reconstruct(device) if algorithm == "device" else LEVELS
     return quantise(compose(src, fit=fit, mat_style=mat_style, flat=flat,
-                            size=panel(device)), algorithm)
+                            size=panel(device)), algorithm, device)
 
 
 def probe(src: Path, *, fit: str = "cover", device: str = DEFAULT_DEVICE) -> dict:
@@ -872,7 +875,7 @@ def convert(src: Path, out_dir: Path, *, fit: str = "cover",
     if preview:
         shown = co.composite(
             [None if clear and clear[i] else v for i, v in enumerate(levels)],
-            sample_page(size) if clear else None)
+            sample_page(size) if clear else None, cp.reconstruct(device))
         (out_dir / "previews").mkdir(exist_ok=True)
         Image.frombytes("L", size, shown).save(
             out_dir / "previews" / dest.name)

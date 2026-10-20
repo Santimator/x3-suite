@@ -240,8 +240,9 @@ rather than reasoned. The part still unseen is the *mat*: every image
 photographed so far filled the screen and never got framed.
 
 **X4 Pro:** `make_wallpaper.py --device x4pro` builds for its 480×800 panel,
-with the same quantiser (CrossPoint 1.6.5 uses the same even ramp on that
-panel). Source-confirmed only — not yet seen on the glass.
+with the same quantiser on a ramp of its own: its greys show lighter than the
+X3's (measured 2026-10, `extras/readers.md`), so it is quantised against
+0/110/212/255 instead of the X3's even 0/85/170/255.
 
 Drop pictures in `workspace/wallpapers/`, run one command, and they're files
 the reader can draw. Run the second and they're on it. One sample ships with

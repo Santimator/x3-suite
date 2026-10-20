@@ -392,12 +392,13 @@ default sleep screen, with no message anywhere. In order of likelihood:
 
 Same code, other numbers. The overlay sleep screen is one piece of firmware
 for both readers, so everything above holds at 480×800: the PNG, the four
-levels, the draw rule, the folder. The quantiser is also the same, the even
-0/85/170/255 ramp — CrossPoint 1.6.5 itself quantises against that ramp on an
-SSD1677 panel, which the X4 Pro has. That is **source-confirmed, not yet
-device-confirmed**: if X4 Pro wallpapers look too bright or too dark next to
-the same picture on the X3, this assumption is the one to revisit
-(`extras/readers.md` → "The X4 Pro's sleep screen and grey levels").
+levels, the draw rule, the folder. The quantiser's algorithm is the same too;
+its **ramp** is not. The X4 Pro shows its two greys lighter than the X3, so
+the even 0/85/170/255 ramp washed its wallpapers out (device-observed 2026-10).
+It runs on its own measured ramp, 0/110/212/255
+(`crosspoint_bmp.DEVICE_TUNING`; numbers and method in `extras/readers.md` →
+"The X4 Pro's sleep screen and grey levels"). Eyeballed, so a first pass: if
+they now look too dark, that table is the one to revisit.
 
 ## The gate
 

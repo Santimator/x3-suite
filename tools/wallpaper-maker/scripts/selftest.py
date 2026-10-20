@@ -578,15 +578,15 @@ def check_tuning() -> None:
 
     Device-confirmed 2026-08: the X4 branch is visibly too bright on an X3.
     """
-    panel = Image.new("L", (cp.PANEL_W, cp.PANEL_H))
+    x3 = Image.new("L", (cp.PANEL_W, cp.PANEL_H))
     px = []
     for y in range(cp.PANEL_H):                 # a full-range vertical ramp
         px += [min(255, y * 255 // cp.PANEL_H)] * cp.PANEL_W
-    panel.putdata(px)
+    x3.putdata(px)
     asked = sum(px) / len(px)
 
     def panel_mean(tuning):
-        lv = cp.firmware_quantise(panel.tobytes(), cp.PANEL_W, cp.PANEL_H, tuning=tuning)
+        lv = cp.firmware_quantise(x3.tobytes(), cp.PANEL_W, cp.PANEL_H, tuning=tuning)
         return sum(cp.NATIVE_LEVELS[v] for v in lv) / len(lv)
 
     even, x4 = panel_mean("even"), panel_mean("x4")
@@ -594,6 +594,26 @@ def check_tuning() -> None:
           abs(even - asked) < 12, f"asked {asked:.0f}, got {even:.0f}")
     check("the firmware's live 'X4' branch would run much brighter",
           x4 - even > 20, f"x4 {x4:.0f} vs even {even:.0f}")
+
+    # The X4 Pro's greys read lighter (measured 2026-10, crosspoint_bmp). Shown
+    # through its own tones, the even ramp washes a picture out; its own
+    # tuning brings it back to the tone asked for.
+    w, h = panel("x4pro")
+    ramp = bytearray()
+    for y in range(h):
+        ramp += bytes([min(255, y * 255 // h)]) * w
+    asked = sum(ramp) / len(ramp)
+    tone = cp.reconstruct("x4pro")
+
+    def pro_mean(tuning):
+        lv = cp.firmware_quantise(bytes(ramp), w, h, tuning=tuning)
+        return sum(tone[v] for v in lv) / len(lv)
+
+    own, even_on_pro = pro_mean(cp.DEVICE_TUNING["x4pro"]), pro_mean("even")
+    check("the X4 Pro's own tuning tracks the tone asked for on its panel",
+          abs(own - asked) < 12, f"asked {asked:.0f}, got {own:.0f}")
+    check("... where the X3's even ramp would wash it out",
+          even_on_pro - own > 12, f"even {even_on_pro:.0f} vs own {own:.0f}")
 
 
 def check_designed_failures() -> None:
@@ -913,7 +933,7 @@ def main() -> int:
         print("\nflat areas, where error diffusion locks into a pattern:")
         check_flat_tones()
 
-        print("\nwhich of the firmware's two tunings we run:")
+        print("\nwhich tuning we run, per panel:")
         check_tuning()
 
         print("\nthe failure modes we design around:")
