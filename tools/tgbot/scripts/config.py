@@ -52,6 +52,7 @@ DEFAULTS = {
     "state_dir": "tools/tgbot/state",
     "opds_url": "http://127.0.0.1:6737/opds",
     "max_download_mb": 20,
+    "watch_iface": "0.0.0.0",
 }
 
 

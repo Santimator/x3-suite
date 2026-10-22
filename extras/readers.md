@@ -111,11 +111,21 @@ server under the same mDNS name. What the reader says about itself does.
 
 | What | X3 | X4 Pro |
 |---|---|---|
-| mDNS name | `crosspoint.local` | `crosspoint.local` — **the same**: with both on File Transfer, whichever answers first wins |
+| mDNS name | `crosspoint.local` | `crosspoint.local` — **the same**. **Device-confirmed 2026-10:** with both on File Transfer, the second to arrive finds the name taken and takes `crosspoint-2.local` (standard mDNS conflict resolution) |
 | `/api/status` → `device` | `"X3"` (`gpio.deviceIsX3()`) | `"xteink_x4_pro"` (the board profile's name) — `devices.py` maps both |
 | `/api/status` → `version` | `1.6.5` | `1.6.5-x4pro` |
 | `/api/status` → `serial` | eFuse `USER_DATA`, or `"Not found"` when the factory burned none | same |
 | Discovery reply (UDP 8134, `hello`) | `crosspoint (on CrossPoint-Reader-AABBCCDDEEFF);81` | same shape |
+
+**It says when it arrives.** Entering File Transfer runs `MDNS.begin` on the
+new connection, and the responder **probes** for its name — three queries to
+224.0.0.251:5353 carrying its own A record — then **announces** it three
+times, all within about 3 s. **Device-confirmed 2026-10**, X3 and X4 Pro on
+1.6.5, heard from a wired server on the same LAN; a unicast `hello` to the
+probing address answered with the MAC at once. A probe only happens when a
+responder starts, so it is a clean "a reader just arrived" signal, unlike
+answers, which any lookup of `crosspoint.local` provokes. `tools/tgbot/`
+listens for it (`mdns_watch.py`) and delivers queues with no polling.
 
 **The MAC is the identity.** On joining a network the firmware sets its DHCP
 hostname to `CrossPoint-Reader-` + the station MAC in hex, and the discovery

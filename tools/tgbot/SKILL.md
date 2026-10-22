@@ -54,14 +54,15 @@ wallpaper, file a book where the catalog will find it, stage a PDF, rename or
 delete inside `workspace/`. Work that is *bound for the device* is **queued**,
 not sent — a wallpaper, a book you asked to copy onto the card, a font family.
 
-**Push** happens only when you ask, and only while the reader sits on **Home →
-File Transfer → Join a Network** — the firmware runs its web server only on
-that screen and stops the moment you leave it. If the reader cannot be found,
-**the queue is left exactly as it was**.
+**Push** happens only while the reader sits on **Home → File Transfer → Join
+a Network** — the firmware runs its web server only on that screen and stops
+the moment you leave it. A saved reader arriving there is heard and its queue
+delivered by itself (see "A push session"); you can also push by hand. If the
+reader cannot be found, **the queue is left exactly as it was**.
 
 That last promise is the reason the queue is worth having. You can send photos
-all week from wherever you are, and push once when you are next near the
-device, without ever wondering whether something was half-delivered.
+all week from wherever you are, and put the reader on File Transfer when you
+are next near it, without ever wondering whether something was half-delivered.
 
 **A book is filed before it is anything else.** Every EPUB that arrives goes
 into `workspace/library/`, where `opds-server` scans — always, first, without
@@ -335,6 +336,23 @@ same button sits on the 📲 Device card for a network where mDNS never works.
 The underlying error comes from `push_wallpaper.py` and ends by suggesting
 `--ip 192.168.x.x`; that line is deliberately not repeated into a chat, where
 it is advice you cannot take.
+
+**It delivers by itself.** A queue is a letterbox: what is in it is wanted
+on the reader, so it goes as soon as the reader can take it. Put a saved
+reader on File Transfer and the bot hears it arrive — the reader probes for
+its mDNS name on joining the network (`scripts/mdns_watch.py`;
+`extras/readers.md` has the packets) — and pushes its queue with nothing
+asked. The running report arrives silently; one closing message rings —
+*"🔔 Night Pro: all delivered. You can leave File Transfer."* — because
+CrossPoint itself never says a transfer is over, and the point is that the
+phone can stay in a pocket. A reader that is not saved, or has nothing
+queued, is not news and gets no message. The bot only listens: nothing goes
+out on the network until a reader turns up. On start it looks once, for a
+reader that arrived while it was down. If it cannot listen (no multicast
+route, another daemon holding the port without sharing) it logs that and
+Push stays the way to deliver; `watch_iface` in the config picks the network
+on a machine with several, and `python3 scripts/mdns_watch.py` shows what
+arrives.
 
 **📤 Queues → 📲 Push all** (or 📲 Push now anywhere) lists what is waiting per
 reader, tells you to open File Transfer on the readers you want filled, then

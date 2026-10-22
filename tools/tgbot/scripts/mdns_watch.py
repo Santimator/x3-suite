@@ -1,21 +1,29 @@
-"""Experiment: does a CrossPoint reader announce itself when it enters File
-Transfer, so the bot could just listen instead of pinging?
+"""Hear a CrossPoint reader enter File Transfer, without asking the network.
+
+On joining a network the firmware calls `MDNS.begin("crosspoint")`
+(CrossPointWebServerActivity.cpp, `restartMdns`), and an mDNS responder that
+starts multicasts probes for its name and then announces it (RFC 6762 §8) to
+224.0.0.251:5353. So listening there costs nothing until a reader turns up.
+Device-confirmed 2026-10, X3 and X4 Pro on 1.6.5: each entry into File
+Transfer is 3 probes and 3 announcements within ~3 s, and a unicast `hello`
+to the probing address names the reader's MAC straight away. A second reader
+finds the name taken and probes `crosspoint-2.local` instead.
+
+The trigger is the **probe**: a query from the reader carrying its own A
+record (in the authority section, where RFC 6762 §8.2 puts it — matched on
+"its own address, sent by that address" so the section is not load-bearing).
+Only a responder starting up sends one, so it means
+"a reader just entered File Transfer". An announcement or an answer would
+not do — the bot's own lookups of `crosspoint.local` get answers too, and
+reacting to those would push again every time something asked.
+
+`watch` is what the bot runs (tools/tgbot/scripts/bot.py). Run as a script it
+is the diagnostic that confirmed the above:
 
     python3 mdns_watch.py [--iface 192.168.1.10] [--minutes 30]
 
-Stdlib only, listens and never sends to the network — except one unicast
-`hello` to a reader it has just heard, to show the announcement is enough to
-identify it. Run it on the bot's machine, then put each reader into File
-Transfer (and out, and in again) and watch.
-
-Why it should work: on joining a network the firmware calls `MDNS.begin
-("crosspoint")` (CrossPointWebServerActivity.cpp, `restartMdns`), and an mDNS
-responder starting up multicasts probes for its name and then unsolicited
-announcements of it (RFC 6762 §8) to 224.0.0.251:5353. Whether they reach this
-machine over the WiFi is what is being tested — multicast over WiFi is lossy.
-
-Every minute it also prints how much mDNS the rest of the network already
-sends, which is the yardstick for "is a ping every N seconds a lot".
+listen only, plus one unicast `hello` to each reader it hears, and once a
+minute how much mDNS the rest of the network sends.
 """
 import argparse
 import collections
@@ -49,7 +57,7 @@ def name_at(data: bytes, off: int) -> tuple:
 
 def parse(data: bytes) -> dict:
     """The parts of an mDNS packet worth looking at: is it a response, which
-    names it asks about or states, and any A records (name -> IPv4)."""
+    names it asks about or states, and its A records (name -> IPv4)."""
     _, flags, qd, an, ns, ar = struct.unpack("!6H", data[:12])
     off, names, a = 12, [], {}
     for _ in range(qd):
@@ -65,6 +73,54 @@ def parse(data: bytes) -> dict:
             a[nm] = socket.inet_ntoa(data[off:off + 4])
         off += rdlen
     return {"response": bool(flags & 0x8000), "names": names, "a": a}
+
+
+def probe_ip(packet: dict, src: str) -> str | None:
+    """The address of a CrossPoint reader probing for its name — one that has
+    just entered File Transfer — or None for anything else. A query from
+    `src` stating that a crosspoint name is `src`: someone else asking for
+    the name does not send its address with the question."""
+    if packet["response"]:
+        return None
+    return next((ip for name, ip in packet["a"].items()
+                 if name.lower().startswith("crosspoint") and ip == src), None)
+
+
+def open_socket(iface: str = "0.0.0.0") -> socket.socket:
+    """Joined to the mDNS group, sharing the port with any mDNS daemon already
+    on this machine (avahi). Raises OSError when that cannot be done."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if hasattr(socket, "SO_REUSEPORT"):
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+    try:
+        sock.bind(("", PORT))
+        sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,
+                        socket.inet_aton(GROUP) + socket.inet_aton(iface))
+    except OSError:
+        sock.close()
+        raise
+    return sock
+
+
+def watch(on_reader, iface: str = "0.0.0.0", quiet: float = 30.0) -> None:
+    """Call `on_reader(ip)` each time a reader enters File Transfer. Blocks.
+
+    One call per entry: the probes repeat (three, and again under a new name
+    when two readers want the same one), so an address is not reported again
+    for `quiet` seconds. Raises OSError if the group cannot be joined."""
+    sock = open_socket(iface)
+    last = {}
+    while True:
+        data, (src, _) = sock.recvfrom(9000)
+        try:
+            ip = probe_ip(parse(data), src)
+        except (IndexError, struct.error):
+            continue
+        now = time.monotonic()
+        if ip and now - last.get(ip, -quiet) >= quiet:
+            last[ip] = now
+            on_reader(ip)
 
 
 def hello(ip: str) -> str | None:
@@ -91,18 +147,12 @@ def main() -> int:
     ap.add_argument("--minutes", type=float, default=30)
     args = ap.parse_args()
 
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    if hasattr(socket, "SO_REUSEPORT"):
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
     try:
-        sock.bind(("", PORT))
+        sock = open_socket(args.iface)
     except OSError as e:
-        print(f"cannot listen on {PORT}: {e} (another mDNS daemon holding it "
-              "without sharing?)", file=sys.stderr)
+        print(f"cannot listen on {GROUP}:{PORT}: {e} (another mDNS daemon "
+              "holding it without sharing?)", file=sys.stderr)
         return 1
-    sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP,
-                    socket.inet_aton(GROUP) + socket.inet_aton(args.iface))
     sock.settimeout(1.0)
 
     stop = time.time() + args.minutes * 60
@@ -131,7 +181,8 @@ def main() -> int:
         ours = [n for n in p["names"] if "crosspoint" in n.lower()]
         if not ours:
             continue
-        kind = "announce" if p["response"] else "probe/query"
+        kind = ("announce" if p["response"]
+                else "PROBE" if probe_ip(p, src) else "query")
         ip = next((v for k, v in p["a"].items() if "crosspoint" in k.lower()), src)
         print(f"{time.strftime('%H:%M:%S')}  {kind:11} from {src}: "
               f"{', '.join(sorted(set(ours)))}  A={p['a'] or '-'}", flush=True)

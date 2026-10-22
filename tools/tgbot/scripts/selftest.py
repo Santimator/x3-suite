@@ -91,7 +91,8 @@ class FakeTelegram:
         self.answered = []
 
     def send_message(self, chat_id, text, keyboard=None, **kw):
-        self.sent.append({"chat": chat_id, "text": text, "keyboard": keyboard})
+        self.sent.append({"chat": chat_id, "text": text, "keyboard": keyboard,
+                          "silent": bool(kw.get("silent"))})
         return {"message_id": len(self.sent)}
 
     def send_photo(self, chat_id, photo, caption="", keyboard=None):
@@ -2345,6 +2346,41 @@ def check_entry_point() -> None:
 # -- 6. it does not reach into the rest of the repo ------------------------
 
 
+def check_mdns() -> None:
+    """A reader entering File Transfer probes for its name; that, and only
+    that, is what wakes the delivery. Packets shaped as the X3 and X4 Pro sent
+    them (device-confirmed 2026-10)."""
+    import struct
+    import socket as so
+    import mdns_watch
+
+    def name(n):
+        return b"".join(bytes([len(p)]) + p.encode() for p in n.split(".")) + b"\0"
+
+    def a_rr(n, ip, ptr=False):
+        return ((struct.pack("!H", 0xC00C) if ptr else name(n))
+                + struct.pack("!HHIH", 1, 0x8001, 120, 4) + so.inet_aton(ip))
+
+    def packet(flags, qd, an, ns, body):
+        return struct.pack("!6H", 0, flags, qd, an, ns, 0) + body
+
+    question = name("crosspoint-2.local") + struct.pack("!HH", 255, 1)
+    probe = packet(0, 1, 0, 1, question + a_rr("", "192.168.50.28", ptr=True))
+    answer = packet(0x8400, 0, 1, 0, a_rr("crosspoint.local", "192.168.50.28"))
+    asking = packet(0, 1, 0, 0, name("crosspoint.local") + struct.pack("!HH", 1, 1))
+    known = packet(0, 1, 1, 0, name("crosspoint.local") + struct.pack("!HH", 1, 1)
+                   + a_rr("crosspoint.local", "192.168.50.28"))
+    p = mdns_watch.parse(probe)
+    check("mdns: a reader's probe names its address",
+          mdns_watch.probe_ip(p, "192.168.50.28") == "192.168.50.28", str(p))
+    check("mdns: its announcements and answers do not — the bot's own lookups get those",
+          mdns_watch.probe_ip(mdns_watch.parse(answer), "192.168.50.28") is None)
+    check("mdns: nor does someone else asking for the name, with or without "
+          "the answer it already knows",
+          mdns_watch.probe_ip(mdns_watch.parse(asking), "192.168.50.9") is None
+          and mdns_watch.probe_ip(mdns_watch.parse(known), "192.168.50.9") is None)
+
+
 def check_optional() -> None:
     print("\noptional by construction:")
     hits = []
@@ -2797,6 +2833,47 @@ def check_readers(tmp: Path) -> None:
               not any("readers are answering" in m["text"] for m in tg.sent)
               and bot.current_id() == TEST_DEV, str(tg.sent))
 
+        # Heard entering File Transfer: a saved reader's queue goes unasked.
+        bot.queue.add("book", str(book), "Dune2", device=PRO_DEV,
+                      meta={"title": "Dune2", "author": "FH"})
+        answering[:] = ["10.0.0.7"]
+        bot.current = None
+        pushed.clear()
+        uploaded.clear()
+        tg.sent.clear()
+        bot.deliver_heard("10.0.0.7")
+        rang = [m for m in tg.sent if "edited" not in m and not m["silent"]]
+        check("a saved reader heard entering File Transfer gets its queue, unasked",
+              uploaded == [("10.0.0.7", "Dune2.epub")] and bot.queue.count(PRO_DEV) == 0,
+              str((uploaded, bot.queue.items(PRO_DEV))))
+        check("... the report is silent, and the one message that rings comes last",
+              len(rang) == 1 and rang[0] is tg.sent[-1]
+              and "Night Pro" in rang[0]["text"] and "all delivered" in rang[0]["text"],
+              str([(m["text"][:40], m.get("silent"), m.get("edited")) for m in tg.sent]))
+        tg.sent.clear()
+        bot.deliver_heard("10.0.0.7")
+        check("... heard again with nothing queued, it says nothing at all",
+              not tg.sent and len(uploaded) == 1, str(tg.sent))
+        answering[:] = ["10.0.0.11"]
+        bot.queue.add("book", str(book), "Dune2", device=PRO_DEV,
+                      meta={"title": "Dune2", "author": "FH"})
+        bot.deliver_heard("10.0.0.11")
+        check("... and a reader that is not saved is left alone, silently",
+              not tg.sent and len(uploaded) == 1 and bot.queue.count(PRO_DEV) == 1,
+              str(tg.sent))
+        answering[:] = ["10.0.0.5"]                  # the bot starts; only the X3 is on
+        bot.queue.add("book", str(book), "Dune2", device=TEST_DEV,
+                      meta={"title": "Dune2", "author": "FH"})
+        bot.current = None
+        uploaded.clear()
+        bot.deliver_online()
+        check("on start, a saved reader already on File Transfer gets its queue; "
+              "an absent one keeps its",
+              ("10.0.0.5", "Dune2.epub") in uploaded and bot.queue.count(PRO_DEV) == 1
+              and not any(i["kind"] == "book" for i in bot.queue.items(TEST_DEV)),
+              str((uploaded, bot.queue.items())))
+        bot.queue.remove_many(i["id"] for i in bot.queue.items(PRO_DEV))
+
         # Off: its card and inventory are still there.
         answering[:] = []
         bot.current = None
@@ -2962,6 +3039,7 @@ def main() -> int:
         check_poll_timeout_is_transient()
         check_entry_point()
         check_secrets_outside(tmp)
+        check_mdns()
         check_optional()
         check_python311_syntax()
 

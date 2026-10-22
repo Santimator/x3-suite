@@ -394,10 +394,12 @@ Stdlib only — nothing to install. It answers exactly one Telegram user id and
 drops everything else without a reply.
 
 The shape worth knowing before you use it: **server-side work happens any time,
-device-side work only when you ask.** A built wallpaper is *queued*, and the
-queue is drained only by an explicit push, only while the X3 is on Home → File
-Transfer → Join a Network. If the reader isn't there, the queue is untouched —
-so you can send pictures all week and push once. A font family queues the same
+device-side work only when the reader is there.** A built wallpaper is *queued*, and the
+queue is drained when the reader is on Home → File Transfer → Join a Network:
+the bot hears a saved reader arrive and delivers its queue by itself, with one
+message that rings when it is done (or you push by hand). If the reader isn't
+there, the queue is untouched — so you can send pictures all week and just
+turn the reader on File Transfer once. A font family queues the same
 way, as one entry: it goes across, is verified against `CHECKSUMS.tsv` and
 selected, or it stays queued. Books normally arrive through the catalog; an
 explicit **Also send to device** (or **Add all to the reader** on a series) puts a slimmed
