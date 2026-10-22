@@ -159,9 +159,10 @@ book ever opened.
 
   Eyeballed at under a metre, so ± a few %. The X3's even ramp is the
   device-confirmed reference, so the X4 Pro's levels are placed on the X3's
-  coverage→tone anchors: it reconstructs **0/110/212/255** with midpoint
-  thresholds **55/161/234** (`crosspoint_bmp.X4PRO_*`). Device check of that
-  ramp pending.
+  coverage→tone anchors: 0/110/212/255. **Device-checked 2026-10:** close to
+  the X3, but highlights wore a faint grey veil, so level 2 reads darker than
+  212. Now **0/110/200/255** (≈ 71 %, within the eyeball's error), midpoint
+  thresholds **55/155/228** (`crosspoint_bmp.X4PRO_*`).
 - **A wallpaper is for one panel.** A 528×792 file on the X4 Pro is wider than
   its panel and is shrunk to fit (letterboxed); a 480×800 one on the X3 is
   centred in a black frame. `push_wallpaper.py` reads the model from

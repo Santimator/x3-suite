@@ -395,10 +395,10 @@ for both readers, so everything above holds at 480×800: the PNG, the four
 levels, the draw rule, the folder. The quantiser's algorithm is the same too;
 its **ramp** is not. The X4 Pro shows its two greys lighter than the X3, so
 the even 0/85/170/255 ramp washed its wallpapers out (device-observed 2026-10).
-It runs on its own measured ramp, 0/110/212/255
+It runs on its own measured ramp, 0/110/200/255
 (`crosspoint_bmp.DEVICE_TUNING`; numbers and method in `extras/readers.md` →
-"The X4 Pro's sleep screen and grey levels"). Eyeballed, so a first pass: if
-they now look too dark, that table is the one to revisit.
+"The X4 Pro's sleep screen and grey levels"), device-checked against the X3
+and nudged once for cleaner highlights.
 
 ## The gate
 

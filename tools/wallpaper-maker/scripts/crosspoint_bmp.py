@@ -234,10 +234,13 @@ X4_RECONSTRUCT = (15, 30, 80, 210)        # the live branch; too bright on an X3
 # the reference — its even ramp is the device-confirmed one — so its anchors
 # (coverage 0/15/55/100 % <-> tone 0/85/170/255) say which tone a coverage
 # reads as, and the X4 Pro's levels interpolate on them: 27 % -> 110, 77 % ->
-# 212. Thresholds are the midpoints, as in the even branch. A first pass:
-# eyeballed, so the gate pins the method and the device is the check.
-X4PRO_THRESHOLDS = (55, 161, 234)
-X4PRO_RECONSTRUCT = (0, 110, 212, 255)
+# 212. Thresholds are the midpoints, as in the even branch.
+# Device check of that ramp, 2026-10: close, but highlights carried a grey veil
+# against the X3 — level 2 reads darker than 212, so it was used where white
+# belonged. Taken down to 200 (~71 %, inside the eyeball's error), which hands
+# the light end back to white.
+X4PRO_THRESHOLDS = (55, 155, 228)
+X4PRO_RECONSTRUCT = (0, 110, 200, 255)
 
 TUNINGS = {
     "even": (EVEN_THRESHOLDS, EVEN_RECONSTRUCT),
