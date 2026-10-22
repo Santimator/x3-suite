@@ -28,5 +28,8 @@
   "_opds_url_note": "Checked by the Status card, and after a book arrives, to answer 'is it actually on the catalog'. The bot never serves books itself — opds-server does, and the X3 pulls them. This is only how the bot knows whether that server is up.",
 
   "max_download_mb": 20,
+  "watch_iface": "0.0.0.0",
+  "_watch_iface_note": "Where the bot listens for readers entering File Transfer (mDNS), to deliver their queues by itself. 0.0.0.0 lets the system pick the network; on a machine with more than one, put this machine's address on the readers' network here. If the bot logs 'not listening for readers', run tools/tgbot/scripts/mdns_watch.py to see what arrives.",
+
   "_max_download_note": "Telegram's own ceiling on what a bot may download is 20 MB, whatever your account managed to upload. Lowering this is allowed; raising it past 20 achieves nothing, because the refusal is at their end. Anything bigger goes into workspace/inbox/ on the server by hand, and the 📥 Inbox button picks it up."
 }

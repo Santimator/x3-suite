@@ -135,11 +135,14 @@ class Telegram:
     # of underscores, asterisks and brackets, and Markdown would either mangle
     # them or fail the whole send. Callers escape with html.escape().
     def send_message(self, chat_id, text: str, keyboard=None, **kw) -> dict:
+        # `silent`: delivered without a sound, for messages that are progress
+        # rather than news.
         return self._post("sendMessage", {
             "chat_id": chat_id, "text": text,
             "reply_markup": _markup(keyboard),
             "parse_mode": kw.get("parse_mode", "HTML"),
             "disable_web_page_preview": True,
+            "disable_notification": bool(kw.get("silent")),
         })
 
     def edit_message(self, chat_id, message_id, text: str, keyboard=None) -> dict:

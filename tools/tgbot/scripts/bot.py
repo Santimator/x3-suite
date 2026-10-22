@@ -55,6 +55,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import mdns_watch
 import suite
 from config import ConfigError, inside, load, resolve_token, safe_join
 from config import warnings as config_warnings
@@ -134,6 +135,8 @@ class Bot:
         self.cfg = cfg
         self.tg = tg
         self.sync = sync
+        # A reader heard probing is given this long to bring its web server up.
+        self.heard_settle = 0.0 if sync else 2.0
         self.user_id = int(cfg["telegram"]["user_id"])
         self.workspace = Path(cfg["workspace_path"])
         self.state_dir = Path(cfg["state_path"])
@@ -221,7 +224,7 @@ class Bot:
             return self.no_reader(chat, str(exc))
         self.say(chat, f"⚠️ {exc}")
 
-    def say(self, chat, text: str, keyboard=None):
+    def say(self, chat, text: str, keyboard=None, silent: bool = False):
         """Say it, and if that fails say it plainly rather than not at all.
 
         A swallowed send is the worst failure this bot has, because it is
@@ -231,17 +234,18 @@ class Bot:
         anything worse is logged loudly enough to find in the journal.
         """
         try:
-            return self.tg.send_message(chat, text, keyboard)
+            return self.tg.send_message(chat, text, keyboard, silent=silent)
         except TelegramError as exc:
             log("send failed:", exc, "— retrying without formatting")
         try:
             plain = html.unescape(re.sub(r"<[^>]+>", "", text))
-            return self.tg.send_message(chat, plain, keyboard, parse_mode=None)
+            return self.tg.send_message(chat, plain, keyboard, parse_mode=None,
+                                        silent=silent)
         except TelegramError as exc:
             log("SEND LOST:", exc, "|", text[:120].replace("\n", " "))
             return None
 
-    def panel(self, chat, message_id, text: str, keyboard=None):
+    def panel(self, chat, message_id, text: str, keyboard=None, silent: bool = False):
         """Render a text navigator in place when it came from a button.
 
         Telegram inline keyboards are a small UI, not a stream of status
@@ -256,7 +260,7 @@ class Bot:
                 return {"message_id": message_id}
             except TelegramError as exc:
                 log("panel edit failed:", exc, "— sending a fresh panel")
-        return self.say(chat, text, keyboard)
+        return self.say(chat, text, keyboard, silent=silent)
 
     @staticmethod
     def initial_bucket(label: str) -> str:
@@ -4355,6 +4359,83 @@ class Bot:
                 f"{html.escape(saved[d]['name'])} ({self.queue.count(d)})" for d in waiting))
         self.say(chat, "\n".join(lines), [[("📤 Queues", "m:q"), ("🏠 Menu", "m:main")]])
 
+    # -- delivering by itself -----------------------------------------------
+
+    def start_watch(self) -> None:
+        """Listen for readers entering File Transfer, and deliver their queues.
+
+        A queue is a letterbox: what is in it is wanted on the reader, so it
+        goes the moment the reader can take it, with nothing to ask. The
+        reader says when that is — it probes for its mDNS name on joining the
+        network (`mdns_watch`) — so the bot only listens; nothing is sent to
+        the network while no reader is on. A machine that cannot join the
+        group (no multicast route, another daemon holding the port) logs it
+        and the bot carries on: Push is still a button.
+
+        Also looked for once now, for a reader already on File Transfer while
+        the bot was down: it probed before anyone was listening.
+        """
+        if self.sync:
+            return
+        iface = self.cfg["watch_iface"]
+
+        def heard(ip):
+            self.submit(self.user_id, lambda: self.deliver_heard(ip))
+
+        def listen():
+            try:
+                mdns_watch.watch(heard, iface=iface)
+            except OSError as exc:
+                log(f"warning: not listening for readers ({exc}); queues go on Push only")
+
+        threading.Thread(target=listen, daemon=True).start()
+        self.submit(self.user_id, self.deliver_online)
+        log(f"listening for readers on File Transfer (mDNS, {iface})")
+
+    def deliver_heard(self, ip: str) -> None:
+        """A reader just entered File Transfer at `ip`: if it is saved and has
+        a queue, the queue goes. Anything else — a reader not saved, an empty
+        queue, one that left again — is not news, and says nothing."""
+        time.sleep(self.heard_settle)   # its probing ends before its server is up
+        try:
+            info = suite.device.status(ip, timeout=suite.device.PROBE_TIMEOUT)
+        except suite.DeviceError as exc:
+            return log(f"heard a reader at {ip}, but it did not answer: {exc}")
+        ident = self.identify(ip, info)
+        if not self.devices.get(ident.get("id")):
+            return log(f"heard {self.reader_label(ident)} at {ip}: not saved, left alone")
+        self.deliver(ident["id"], ip, info, ident)
+
+    def deliver_online(self) -> None:
+        """Every saved reader answering now gets its queue — the same delivery
+        as hearing it arrive, for readers that arrived unheard."""
+        for dev_id, reader in self.scan_readers().items():
+            if self.devices.get(dev_id):
+                self.deliver(dev_id, reader["host"], reader["info"], reader["ident"])
+
+    def deliver(self, dev_id: str, host: str, info: dict, ident: dict) -> None:
+        """Push one reader's queue unasked, then say so once, with a sound.
+
+        The running report is silent; the last message is the one that rings,
+        because it means the reader can leave File Transfer. CrossPoint gives
+        no sign of its own that a transfer is over."""
+        items = self.queue.count(dev_id)
+        if not items:
+            return log(f"{self.devices.get(dev_id)['name']} is on: nothing queued")
+        name = html.escape(self.devices.get(dev_id)["name"])
+        self.current = {"host": host, "info": info, "ident": ident}
+        self.say(self.user_id, f"📥 <b>{name}</b> is on File Transfer — delivering "
+                               f"{counted(items, 'queued item', 'queued items')}.",
+                 silent=True)
+        self.do_push(self.user_id, quiet=True)
+        left = self.queue.count(dev_id)
+        self.say(self.user_id,
+                 f"🔔 <b>{name}</b>: " + (
+                     "all delivered. You can leave File Transfer." if not left else
+                     f"{items - left} of {items} delivered, {left} still queued "
+                     "(the report above says why). You can leave File Transfer."),
+                 [[("📤 Queues", "m:q"), ("🏠 Menu", "m:main")]])
+
     def push_one(self, chat, dev_id: str) -> None:
         """Push one saved reader's queue — it must be answering."""
         reader = self.online.get(dev_id)
@@ -4370,8 +4451,12 @@ class Bot:
         self.use_reader(reader["host"], reader["info"])
         self.do_push(chat)
 
-    def do_push(self, chat) -> None:
+    def do_push(self, chat, quiet: bool = False) -> None:
         """Drain the queue, and leave it alone if the reader is not there.
+
+        `quiet`: the running report arrives without a sound, because whoever
+        asked for this push is not the one who will say when it is over
+        (`deliver`).
 
         Only items the push script reported as landed are removed. A device
         that never answered removes nothing at all — which is the promise that
@@ -4439,7 +4524,8 @@ class Bot:
             nonlocal progress_message_id
             text = "\n".join(lines + ([current] if current else []))
             try:
-                sent = self.panel(chat, progress_message_id, text, keyboard)
+                sent = self.panel(chat, progress_message_id, text, keyboard,
+                                  silent=quiet)
                 if sent and sent.get("message_id"):
                     progress_message_id = sent["message_id"]
             except Exception as exc:
@@ -4589,6 +4675,7 @@ def main(argv=None) -> int:
     tg = Telegram(token)
     bot = Bot(cfg, tg)
     bot.start_worker()
+    bot.start_watch()
 
     try:
         me = tg.get_me()
