@@ -226,9 +226,38 @@ EVEN_RECONSTRUCT = (0, 85, 170, 255)      # the disabled branch; right for the X
 X4_THRESHOLDS = (30, 50, 140)
 X4_RECONSTRUCT = (15, 30, 80, 210)        # the live branch; too bright on an X3
 
+# The X4 Pro shows its two greys lighter than the X3 does, so the even ramp
+# that is right for the X3 leaves its wallpapers washed out (device-observed
+# 2026-10, CrossPoint 1.6.5 on both). Measured by eye against black/white
+# stipples of known coverage, one card per panel: level 1 matches 15 % white
+# on the X3 and 27 % on the X4 Pro, level 2 matches 55 % and 77 %. The X3 is
+# the reference — its even ramp is the device-confirmed one — so its anchors
+# (coverage 0/15/55/100 % <-> tone 0/85/170/255) say which tone a coverage
+# reads as, and the X4 Pro's levels interpolate on them: 27 % -> 110, 77 % ->
+# 212. Thresholds are the midpoints, as in the even branch.
+# Device check of that ramp, 2026-10: close, but highlights carried a grey veil
+# against the X3 — level 2 reads darker than 212, so it was used where white
+# belonged. Taken down to 200 (~71 %, inside the eyeball's error), which hands
+# the light end back to white.
+X4PRO_THRESHOLDS = (55, 155, 228)
+X4PRO_RECONSTRUCT = (0, 110, 200, 255)
+
+TUNINGS = {
+    "even": (EVEN_THRESHOLDS, EVEN_RECONSTRUCT),
+    "x4": (X4_THRESHOLDS, X4_RECONSTRUCT),
+    "x4pro": (X4PRO_THRESHOLDS, X4PRO_RECONSTRUCT),
+}
+# Which tuning each reader in `devices.py` gets.
+DEVICE_TUNING = {"x3": "even", "x4pro": "x4pro"}
+
 # What `firmware_quantise` uses unless told otherwise.
 FIRMWARE_THRESHOLDS = EVEN_THRESHOLDS
 FIRMWARE_RECONSTRUCT = EVEN_RECONSTRUCT
+
+
+def reconstruct(device: str) -> tuple:
+    """The tone each of the four levels reads as on `device`'s panel."""
+    return TUNINGS[DEVICE_TUNING[device]][1]
 
 
 def firmware_quantise(img_bytes: bytes, w: int, h: int, bottom_up: bool = True,
@@ -238,10 +267,10 @@ def firmware_quantise(img_bytes: bytes, w: int, h: int, bottom_up: bool = True,
     A byte-for-byte port of `AtkinsonDitherer::processPixel` plus the loop that
     drives it: 1/8 of the error to each of six neighbours, no serpentine.
 
-    `tuning` picks which of the two constant sets in that function to use.
-    "even" is the firmware's own disabled branch and the default, because it is
-    the one that matches an X3; "x4" is the branch the firmware actually runs,
-    kept so the gate can demonstrate what it does.
+    `tuning` picks the constants (`TUNINGS`). "even" is the firmware's own
+    disabled branch and the default, because it is the one that matches an X3;
+    "x4" is the branch the firmware actually runs, kept so the gate can
+    demonstrate what it does; "x4pro" is ours, measured on that panel.
 
     Running it here means we can hand the panel the *result* as a 4-bpp file it
     maps straight through, instead of the full-tone image it would have had to
@@ -253,8 +282,7 @@ def firmware_quantise(img_bytes: bytes, w: int, h: int, bottom_up: bool = True,
     where the error starts travelling. Getting this backwards still looks fine
     but is not the same image.
     """
-    thresholds = X4_THRESHOLDS if tuning == "x4" else EVEN_THRESHOLDS
-    reconstruct = X4_RECONSTRUCT if tuning == "x4" else EVEN_RECONSTRUCT
+    thresholds, reconstruct = TUNINGS[tuning]
 
     e0 = [0] * (w + 4)
     e1 = [0] * (w + 4)

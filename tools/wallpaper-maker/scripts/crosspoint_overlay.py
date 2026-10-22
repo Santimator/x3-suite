@@ -209,10 +209,11 @@ def panel_levels(img: dict) -> list:
     return out
 
 
-def composite(levels: list, page: bytes | None = None) -> bytes:
+def composite(levels: list, page: bytes | None = None,
+              tone: tuple = (0, 85, 170, 255)) -> bytes:
     """What the glass shows: our levels where drawn, the page elsewhere.
-    `page` is panel-sized 8-bit grey; white when absent."""
-    tone = (0, 85, 170, 255)
+    `page` is panel-sized 8-bit grey; white when absent. `tone` is what each
+    level reads as on the panel (`crosspoint_bmp.reconstruct`)."""
     return bytes(tone[v] if v is not None else (page[i] if page else 255)
                  for i, v in enumerate(levels))
 
@@ -269,7 +270,8 @@ def main(argv=None) -> int:
                 page = sample_page((pw, ph))
             elif args.page:
                 page = Image.open(args.page).convert("L").resize((pw, ph)).tobytes()
-            shown = composite(panel_levels(img), page)
+            from crosspoint_bmp import reconstruct          # same folder
+            shown = composite(panel_levels(img), page, reconstruct(args.device))
             Image.frombytes("L", (pw, ph), shown).save(args.out)
         rep["png"] = str(args.out)
     json.dump(rep, sys.stdout, ensure_ascii=False)
